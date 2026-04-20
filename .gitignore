@@ -1,0 +1,10 @@
+# Go template additions
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/

@@ -1,0 +1,13 @@
+-- {{PROJECT_NAME}} database schema template
+-- Portable SQL — compatible with PostgreSQL, SQLite, MySQL
+-- All access through database/adapter — modules never touch this directly.
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id               TEXT PRIMARY KEY,
+    input_path           TEXT NOT NULL,
+    status               TEXT NOT NULL DEFAULT 'started',
+    last_completed_stage TEXT,
+    config_hash          TEXT NOT NULL,
+    created_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
