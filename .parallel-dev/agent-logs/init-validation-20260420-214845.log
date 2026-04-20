@@ -145,3 +145,20 @@ Now create the orchestrator stub:
 
 All good. Now commit the fixes:
 
+● Stage all changes (shell)
+  │ cd /Users/mekari/Documents/PROJECTS/crypto-sniping-bot && git add -A && git
+  │ status
+  └ 9 lines...
+
+● Commit validation fixes (shell)
+  │ cd /Users/mekari/Documents/PROJECTS/crypto-sniping-bot && git commit -m
+  │ "chore: post-init validation fixes
+  │
+  │ - Add database/adapter.go with Adapter interface (single DB access
+  │ boundary)…
+  └ 16 lines...
+
+
+Changes   +141 -0
+Requests  1 Premium (3m 31s)
+Tokens    ↑ 645.0k • ↓ 7.7k • 597.6k (cached)
