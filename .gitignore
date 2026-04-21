@@ -1,10 +1,60 @@
-# Go template additions
+# Binaries
 bin/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+
+# Test artifacts
 *.test
 *.out
+coverage.out
+coverage.html
+
+# Build output
+dist/
+
+# Go vendor directory
 vendor/
+
+# Module download cache
+go.sum.bak
+
+# Output artifacts (pipeline-generated files)
+output/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Parallel dev artifacts
+.parallel-dev/
+
+# Logs
+*.log
+logs/
+
