@@ -7,19 +7,19 @@
 
 ## Reference Documents
 
-| Document                         | Purpose                                                                                                   |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `docs/architecture.md`           | Master reference — system architecture, module breakdown, pipeline flow, data model                       |
-| `docs/implementation_roadmap.md` | Phase-based implementation roadmap with schemas, algorithms, exit criteria, priority layers               |
-| `docs/orchestrator_spec.md`      | Orchestrator specification — execution model, checkpointing, resume, idempotency, failure handling        |
-| `docs/dto_contracts.md`          | DTO definitions with all fields/types/constraints, cross-module dependency matrix, validation rules       |
-| `docs/db_adapter_spec.md`        | Database abstraction layer — adapter interface, SQL compatibility, migration strategy, engine portability |
-| `docs/PARALLEL_DEV.md`           | Parallel development orchestration guide — 3-mode execution system, phase grouping, token optimization    |
-| `docs/AGENTS_AND_SKILLS.md`      | Agent/skill system — agents, skills, composition matrices, token optimization, parallel dev integration   |
-| `docs/STARTER_GUIDE.md`          | Getting started playbook — setup, architecture generation, roadmap generation, parallel system usage      |
-| `docs/PROGRESS_REPORT.md`        | Implementation status — completed work, test results, remaining items, phase-by-phase progress tracking   |
-| `contracts/`                     | Immutable DTO definitions — all modules MUST use these, not upstream sources or raw dicts/objects         |
-| `config/`                        | YAML configuration files — all thresholds, paths, and tunable parameters live here                        |
+| Document                         | Purpose                                                                                                                                                                           |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/architecture.md`           | **Single source of truth.** Unified architecture — control system, 10-layer pipeline, backbone, meta systems, KPIs, operational modes. All other docs must be consistent with it. |
+| `docs/implementation_roadmap.md` | Phase-based implementation roadmap with schemas, algorithms, exit criteria, priority layers                                                                                       |
+| `docs/orchestrator_spec.md`      | Orchestrator specification — execution model, checkpointing, resume, idempotency, failure handling                                                                                |
+| `docs/dto_contracts.md`          | DTO definitions with all fields/types/constraints, cross-module dependency matrix, validation rules                                                                               |
+| `docs/db_adapter_spec.md`        | Database abstraction layer — adapter interface, SQL compatibility, migration strategy, engine portability                                                                         |
+| `docs/PARALLEL_DEV.md`           | Parallel development orchestration guide — 3-mode execution system, phase grouping, token optimization                                                                            |
+| `docs/AGENTS_AND_SKILLS.md`      | Agent/skill system — agents, skills, composition matrices, token optimization, parallel dev integration                                                                           |
+| `docs/STARTER_GUIDE.md`          | Getting started playbook — setup, architecture generation, roadmap generation, parallel system usage                                                                              |
+| `docs/PROGRESS_REPORT.md`        | Implementation status — completed work, test results, remaining items, phase-by-phase progress tracking                                                                           |
+| `contracts/`                     | Immutable DTO definitions — all modules MUST use these, not upstream sources or raw dicts/objects                                                                                 |
+| `config/`                        | YAML configuration files — all thresholds, paths, and tunable parameters live here                                                                                                |
 
 When generating code, refer to these documents for exact schemas, DTO definitions, interfaces, and algorithms. Do not invent new structures that contradict them.
 
@@ -42,12 +42,36 @@ When generating code, refer to these documents for exact schemas, DTO definition
 
 ### Pipeline Architecture
 
-Stages execute in **strict sequential order** — never reorder, skip, or parallelize stages at runtime:
+Stages execute in **strict sequential order** — never reorder, skip, or parallelize stages at runtime.
+
+**Canonical pipeline** (per `docs/architecture.md` § 1):
 
 ```
-[Define your pipeline stages in docs/architecture.md]
-stage_1 → stage_2 → stage_3 → ... → stage_N
+DETECT → FILTER → SCORE → SELECT → EXECUTE → EXIT → EVALUATE → ADJUST
 ```
+
+Mapped to the 10 layers (`docs/architecture.md` § 3):
+
+```
+Layer 1  Data Quality Engine        (reject manipulation, honeypots, rugs)
+Layer 2  Feature Extraction         (normalized FeatureDTO + FeatureConfidence)
+Layer 3  Signal & Edge Discovery    (NEW_LAUNCH_EDGE, adaptive momentum threshold)
+Layer 4  Probability/Slippage/Latency Models
+Layer 5  Edge Validation            (EV gate, adaptive thresholds)
+Layer 6  Selection Engine           (Top-K greedy + diversity + exploration band)
+Layer 7  Capital Engine             (size ∝ Score × P × Confidence, cohort multipliers)
+Layer 8  Execution Engine           (wallet sharding, prebuilt calldata, bounded parallelism)
+Layer 9  Position Engine            (TP1/TP2/SL/TIME, adaptive per cohort)
+Layer 10 Learning Engine            (FP/FN, cohort analysis, bounded updates)
+```
+
+### Core Invariant (do not violate)
+
+```
+Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality
+```
+
+If any factor → 0, profit → 0. Every change must preserve every factor.
 
 ### Determinism
 
@@ -108,17 +132,94 @@ Modules MUST:
 
 ---
 
+## Sniper-Specific Architecture Invariants
+
+These rules extend the skeleton-parallel framework with the specific architecture defined in `docs/architecture.md`. All code generation MUST comply.
+
+### Event-Sourced Backbone (per `docs/architecture.md` § 2)
+
+- **Append-only event bus** in Postgres (`events` table) is the authoritative log of all DTO transitions
+- Modules **publish events** (INSERT); they never mutate past events
+- **Workers consume via `SELECT ... FOR UPDATE SKIP LOCKED`** with `consumer_offsets` tracking — no polling queues, no in-memory queues
+- **Full state is reconstructible** from the event log alone (replay guarantee)
+- See `docs/architecture.md` § 2.2–2.3 for SQL and worker loop
+
+### Per-Market Isolation (per `docs/architecture.md` § 2.4)
+
+- The pipeline runs **one independent instance per market** (`eth-uniswap-v2`, `bsc-pancake-v2`, etc.)
+- No cross-market coupling — each market has isolated configs, workers, checkpoints
+- Horizontal scalability = add more market workers; no shared mutable state
+
+### Telegram via Event Bus Only (per `docs/architecture.md` § 2.5, § 4.4)
+
+- Modules **MUST NOT** call Telegram APIs directly
+- All user-facing events emit to `events` → dedicated **Telegram dispatcher service** reads from the bus and sends messages
+- Operator commands (`/status`, `/mode`, `/pnl`, `/positions`, `/kill`, `/resume`, `/version`) are logged and require confirmation for destructive actions
+- No remote code execution via Telegram — ever
+
+### Strategy Versioning & Replay (per `docs/architecture.md` § 4.1–4.2)
+
+- Every configuration update creates an **immutable `StrategyVersion`** — thresholds, feature weights, model params, cohort multipliers
+- Every trade logs `strategy_version_id` for attribution
+- **A/B promotion is bounded**: promote only if `expectancy(V2) > expectancy(V1) × 1.05` AND `drawdown(V2) ≤ drawdown(V1)` AND `N ≥ 30–50` samples
+- **Replay must be bit-for-bit deterministic**: no wall-clock dependencies, no randomness, no external nondeterministic calls — use event timestamps only
+
+### Operational Modes (per `docs/architecture.md` § 7)
+
+The system runs in exactly one of three modes at any time:
+
+- `STRICT` — conservative thresholds, low explore budget (≤1%)
+- `BALANCED` — default operating mode
+- `EXPLORATION` — relaxed thresholds, higher explore budget (3–5%), used for starvation recovery
+
+Mode transitions are **bounded**: one transition per window, auto-downgrade on starvation, auto-upgrade on rug/FP spike, manual override via `/mode` (logged, reversible). Values live in `config/` YAML.
+
+### Learning Safety (per `docs/architecture.md` § 3.10.12, § 5.3)
+
+All adaptive updates are non-negotiably:
+
+- **Bounded** — `Δparameter ≤ 5–10% per cycle`
+- **Sample-gated** — require `N ≥ 30–50` before update
+- **Versioned** — every change bumps `config_version` with snapshot
+- **Rollback-able** — revert if performance degrades
+- **Single-family per cycle** — never tune multiple parameter families simultaneously (prevents oscillation)
+- **Must store rejected shadow trades** in `LearningRecord` — without them false negatives cannot be computed
+
+### Execution Engine Rules (per `docs/architecture.md` § 3.8)
+
+- **Wallet sharding is mandatory** — `hash(TokenAddress) % n` or round-robin; one in-flight tx per wallet; strictly increasing nonce per wallet
+- **Prebuilt calldata** on hot path — no recomputation during submission
+- **Bounded parallelism** — global semaphore, concurrency_limit ∈ [5, 20], adaptive on failure rate
+- **Idempotency keys** — each `AllocationDTO` has unique `execution_id`; duplicate submissions are dropped
+- **Multi-endpoint RPC fallback** with circuit breaker; fee bumps on stuck tx use same nonce, δ ≈ 10–20%, max 2–3 retries
+
+### DTO Contract Rules (per `docs/architecture.md` § 2.1, § 4.5)
+
+The canonical DTO registry — no ad-hoc types allowed:
+
+```
+DataQualityDTO, FeatureDTO, FeatureConfidence, EdgeDTO,
+ProbabilityEstimateDTO, SlippageEstimateDTO, LatencyProfileDTO,
+ValidatedEdgeDTO, SelectionOutput, AllocationDTO,
+ExecutionResultDTO, PositionState, LearningRecord,
+StrategyConfig, StrategyVersion
+```
+
+All DTOs: immutable, versioned (`Version` field), schema-validated, `Timestamp` field required, no untyped payloads.
+
+---
+
 ## Forbidden Technologies
 
 Do not introduce any of these unless the project explicitly requires them:
 
-| Category     | Default Forbidden                                                   | Override             |
-| ------------ | ------------------------------------------------------------------- | -------------------- |
-| Architecture | Microservices, Kafka, RabbitMQ, Kubernetes, Docker orchestration    | Unless project needs |
-| Databases    | MongoDB, Redis, any distributed database                            | Unless project needs |
-| AI/ML        | OpenAI API, Anthropic API, LangChain, AutoGPT, CrewAI, any paid LLM | Unless project needs |
-| Cloud        | AWS, GCP, Azure, any cloud compute or storage                       | Unless project needs |
-| Runtime      | Agent loops, autonomous planners, event-driven architectures        | Unless project needs |
+| Category     | Default Forbidden                                                                                            | Override             |
+| ------------ | ------------------------------------------------------------------------------------------------------------ | -------------------- |
+| Architecture | Microservices, Kafka, RabbitMQ, Kubernetes, Docker orchestration                                             | Unless project needs |
+| Databases    | MongoDB, Redis, any distributed database                                                                     | Unless project needs |
+| AI/ML        | OpenAI API, Anthropic API, LangChain, AutoGPT, CrewAI, any paid LLM                                          | Unless project needs |
+| Cloud        | AWS, GCP, Azure, any cloud compute or storage                                                                | Unless project needs |
+| Runtime      | Agent loops, autonomous planners, async message brokers (Kafka/RabbitMQ/NATS) outside the Postgres event bus | Unless project needs |
 
 > **Override policy:** If your project legitimately requires a forbidden technology (e.g., Redis for caching, Docker for deployment, OpenAI for an LLM-powered feature), document the justification in `docs/architecture.md` and proceed. The defaults exist to prevent accidental complexity, not to block valid requirements.
 
