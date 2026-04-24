@@ -9,7 +9,7 @@
 ## 1. Overview
 
 This framework supports parallel development of pipeline phases. Most phases own isolated
-modules under `app/modules/` and communicate only through immutable DTOs in `contracts/`.
+modules under `internal/modules/` and communicate only through immutable DTOs in `contracts/`.
 This isolation enables parallel development — multiple phases implemented at the same time
 by independent AI agents.
 
@@ -82,6 +82,8 @@ main
    - `phase-builder` — implements the phase (up to 5 retries)
    - `dto-guardian` — validates DTO contracts (up to 5 retries)
    - `integration` — validates module wiring (up to 5 retries)
+   - `security-auditor` — OWASP security review (up to 3 retries)
+   - `test-builder` — generates unit + integration tests (up to 3 retries)
    - `refactor` — fixes quality gate failures (up to 3 retries)
    - If any stage exceeds retry limit → rollback to checkpoint
 7. Tracks per-phase status in `.parallel-dev/phase-status.json`
@@ -112,7 +114,7 @@ Context is shared across phases. Always uses `claude-sonnet-4.6` as the model.
 main
  └─ track/group-2-3-4  ← single branch, checkpoint + agent pipeline (bounded retries)
      Phase 2 → commit → Phase 3 → commit → Phase 4 → commit
-     dto-guardian → integration → refactor (bounded retries) → global validation
+     dto-guardian → integration → security-auditor → test-builder → refactor (bounded retries) → global validation
 ```
 
 1. Creates a single branch from `main`
@@ -232,10 +234,53 @@ Phases can run simultaneously when they own **different files**:
 ❌ orchestrator ‖ any module  — Concurrent changes conflict
 ```
 
-### File Ownership
+### Canonical Phase Groups (Crypto-Sniping-Bot)
 
-Each phase owns specific directories. Parallel phases MUST NOT share file ownership.
-Define your ownership matrix in `docs/implementation_roadmap.md`.
+```text
+GROUP A — SEQUENTIAL ONLY (no parallelism):
+  Phase 0  core-infrastructure    — DB schema, adapter, event bus, orchestrator wiring
+  Phase 1  dex-ingestion          — DEX scanning, MarketDataDTO, event emission
+  Phase 2  first-trade-pipeline   — Full vertical slice: DQ → Edge → Execute → Position
+
+GROUP B — SAFE PARALLEL (independent modules):
+  Phase 3  evaluation-correctness — Evaluation + LearningRecord + shadow observer
+  Phase 4  signal-quality         — Probability/Slippage/Latency models + full DQ + features
+  Phase 5  learning-engine        — Adaptive thresholds, A/B versioning, bounded updates
+
+GROUP C — CONTROL LAYER (runs after all others):
+  Phase 6  production-hardening   — Wallet sharding, RPC management, observability, scaling
+```
+
+**Rules:**
+
+- Group A (Phase 0–2) MUST complete sequentially before any Group B phase starts
+- Group B (Phase 3–5) MAY run in parallel — they own separate `internal/modules/` subdirs
+- Group C (Phase 6) MUST run after all Group B phases are merged and validated
+- No phase modifies `contracts/` or `database/` without going through the DTO guardian
+- `internal/orchestrator/` is a SHARED file — requires merge validation before any edit
+
+### File Ownership Matrix
+
+| Path                             | Owner                  | Rule                                          |
+| -------------------------------- | ---------------------- | --------------------------------------------- |
+| `contracts/`                     | LOCKED — additive only | No field removal, no rename                   |
+| `database/`                      | LOCKED — Phase 0 only  | Schema changes via migrations only            |
+| `docs/`                          | READ-ONLY              | No agent may modify                           |
+| `config/`                        | ADDITIVE only          | New keys allowed; existing keys never removed |
+| `internal/modules/dex_ingest/`   | Phase 1                | Exclusive ownership                           |
+| `internal/modules/data_quality/` | Phase 2+4              | Phase 2 skeleton, Phase 4 expands             |
+| `internal/modules/feature/`      | Phase 2+4              | Phase 2 basic, Phase 4 full                   |
+| `internal/modules/edge/`         | Phase 2+4              | Phase 2 single rule, Phase 4 full             |
+| `internal/modules/probability/`  | Phase 4                | Exclusive ownership                           |
+| `internal/modules/slippage/`     | Phase 4                | Exclusive ownership                           |
+| `internal/modules/selection/`    | Phase 2+4              | Phase 2 top-1, Phase 4 top-K                  |
+| `internal/modules/capital/`      | Phase 2+6              | Phase 2 fixed, Phase 6 full sharding          |
+| `internal/modules/execution/`    | Phase 2+6              | Phase 2 basic, Phase 6 full sharding          |
+| `internal/modules/position/`     | Phase 2+5              | Phase 2 TP/SL, Phase 5 adaptive               |
+| `internal/modules/evaluation/`   | Phase 3                | Exclusive ownership                           |
+| `internal/modules/learning/`     | Phase 5                | Exclusive ownership                           |
+| `internal/orchestrator/`         | SHARED                 | Merge validation required before any edit     |
+| `internal/workers/`              | Per-phase              | Each phase owns its own worker file           |
 
 ---
 
@@ -330,8 +375,10 @@ git tag -d checkpoint-${phase_label}-pre
 phase-builder (up to 5 retries)
   → dto-guardian (up to 5 retries)
     → integration (up to 5 retries)
-      → refactor/quality gates (up to 3 retries)
-        → success OR rollback
+      → security-auditor (up to 3 retries)
+        → test-builder (up to 3 retries)
+          → refactor/quality gates (up to 3 retries)
+            → success OR rollback
 ```
 
 ### Stage-Specific Validation
@@ -400,11 +447,11 @@ Recommended checks to implement in the hook:
 1. **Compile/import check** — Project compiles/imports successfully
 2. **Lint check** — No lint errors in modified files
 3. **Test check** — Test suite passes
-4. **SQL check** — No database driver imports in `app/modules/`
-5. **Cross-module check** — No cross-module imports between `app/modules/` packages
-6. **Console check** — No unstructured console output in `app/modules/`
+4. **SQL check** — No database driver imports in `internal/modules/`
+5. **Cross-module check** — No cross-module imports between `internal/modules/` packages
+6. **Console check** — No unstructured console output in `internal/modules/`
 7. **DTO validation** — All DTOs in `contracts/` are immutable
-8. **Orchestrator integrity** — No database imports in `app/modules/`
+8. **Orchestrator integrity** — No database imports in `internal/modules/`
 9. **Protected files** — Warns if `contracts/`, `database/`, or `docs/` were modified
 10. **Deterministic ordering** — No unordered iteration of collections without explicit sorting
 
@@ -491,7 +538,7 @@ intervention:
 ./scripts/run_parallel.sh start [--mode=1|2|3] <phases...>
         │
         ▼
-[1] Per phase/group: phase-builder → dto-guardian → integration → refactor
+[1] Per phase/group: phase-builder → dto-guardian → integration → security-auditor → test-builder → refactor
         │  (bounded retries per stage; rollback to checkpoint on exceed)
         ▼
 [2] Auto-merge all branches (union strategy)
@@ -617,3 +664,119 @@ All agent subshells are wrapped with `run_with_timeout 1800` (30 minutes default
 A timed-out phase is recorded as `timed_out` in phase-status.json and treated as a
 failure (triggers rollback). Override by setting `AGENT_TIMEOUT_SECONDS` before calling
 the function directly.
+
+---
+
+## 12. Parallel Safety Invariants
+
+These invariants MUST hold across all phases, all modes, and all merge combinations.
+Any violation corrupts pipeline state and cannot be recovered by retry alone.
+
+### A. DTO Immutability
+
+```text
+INVARIANT: contracts/ is additive-only.
+  ✅ Adding new fields to a DTO
+  ✅ Adding new DTO types
+  ❌ Removing a field
+  ❌ Renaming a field
+  ❌ Changing a field type
+  ❌ Making an immutable field mutable
+```
+
+Enforcement: `dto-guardian` runs after every `phase-builder`. Any violation aborts the
+phase immediately — no retry, rollback to checkpoint.
+
+### B. Adapter Interface Immutability
+
+```text
+INVARIANT: database/adapter.go interface does not change during parallel phases.
+  ✅ Adding a new adapter method (new phase needs it)
+  ❌ Renaming an existing method (breaks all callers simultaneously)
+  ❌ Changing an existing method signature
+  ❌ Removing a method
+```
+
+Adapter changes require sequential coordination — schedule as Phase 0 extension or
+between phase groups.
+
+### C. Module Isolation
+
+```text
+INVARIANT: Each module in internal/modules/ is a pure function.
+  ✅ Module accepts DTO input, returns DTO output
+  ✅ Module imports from contracts/ only
+  ❌ Module imports another module (internal/modules/<other>)
+  ❌ Module imports from database/ or calls the adapter
+  ❌ Module manages its own state
+  ❌ Module calls Telegram or any external service directly
+```
+
+### D. Event Contract Immutability
+
+```text
+INVARIANT: Event type strings are immutable once published.
+  ✅ Adding a new event type
+  ❌ Renaming an existing event type (breaks all consumers)
+  ❌ Changing an event payload schema without versioning
+```
+
+Consumer workers use string-matched event types — renames silently break consumers with
+no compile error. New event types require new consumer registration in orchestrator.
+
+### E. Lifecycle Consistency (Token State Machine)
+
+All token state transitions MUST follow the READ → VALIDATE → CAS TRANSITION pattern:
+
+```go
+// Safe lifecycle transition (compare-and-swap):
+affected, err := adapter.TransitionTokenState(ctx, tokenID, "queued", "processing")
+if err != nil || affected == 0 {
+    // Another worker already transitioned — skip, do not retry
+    return nil
+}
+```
+
+`SELECT ... FOR UPDATE SKIP LOCKED` guarantees only one worker claims a token at a time.
+**Never use** optimistic updates without CAS — race conditions corrupt the lifecycle audit trail.
+
+### F. Event Bus Safety
+
+```text
+INVARIANT: One primary consumer per event type.
+  ✅ One worker reads "token_detected" events
+  ✅ Fan-out via publishing new events from the consumer
+  ❌ Two workers both reading "token_detected" (duplicate processing)
+  ❌ Consumer mutating past events
+```
+
+All events are append-only. Workers consume via `SELECT ... FOR UPDATE SKIP LOCKED`
+and track offset via `consumer_offsets`. Full state is reconstructible from event log alone.
+
+---
+
+## 13. Parallel Failure Modes
+
+The following failure modes can occur during parallel development. Each has a defined
+detection method and resolution path.
+
+| Failure Mode                | Description                                                           | Detection                                                | Resolution                                                               |
+| --------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **DTO Drift**               | A module uses fields not in `contracts/` or uses stale types          | `dto-guardian` reports mismatches                        | Agent fixes contract or module; additive only                            |
+| **Module Collision**        | Two parallel phases write to the same `internal/modules/<name>/` file | Git merge conflict on merge                              | `conflict-resolver` agent + union merge strategy                         |
+| **Lifecycle Race**          | Two workers transition a token simultaneously without CAS             | Duplicate processing in logs or corrupted position state | Fix transition to use CAS + SKIP LOCKED; replay from event log           |
+| **Merge Corruption**        | A phase's module silently breaks an earlier phase after union merge   | Global validation quality gates fail post-merge          | `refactor` agent with full quality gate context; re-run gates            |
+| **Adapter Signature Break** | A phase changes `database/adapter.go` interface during parallel work  | Compile error in other phases                            | Sequential fix: finish and merge the changing phase before others        |
+| **Event Type Rename**       | An event type string is renamed in one branch                         | Consumer worker silently stops processing in merged code | `integration` agent detects; revert rename, use additive versioning      |
+| **Orchestrator Conflict**   | Two phases both modify `internal/orchestrator/orchestrator.go`        | Git merge conflict                                       | `conflict-resolver` agent; union merge preserves all stage registrations |
+
+### Merge Validation Steps (run after every branch merge)
+
+Run these in sequence before proceeding to global validation:
+
+1. **DTO compatibility** — `dto-guardian` re-validates all `contracts/`; additive check only
+2. **Adapter interface** — Verify `database/adapter.go` matches all call sites in orchestrator
+3. **Event type registry** — Verify all event type strings in workers match emissions in modules
+4. **Worker registration** — Verify all workers are registered in `internal/orchestrator/orchestrator.go`
+5. **Orchestrator wiring** — Verify stage sequence matches canonical pipeline order (Layer 0–10)
+6. **Quality gates** — `scripts/hooks/quality-gates.sh` exits 0

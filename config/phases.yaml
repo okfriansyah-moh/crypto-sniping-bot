@@ -9,16 +9,31 @@
 # Fields:
 #   name       — Human-readable phase name (used in logs and task files)
 #   complexity — Score 1-10 (highest gets the heavy model in parallel mode)
-#   group      — Letter A-Z (phases in the same group run sequentially)
+#   group      — A=sequential-only, B=safe-parallel, C=after-all-B
 #   skills     — Comma-separated skill names required for this phase
-#               All 28 available skills: dto, pipeline, modularity, determinism,
-#               idempotency, failure, config-validation, code-quality,
-#               coding-standards, database-portability, docs-sync,
-#               conflict-resolution, token-optimization, running-prompt,
+#
+# All 41 available skills:
+#   Core:       dto, pipeline, modularity, determinism, idempotency, failure,
+#               config-validation, code-quality, coding-standards, database-portability,
+#               docs-sync, conflict-resolution, token-optimization, running-prompt,
 #               security-audit, test-generation, vertical-slice, api-design,
 #               project-scaffold, dependency-analysis, migration-management,
 #               performance-optimization, caveman, brainstorming, writing-plans,
 #               subagent-driven-development, test-driven-development, rtk
+#   Domain:     dex-scanning, event-bus, rpc-management, token-lifecycle,
+#               data-quality-engine, anti-manipulation, edge-detection, momentum-detector,
+#               signal-normalizer, feature-stability-checker, liquidity-event-detector,
+#               probability-modeling, overfit-detector, replay-engine-pattern,
+#               capital-sizing, execution-engine, execution-quality-analyzer,
+#               drawdown-protection, exposure-monitor, position-management,
+#               monitoring-loop-engine, learning-engine, loss-pattern-analyzer,
+#               strategy-decay-detector, strategy-auto-disable, strategy-versioning,
+#               observability, operational-modes, telegram-dispatcher, traceability
+#
+# Group rules (see docs/PARALLEL_DEV.md § 5):
+#   Group A — SEQUENTIAL ONLY:  Phases 0-2 (infra, ingestion, first-trade)
+#   Group B — SAFE PARALLEL:    Phases 3-5 (evaluation, models, learning)
+#   Group C — CONTROL LAYER:    Phase 6 (observability, scaling) — after all B
 # ─────────────────────────────────────────────────────────────────────────────
 
 phases:
@@ -26,14 +41,34 @@ phases:
     name: "core-infrastructure"
     complexity: 8
     group: "A"
-    skills: "idempotency, failure, database-portability, config-validation, modularity, migration-management"
-  # 1:
-  #   name: "stage-name"
-  #   complexity: 5
-  #   group: "B"
-  #   skills: "dto, modularity, determinism, idempotency, config-validation"
-  # 2:
-  #   name: "another-stage"
-  #   complexity: 6
-  #   group: "B"
-  #   skills: "dto, modularity, determinism, api-design, test-generation"
+    skills: "idempotency, failure, database-portability, config-validation, modularity, migration-management, event-bus, token-lifecycle, traceability, dto, determinism, code-quality, coding-standards"
+  1:
+    name: "dex-ingestion"
+    complexity: 7
+    group: "A"
+    skills: "dex-scanning, event-bus, rpc-management, token-lifecycle, dto, modularity, determinism, idempotency, config-validation, traceability, code-quality, coding-standards, test-generation, test-driven-development"
+  2:
+    name: "first-trade-pipeline"
+    complexity: 9
+    group: "A"
+    skills: "data-quality-engine, anti-manipulation, edge-detection, signal-normalizer, capital-sizing, execution-engine, position-management, dto, modularity, determinism, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, drawdown-protection, exposure-monitor, rpc-management"
+  3:
+    name: "evaluation-correctness"
+    complexity: 8
+    group: "B"
+    skills: "learning-engine, loss-pattern-analyzer, strategy-versioning, replay-engine-pattern, dto, modularity, determinism, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, overfit-detector"
+  4:
+    name: "signal-quality"
+    complexity: 9
+    group: "B"
+    skills: "probability-modeling, overfit-detector, signal-normalizer, feature-stability-checker, liquidity-event-detector, momentum-detector, data-quality-engine, anti-manipulation, edge-detection, dto, modularity, determinism, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, replay-engine-pattern"
+  5:
+    name: "learning-engine"
+    complexity: 9
+    group: "B"
+    skills: "learning-engine, loss-pattern-analyzer, strategy-decay-detector, strategy-auto-disable, strategy-versioning, feature-stability-checker, monitoring-loop-engine, position-management, dto, modularity, determinism, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, overfit-detector"
+  6:
+    name: "production-hardening"
+    complexity: 8
+    group: "C"
+    skills: "observability, operational-modes, telegram-dispatcher, traceability, event-bus, execution-engine, execution-quality-analyzer, drawdown-protection, exposure-monitor, rpc-management, dto, modularity, config-validation, code-quality, coding-standards, test-generation, test-driven-development, performance-optimization, security-audit"

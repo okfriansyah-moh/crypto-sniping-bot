@@ -113,8 +113,10 @@ REMEDIATION_AGENT="refactor"
 MAX_RETRIES_SECURITY="${MAX_RETRIES_SECURITY:-3}"
 MAX_RETRIES_TESTS="${MAX_RETRIES_TESTS:-3}"
 
-# All 28 skills — injected into every Copilot call so agents always have full knowledge access
-CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk"
+# All 41 skills — injected into every Copilot call so agents always have full knowledge access
+# Core (28): framework patterns, quality, standards, testing, tooling
+# Domain (13): sniper pipeline layers 0-10, safety, observability
+CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk, dex-scanning, event-bus, rpc-management, token-lifecycle, data-quality-engine, anti-manipulation, edge-detection, momentum-detector, signal-normalizer, feature-stability-checker, liquidity-event-detector, probability-modeling, overfit-detector, replay-engine-pattern, capital-sizing, execution-engine, execution-quality-analyzer, drawdown-protection, exposure-monitor, position-management, monitoring-loop-engine, learning-engine, loss-pattern-analyzer, strategy-decay-detector, strategy-auto-disable, strategy-versioning, observability, operational-modes, telegram-dispatcher, traceability, profit-first"
 
 # Workspace confinement rule — injected into every agent prompt
 # Prevents agents from writing to /tmp or paths outside the project (Permission denied errors)
@@ -656,7 +658,7 @@ integration_execute() {
     cd "${work_dir}"
     local int_log="${LOG_DIR}/${phase_label}-integration-${attempt}.log"
     copilot \
-        -p "Validate module integration for the phases just implemented. STRICT checklist: (1) DTO compatibility across producer/consumer stages, (2) no cross-module imports, (3) no raw SQL in modules — no database driver imports in app/modules, (4) no module calling another module, (5) database access only through orchestrator, (6) deterministic ordering preserved — all collections explicitly sorted, (7) idempotency preserved — content-addressable IDs, (8) no hidden side effects. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Report and fix violations. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
+        -p "Validate module integration for the phases just implemented. STRICT checklist: (1) DTO compatibility across producer/consumer stages, (2) no cross-module imports, (3) no raw SQL in modules — no database driver imports in internal/modules, (4) no module calling another module, (5) database access only through orchestrator, (6) deterministic ordering preserved — all collections explicitly sorted, (7) idempotency preserved — content-addressable IDs, (8) no hidden side effects. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Report and fix violations. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
         --agent=integration \
         --model="${model}" \
         --no-ask-user \
@@ -690,27 +692,33 @@ integration_validate() {
             done <<< "${cross_imports}"
         fi
 
-        # No DB usage in modules
+        # No DB usage in modules (Python fallback, kept for mixed projects)
         if grep -rn "import sqlite3\|import psycopg2\|import asyncpg\|from database" app/modules/ 2>/dev/null | head -5 | grep -q .; then
             log_error "[integration-validate] DB access in app/modules/"
             ((failures++))
         fi
 
+        # No DB driver imports in modules (Go — primary path)
+        if grep -rn '"database/sql"\|"github.com/lib/pq"\|"github.com/jackc/pgx' \
+                internal/modules/ 2>/dev/null | grep -v '_test.go' | head -5 | grep -q .; then
+            log_error "[integration-validate] DB driver import in internal/modules/ — use adapter only"
+            ((failures++))
+        fi
+
         # No adapter import in modules
-        if grep -rn "import adapter" app/modules/ 2>/dev/null | head -5 | grep -q .; then
-            log_error "[integration-validate] Adapter import in app/modules/"
+        if grep -rn "import adapter" internal/modules/ 2>/dev/null | head -5 | grep -q .; then
+            log_error "[integration-validate] Adapter import in internal/modules/"
             ((failures++))
         fi
 
-        # No print statements
-        if grep -rn "^\s*print(" app/modules/ 2>/dev/null | grep -v "# noqa" | head -5 | grep -q .; then
-            log_error "[integration-validate] print() in app/modules/"
-            ((failures++))
+        # No print/fmt.Println statements (Go)
+        if grep -rn "fmt\.Println\|fmt\.Print(" internal/modules/ 2>/dev/null | grep -v "_test\.go" | head -5 | grep -q .; then
+            log_warn "[integration-validate] Unstructured fmt.Print* in internal/modules/ — use structured logger"
         fi
 
-        # Deterministic ordering warning
-        if grep -rn "for .* in .*\.keys()\|for .* in .*\.values()\|for .* in .*\.items()" app/modules/ 2>/dev/null | grep -v "sorted(" | grep -v "# noqa" | head -5 | grep -q .; then
-            log_warn "[integration-validate] Possible non-deterministic dict iteration in app/modules/ (verify sorted)"
+        # Deterministic ordering warning (Go map iteration)
+        if grep -rn "for .*, .* := range" internal/modules/ 2>/dev/null | grep -v "sort\." | grep -v "_test\.go" | head -5 | grep -q .; then
+            log_warn "[integration-validate] Possible non-deterministic map range in internal/modules/ (verify sorted)"
         fi
     fi
 
@@ -755,28 +763,30 @@ security_auditor_validate() {
     cd "${work_dir}"
     local failures=0
 
-    # Check for common hardcoded secret patterns
-    local secret_patterns=("password\s*=\s*['\"][^'\"]{4,}" "api_key\s*=\s*['\"][^'\"]{4,}"
-                           "secret\s*=\s*['\"][^'\"]{4,}" "token\s*=\s*['\"][^'\"]{4,}")
+    # Check for common hardcoded secret patterns (Go and general)
+    local secret_patterns=('password\s*=\s*"[^"]{4,}' 'apiKey\s*=\s*"[^"]{4,}'
+                           'secret\s*=\s*"[^"]{4,}' 'token\s*=\s*"[^"]{4,}'
+                           "password\s*=\s*'[^']{4,}" "api_key\s*=\s*'[^']{4,}")
     for pat in "${secret_patterns[@]}"; do
-        if grep -rniE "${pat}" app/ src/ 2>/dev/null \
-                | grep -v '_test\.' | grep -v 'test/' | grep -v '.example' \
-                | grep -v '# noqa\|//\s*nosec\|//\s*nosemgrep' \
+        if grep -rniE "${pat}" internal/ cmd/ 2>/dev/null \
+                | grep -v '_test\.go' | grep -v '\.example' \
+                | grep -v '//\s*nosec\|//\s*nosemgrep' \
                 | head -3 | grep -q .; then
             log_warn "[security-validate] Possible hardcoded secret (pattern: ${pat}) — review required"
         fi
     done
 
-    # Check for SQL string interpolation (parameterized queries required)
-    if grep -rn 'f".*SELECT\|f".*INSERT\|f".*UPDATE\|f".*DELETE\|%s.*SELECT\|%s.*INSERT' \
-            app/ src/ 2>/dev/null | grep -v '.example' | head -3 | grep -q .; then
-        log_error "[security-validate] SQL string interpolation detected — use parameterized queries"
+    # Check for SQL string formatting (parameterized queries required in Go)
+    if grep -rn 'fmt\.Sprintf.*SELECT\|fmt\.Sprintf.*INSERT\|fmt\.Sprintf.*UPDATE\|fmt\.Sprintf.*DELETE' \
+            internal/ cmd/ 2>/dev/null | grep -v '_test\.go' | grep -v '\.example' | head -3 | grep -q .; then
+        log_error "[security-validate] SQL string formatting detected — use parameterized queries"
         ((failures++))
     fi
 
-    # Check for shell injection via subprocess with string concat
-    if grep -rn 'subprocess.*shell=True\|os\.system(' app/ src/ 2>/dev/null | head -3 | grep -q .; then
-        log_warn "[security-validate] shell=True or os.system() detected — verify input is sanitized"
+    # Check for os/exec with user-controlled input (shell injection risk)
+    if grep -rn 'exec\.Command\|os\.Exec' internal/ cmd/ 2>/dev/null \
+            | grep -v '_test\.go' | head -3 | grep -q .; then
+        log_warn "[security-validate] exec.Command usage detected — verify no user-controlled input"
     fi
 
     return $(( failures > 0 ? 1 : 0 ))

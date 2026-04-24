@@ -46,13 +46,15 @@ Agents consume skills to minimize token usage while maintaining constraint enfor
 Every phase runs through this mandatory agent chain:
 
 ```text
-phase-builder → dto-guardian → integration → refactor (conditional)
+phase-builder → dto-guardian → integration → security-auditor → test-builder → refactor (remediation only)
 ```
 
 1. **phase-builder** implements the assigned phase
 2. **dto-guardian** validates all DTO contracts
 3. **integration** validates cross-module wiring
-4. **refactor** runs only if quality gates fail
+4. **security-auditor** performs OWASP review
+5. **test-builder** generates unit + integration tests
+6. **refactor** runs only if quality gates fail (remediation)
 
 ### Agent Capabilities
 
@@ -115,6 +117,42 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 | test-driven-development     | `.github/skills/test-driven-development/SKILL.md`     | RED-GREEN-REFACTOR cycle enforcement        |
 | rtk                         | `.github/skills/rtk/SKILL.md`                         | Token-efficient CLI proxy (60-90% savings)  |
 
+### Domain Skills (Sniper Pipeline)
+
+| Skill                      | File                                                 | Layer | Purpose                                                    |
+| -------------------------- | ---------------------------------------------------- | ----- | ---------------------------------------------------------- |
+| dex-scanning               | `.github/skills/dex-scanning/SKILL.md`               | 0     | DEX scanning, MarketDataDTO, event emission                |
+| event-bus                  | `.github/skills/event-bus/SKILL.md`                  | All   | PostgreSQL append-only event bus, SKIP LOCKED workers      |
+| rpc-management             | `.github/skills/rpc-management/SKILL.md`             | 0/8   | Multi-endpoint RPC, circuit breaker, fee bump              |
+| token-lifecycle            | `.github/skills/token-lifecycle/SKILL.md`            | All   | Token state machine, CAS transitions, expiry               |
+| data-quality-engine        | `.github/skills/data-quality-engine/SKILL.md`        | 1     | Adaptive firewall: rug/honeypot/wash detection             |
+| anti-manipulation          | `.github/skills/anti-manipulation/SKILL.md`          | 1     | Wash/rug/honeypot/fakeliq/tax detection algorithms         |
+| edge-detection             | `.github/skills/edge-detection/SKILL.md`             | 3     | NEW_LAUNCH_EDGE, adaptive momentum threshold               |
+| momentum-detector          | `.github/skills/momentum-detector/SKILL.md`          | 3     | Trend strength, RSI/volume confirmation (Gate 5)           |
+| signal-normalizer          | `.github/skills/signal-normalizer/SKILL.md`          | 3/4   | Z-score + sigmoid two-stage normalization to [-1,+1]       |
+| feature-stability-checker  | `.github/skills/feature-stability-checker/SKILL.md`  | 2/3   | 60% directional consistency gate, weight redistribution    |
+| liquidity-event-detector   | `.github/skills/liquidity-event-detector/SKILL.md`   | 1/5   | DEX volume spikes, cascade detection, DQ filter gate       |
+| probability-modeling       | `.github/skills/probability-modeling/SKILL.md`       | 4     | P(success)/slippage/latency models, EV computation         |
+| overfit-detector           | `.github/skills/overfit-detector/SKILL.md`           | 4     | Max 5 indicators, max 3 params, min 100 samples gate       |
+| replay-engine-pattern      | `.github/skills/replay-engine-pattern/SKILL.md`      | All   | Deterministic replay with `replay:` prefix isolation       |
+| capital-sizing             | `.github/skills/capital-sizing/SKILL.md`             | 7     | Kelly-adjacent sizing, cohort multipliers, AllocationDTO   |
+| execution-engine           | `.github/skills/execution-engine/SKILL.md`           | 8     | Multi-wallet execution, wallet sharding, prebuilt calldata |
+| execution-quality-analyzer | `.github/skills/execution-quality-analyzer/SKILL.md` | 8     | Slippage/fill/latency/cost-as-edge execution audit         |
+| drawdown-protection        | `.github/skills/drawdown-protection/SKILL.md`        | 7/9   | HWM-based tiered drawdown, kill switch, session floor      |
+| exposure-monitor           | `.github/skills/exposure-monitor/SKILL.md`           | 7     | 80% portfolio cap, 20 positions, 0.5% single limit gate    |
+| position-management        | `.github/skills/position-management/SKILL.md`        | 9     | TP1/TP2/SL/TIME exit logic, trailing stop, PositionState   |
+| monitoring-loop-engine     | `.github/skills/monitoring-loop-engine/SKILL.md`     | 9     | Price-driven position poll loop, kill switch first         |
+| learning-engine            | `.github/skills/learning-engine/SKILL.md`            | 10    | Adaptive thresholds, FP/FN computation, LearningRecord     |
+| loss-pattern-analyzer      | `.github/skills/loss-pattern-analyzer/SKILL.md`      | 10    | 7-bucket loss classification, systemic pattern alerts      |
+| strategy-decay-detector    | `.github/skills/strategy-decay-detector/SKILL.md`    | 10    | 5-metric decay scoring, auto-disable thresholds            |
+| strategy-auto-disable      | `.github/skills/strategy-auto-disable/SKILL.md`      | 10    | 5-trigger lifecycle: probation→active→disabled→review      |
+| strategy-versioning        | `.github/skills/strategy-versioning/SKILL.md`        | All   | Immutable versioning, A/B promotion, rollback              |
+| observability              | `.github/skills/observability/SKILL.md`              | All   | KPI tracking, structured logging, health monitoring        |
+| operational-modes          | `.github/skills/operational-modes/SKILL.md`          | All   | STRICT/BALANCED/EXPLORATION mode transitions               |
+| telegram-dispatcher        | `.github/skills/telegram-dispatcher/SKILL.md`        | All   | Event-bus-only Telegram, operator commands                 |
+| traceability               | `.github/skills/traceability/SKILL.md`               | All   | TraceID/CorrelationID/CausationID/VersionID contract       |
+| profit-first               | `.github/skills/profit-first/SKILL.md`               | All   | Profit factor design framework, feature evaluation gate    |
+
 ### Skill Structure
 
 Each skill is a folder at `.github/skills/<kebab-case-name>/SKILL.md` with standardized format:
@@ -157,17 +195,17 @@ Pre-commit verification items.
 
 ### Core Pipeline Agents
 
-| Agent             | Always Loads                                | Loads On-Demand                             |
-| ----------------- | ------------------------------------------- | ------------------------------------------- |
-| phase-builder     | dto, modularity, pipeline                   | determinism, idempotency, config-validation |
-| dto-guardian      | dto, modularity                             | determinism, docs-sync                      |
-| integration       | pipeline, dto, database-portability         | idempotency, failure, docs-sync             |
-| refactor          | modularity, code-quality                    | determinism                                 |
-| orchestrator      | pipeline, idempotency, database-portability | failure                                     |
-| module-builder    | dto, modularity, code-quality               | determinism, idempotency, config-validation |
-| conflict-resolver | conflict-resolution                         | dto, modularity                             |
-| merge-reviewer    | dto, pipeline, modularity                   | docs-sync                                   |
-| task-sync         | running-prompt, modularity                  | dto, pipeline, code-quality                 |
+| Agent             | Always Loads                                           | Loads On-Demand                                                             |
+| ----------------- | ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| phase-builder     | dto, modularity, pipeline, traceability                | determinism, idempotency, config-validation, profit-first, [phase-specific] |
+| dto-guardian      | dto, modularity                                        | determinism, docs-sync, traceability                                        |
+| integration       | pipeline, dto, database-portability, traceability      | idempotency, failure, docs-sync, event-bus                                  |
+| refactor          | modularity, code-quality                               | determinism, coding-standards                                               |
+| orchestrator      | pipeline, idempotency, database-portability, event-bus | failure, token-lifecycle, traceability                                      |
+| module-builder    | dto, modularity, code-quality, traceability            | determinism, idempotency, config-validation, [phase-specific]               |
+| conflict-resolver | conflict-resolution                                    | dto, modularity                                                             |
+| merge-reviewer    | dto, pipeline, modularity                              | docs-sync, traceability                                                     |
+| task-sync         | running-prompt, modularity                             | dto, pipeline, code-quality, profit-first                                   |
 
 ### Framework Agents
 
@@ -242,9 +280,14 @@ The parallel development script automatically:
 
 Each phase loads only the skills it needs:
 
-| Phase   | Required Skills                               |
-| ------- | --------------------------------------------- |
-| Phase 0 | idempotency, failure                          |
-| Phase N | dto, modularity, determinism + phase-specific |
+| Phase | Name                   | Required Skills (domain-specific)                                                                                                                                                                                |
+| ----- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | core-infrastructure    | event-bus, token-lifecycle, traceability, migration-management, database-portability                                                                                                                             |
+| 1     | dex-ingestion          | dex-scanning, event-bus, rpc-management, token-lifecycle, traceability                                                                                                                                           |
+| 2     | first-trade-pipeline   | data-quality-engine, anti-manipulation, edge-detection, signal-normalizer, capital-sizing, execution-engine, position-management, drawdown-protection, exposure-monitor, rpc-management                          |
+| 3     | evaluation-correctness | learning-engine, loss-pattern-analyzer, strategy-versioning, replay-engine-pattern, overfit-detector                                                                                                             |
+| 4     | signal-quality         | probability-modeling, overfit-detector, signal-normalizer, feature-stability-checker, liquidity-event-detector, momentum-detector, data-quality-engine, anti-manipulation, edge-detection, replay-engine-pattern |
+| 5     | learning-engine        | learning-engine, loss-pattern-analyzer, strategy-decay-detector, strategy-auto-disable, strategy-versioning, feature-stability-checker, monitoring-loop-engine, position-management, overfit-detector            |
+| 6     | production-hardening   | observability, operational-modes, telegram-dispatcher, traceability, execution-quality-analyzer, drawdown-protection, exposure-monitor, rpc-management, performance-optimization                                 |
 
-Core skills loaded by **every** phase: `dto`, `modularity`, `determinism`.
+Core skills loaded by **every** phase: `dto`, `modularity`, `determinism`, `traceability`, `idempotency`, `code-quality`, `coding-standards`, `config-validation`, `test-generation`, `test-driven-development`.
