@@ -33,9 +33,13 @@ func New(logger *slog.Logger) *DB {
 // Initialize establishes the database connection pool.
 // Must be called before any other method.
 func (d *DB) Initialize(ctx context.Context, cfg database.Config) error {
+	sslMode := cfg.SSLMode
+	if sslMode == "" {
+		sslMode = "disable"
+	}
 	dsn := fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
-		cfg.Host, cfg.Port, cfg.Database, cfg.User, cfg.Password,
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.Database, cfg.User, cfg.Password, sslMode,
 	)
 
 	pool, err := sql.Open("pgx", dsn)

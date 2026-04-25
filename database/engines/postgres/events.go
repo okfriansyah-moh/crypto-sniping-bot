@@ -46,9 +46,15 @@ func (d *DB) InsertEvent(ctx context.Context, evt database.Event) error {
 	return nil
 }
 
-// ClaimNextEvent atomically claims the next unprocessed event for a worker group
-// using SELECT ... FOR UPDATE SKIP LOCKED.
-// Returns nil if the queue is empty.
+// ClaimNextEvent atomically claims the next unprocessed event for a worker group.
+//
+// Uses UPDATE ... RETURNING to atomically set claimed_at in a single statement,
+// preventing the race condition that a bare SELECT ... FOR UPDATE SKIP LOCKED
+// in autocommit mode creates (the row lock would be released before
+// MarkEventProcessed is called, allowing two workers to process the same event).
+//
+// A stale-claim guard reclaims events whose claimed_at exceeded
+// claimTimeoutSeconds (default 300 s), recovering from crashed workers.
 //
 // Note: group is passed for future consumer_offsets tracking (per-group progress
 // isolation). The current implementation uses a single processed=TRUE flag, which
@@ -59,17 +65,27 @@ func (d *DB) ClaimNextEvent(ctx context.Context, group string, eventTypes []stri
 		return nil, nil
 	}
 
-	// Build parameterized ANY($n) array.
+	// Atomic claim: UPDATE sets claimed_at, RETURNING delivers the row.
+	// The subquery uses FOR UPDATE SKIP LOCKED so concurrent workers skip
+	// a row that is already being updated by a peer.
+	// Stale claims older than claimTimeoutSeconds are also eligible.
+	const claimTimeoutSeconds = 300
 	const q = `
-		SELECT event_id, event_type, payload, trace_id, correlation_id, causation_id, version_id, created_at, processed
-		FROM events
-		WHERE processed = FALSE
-		  AND event_type = ANY($1)
-		ORDER BY created_at
-		FOR UPDATE SKIP LOCKED
-		LIMIT 1`
+		UPDATE events
+		SET claimed_at = CURRENT_TIMESTAMP
+		WHERE event_id = (
+		    SELECT event_id FROM events
+		    WHERE processed = FALSE
+		      AND event_type = ANY($1)
+		      AND (claimed_at IS NULL
+		           OR claimed_at < CURRENT_TIMESTAMP - ($2 * INTERVAL '1 second'))
+		    ORDER BY created_at
+		    FOR UPDATE SKIP LOCKED
+		    LIMIT 1
+		)
+		RETURNING event_id, event_type, payload, trace_id, correlation_id, causation_id, version_id, created_at, processed`
 
-	row := d.pool.QueryRowContext(ctx, q, eventTypes)
+	row := d.pool.QueryRowContext(ctx, q, eventTypes, claimTimeoutSeconds)
 	evt, err := scanEvent(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -80,9 +96,9 @@ func (d *DB) ClaimNextEvent(ctx context.Context, group string, eventTypes []stri
 	return evt, nil
 }
 
-// MarkEventProcessed marks an event as handled.
+// MarkEventProcessed marks an event as handled and clears its claim.
 func (d *DB) MarkEventProcessed(ctx context.Context, eventID string) error {
-	const q = `UPDATE events SET processed = TRUE WHERE event_id = $1`
+	const q = `UPDATE events SET processed = TRUE, claimed_at = NULL WHERE event_id = $1`
 	_, err := d.pool.ExecContext(ctx, q, eventID)
 	if err != nil {
 		return fmt.Errorf("mark event processed: %w", err)

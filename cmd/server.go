@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"crypto-sniping-bot/database/engines/postgres"
 	"crypto-sniping-bot/internal/app/config"
@@ -54,12 +55,20 @@ func runServer() {
 
 	logger.Info("orchestrator_ready", "version_id", orch.VersionID())
 
-	// Start HTTP health server.
-	srv := web.NewServer(cfg, logger)
+	// Start HTTP health server with read/write/idle timeouts to prevent
+	// slowloris and slow-read denial-of-service attacks.
 	addr := fmt.Sprintf(":%s", cfg.Port())
+	srv := web.NewServer(cfg, logger)
+	httpSrv := &http.Server{
+		Addr:         addr,
+		Handler:      srv.Router(),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 	go func() {
 		logger.Info("http_server_starting", "addr", addr)
-		if err := http.ListenAndServe(addr, srv.Router()); err != nil && err != http.ErrServerClosed {
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("http_server_failed", "error", err)
 		}
 	}()

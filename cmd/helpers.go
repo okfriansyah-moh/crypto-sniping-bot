@@ -39,6 +39,7 @@ func buildDBConfig(cfg *config.Config) database.Config {
 		Database:            cfg.Database.Database,
 		User:                cfg.Database.User,
 		Password:            cfg.DBPassword(),
+		SSLMode:             cfg.Database.SSLMode,
 		MaxOpenConns:        cfg.Database.Pool.MaxOpenConns,
 		MaxIdleConns:        cfg.Database.Pool.MaxIdleConns,
 		ConnMaxLifetimeSecs: cfg.Database.Pool.ConnMaxLifetimeSecs,

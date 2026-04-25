@@ -180,6 +180,7 @@ type Config struct {
 	Database            string
 	User                string
 	Password            string
+	SSLMode             string // disable | require | verify-ca | verify-full
 	MaxOpenConns        int
 	MaxIdleConns        int
 	ConnMaxLifetimeSecs int

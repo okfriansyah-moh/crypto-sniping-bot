@@ -35,6 +35,7 @@ type DatabaseConfig struct {
 	Port     int        `yaml:"port"`
 	Database string     `yaml:"database"`
 	User     string     `yaml:"user"`
+	SSLMode  string     `yaml:"ssl_mode"` // disable | require | verify-ca | verify-full
 	Pool     PoolConfig `yaml:"pool"`
 }
 
@@ -149,6 +150,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SNIPER_DB_USER"); v != "" {
 		cfg.Database.User = v
+	}
+	if v := os.Getenv("SNIPER_DB_SSL_MODE"); v != "" {
+		cfg.Database.SSLMode = v
 	}
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		cfg.Logging.Level = v

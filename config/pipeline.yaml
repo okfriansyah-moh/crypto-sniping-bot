@@ -8,6 +8,9 @@ database:
   database: sniper
   user: sniper
   # Password is read from SNIPER_DB_PASSWORD env var.
+  # ssl_mode controls PostgreSQL TLS. Use 'require' or 'verify-full' in production.
+  # Override with SNIPER_DB_SSL_MODE env var.
+  ssl_mode: disable  # local dev only
   pool:
     max_open_conns: 20
     max_idle_conns: 5
