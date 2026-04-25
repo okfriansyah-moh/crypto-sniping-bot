@@ -120,10 +120,16 @@ CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, confi
 
 # Workspace confinement rule — injected into every agent prompt
 # Prevents agents from writing to /tmp or paths outside the project (Permission denied errors)
-_WORKSPACE_CONSTRAINT="WORKSPACE CONSTRAINT: NEVER write any files, scripts, summaries, or reports to /tmp, /var, /private, or any path outside this project directory. Write ALL output files inside the project — use .parallel-dev/ for temporary artifacts and output/ for generated files."
+# Also enforces protected-paths policy that aborts the phase if violated.
+_WORKSPACE_CONSTRAINT="WORKSPACE CONSTRAINT: NEVER write any files, scripts, summaries, or reports to /tmp, /var, /private, or any path outside this project directory. Write ALL output files inside the project — use .parallel-dev/ for temporary artifacts and output/ for generated files. PROTECTED PATHS POLICY (HARD ENFORCED — VIOLATION ROLLS BACK THE ENTIRE PHASE): contracts/ is ADDITIVE-ONLY outside Phase 0 — you MAY add new .go files for new DTOs, but you MUST NEVER modify, reformat, rename, or delete any existing file under contracts/ (allocation.go, contracts.go, data_quality.go, edge.go, evaluation.go, event_envelope.go, execution.go, expired_event.go, feature.go, latency.go, learning_record.go, market_data.go, position.go, probability.go, selection.go, slippage.go, system_state.go, trace.go, validated_edge.go and their _test.go siblings). database/migrations/ files already committed are IMMUTABLE — never edit or delete them; only add NEW migration files with a strictly later YYYYMMDD000NNN_ prefix. docs/ is READ-ONLY for every agent except the orchestrator (PROGRESS_REPORT.md). If a test or compile error seems to require touching a contracts/ file, STOP and instead adjust the consumer code or add a NEW additive contract — never edit the existing one."
 
 # Protected paths — agents MUST NOT modify unless explicitly instructed
 PROTECTED_PATHS=("contracts/" "database/" "docs/")
+# Protected file enforcement: existing files under contracts/ are immutable in non-phase-0 runs.
+# These globs are used by restore_protected_paths to auto-revert unauthorized modifications.
+PROTECTED_CONTRACTS_GLOB="contracts/"
+PROTECTED_MIGRATIONS_GLOB="database/migrations/"
+PROTECTED_DOCS_GLOB="docs/"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase metadata — loaded from config/phases.yaml or defined here as defaults
@@ -651,8 +657,9 @@ phase_builder_execute() {
 }
 
 phase_builder_validate() {
-    local work_dir="$1"
+    local work_dir="$1" model="$2" phase_label="$3"
     cd "${work_dir}"
+    if ! validate_protected_files "${work_dir}" "${phase_label}"; then return 1; fi
     run_validation_hook "${work_dir}"
 }
 
@@ -660,6 +667,7 @@ phase_builder_fix() {
     local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
     local skill_prompt="${_CURRENT_SKILL_PROMPT}"
     cd "${work_dir}"
+    restore_protected_paths "${work_dir}" "${phase_label}"
     local fix_log="${LOG_DIR}/${phase_label}-phase-builder-fix-${attempt}.log"
     copilot \
         -p "Phase builder validation failed. Fix compilation and syntax issues ONLY. Do not change architecture. ${skill_prompt}. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
@@ -690,8 +698,9 @@ dto_guardian_execute() {
 }
 
 dto_guardian_validate() {
-    local work_dir="$1"
+    local work_dir="$1" model="$2" phase_label="$3"
     cd "${work_dir}"
+    if ! validate_protected_files "${work_dir}" "${phase_label}"; then return 1; fi
     local failures=0
     if [[ -d "contracts" ]]; then
         if grep -rn "@dataclass$" contracts/ 2>/dev/null | grep -v "frozen=True" | head -5 | grep -q .; then
@@ -713,6 +722,7 @@ dto_guardian_validate() {
 dto_guardian_fix() {
     local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
     cd "${work_dir}"
+    restore_protected_paths "${work_dir}" "${phase_label}"
     local fix_log="${LOG_DIR}/${phase_label}-dto-fix-${attempt}.log"
     copilot \
         -p "DTO validation failed. Fix DTO-specific issues ONLY: ensure all DTOs are immutable, no missing/extra fields, no type mismatches, no mutable defaults. Use skills: dto. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
@@ -744,8 +754,9 @@ integration_execute() {
 }
 
 integration_validate() {
-    local work_dir="$1"
+    local work_dir="$1" model="$2" phase_label="$3"
     cd "${work_dir}"
+    if ! validate_protected_files "${work_dir}" "${phase_label}"; then return 1; fi
     local failures=0
 
     if [[ -d "app/modules" ]]; then
@@ -804,6 +815,7 @@ integration_fix() {
     local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
     local skill_prompt="${_CURRENT_SKILL_PROMPT}"
     cd "${work_dir}"
+    restore_protected_paths "${work_dir}" "${phase_label}"
     local fix_log="${LOG_DIR}/${phase_label}-integration-fix-${attempt}.log"
     copilot \
         -p "Integration validation failed. Fix integration-level issues: remove cross-module imports, remove DB usage from modules, remove print statements, ensure deterministic ordering (sorted collections). Use skills: ${CORE_SKILLS}. Do not change architecture. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
@@ -834,8 +846,9 @@ security_auditor_execute() {
 }
 
 security_auditor_validate() {
-    local work_dir="$1"
+    local work_dir="$1" model="$2" phase_label="$3"
     cd "${work_dir}"
+    if ! validate_protected_files "${work_dir}" "${phase_label}"; then return 1; fi
     local failures=0
 
     # Check for common hardcoded secret patterns (Go and general)
@@ -870,6 +883,7 @@ security_auditor_validate() {
 security_auditor_fix() {
     local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
     cd "${work_dir}"
+    restore_protected_paths "${work_dir}" "${phase_label}"
     local fix_log="${LOG_DIR}/${phase_label}-security-fix-${attempt}.log"
     copilot \
         -p "Security validation found critical issues. Fix ONLY the security violations: replace string-interpolated SQL with parameterized queries, remove hardcoded secrets (use config/env), review shell injection risks. Use skills: security-audit, ${CORE_SKILLS}. Do not change architecture. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
@@ -901,14 +915,16 @@ test_builder_execute() {
 }
 
 test_builder_validate() {
-    local work_dir="$1"
+    local work_dir="$1" model="$2" phase_label="$3"
     cd "${work_dir}"
+    if ! validate_protected_files "${work_dir}" "${phase_label}"; then return 1; fi
     run_validation_hook "${work_dir}"
 }
 
 test_builder_fix() {
     local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
     cd "${work_dir}"
+    restore_protected_paths "${work_dir}" "${phase_label}"
     local fix_log="${LOG_DIR}/${phase_label}-test-fix-${attempt}.log"
     copilot \
         -p "Test validation failed. Fix ONLY the failing tests: correct assertions, fix mock setups, ensure tests are deterministic and network-free. Do not change production code architecture. Use skills: test-generation, test-driven-development, ${CORE_SKILLS}. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
@@ -922,6 +938,76 @@ test_builder_fix() {
 }
 
 # ── Protected File Enforcement ────────────────────────────────────────────
+
+# restore_protected_paths
+#   Auto-revert any agent modifications to protected paths against the base
+#   branch. NEW files added under contracts/ are KEPT (additive policy); only
+#   modifications/deletions of EXISTING files are reverted. Migrations and
+#   docs/ (except PROGRESS_REPORT.md) are reverted in full.
+#
+#   Called between agent retries so a violating commit can be cleaned up
+#   before the next attempt instead of waiting for end-of-pipeline rollback.
+restore_protected_paths() {
+    local work_dir="$1" phase_label="$2"
+    cd "${work_dir}"
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then return 0; fi
+    local base_branch="main"
+    if ! git rev-parse --verify "${base_branch}" &>/dev/null; then return 0; fi
+
+    # Phase 0 may legitimately replace skeleton stubs — skip auto-restore.
+    if [[ "${phase_label}" == *"phase-0"* || "${phase_label}" == *"group-0"* ]]; then
+        return 0
+    fi
+
+    local restored=0
+
+    # contracts/ — restore only modified/deleted EXISTING files; keep newly added files.
+    local modified_contracts
+    modified_contracts=$(git diff --name-only --diff-filter=MD "${base_branch}" -- contracts/ 2>/dev/null || true)
+    if [[ -n "${modified_contracts}" ]]; then
+        log_warn "[protected-files] auto-restoring modified contracts/ files from ${base_branch}"
+        echo "${modified_contracts}" | while read -r f; do
+            [[ -z "${f}" ]] && continue
+            git checkout "${base_branch}" -- "${f}" 2>/dev/null && log_info "  restored ${f}" || true
+        done
+        restored=1
+    fi
+
+    # database/migrations/ — restore any modified/deleted committed migration files.
+    local modified_migrations
+    modified_migrations=$(git diff --name-only --diff-filter=MD "${base_branch}" -- database/migrations/ 2>/dev/null || true)
+    if [[ -n "${modified_migrations}" ]]; then
+        log_warn "[protected-files] auto-restoring modified database/migrations/ files from ${base_branch}"
+        echo "${modified_migrations}" | while read -r f; do
+            [[ -z "${f}" ]] && continue
+            git checkout "${base_branch}" -- "${f}" 2>/dev/null && log_info "  restored ${f}" || true
+        done
+        restored=1
+    fi
+
+    # docs/ — restore everything except PROGRESS_REPORT.md.
+    local modified_docs
+    modified_docs=$(git diff --name-only "${base_branch}" -- docs/ 2>/dev/null \
+        | grep -v '^docs/PROGRESS_REPORT\.md$' || true)
+    if [[ -n "${modified_docs}" ]]; then
+        log_warn "[protected-files] auto-restoring modified docs/ files from ${base_branch}"
+        echo "${modified_docs}" | while read -r f; do
+            [[ -z "${f}" ]] && continue
+            git checkout "${base_branch}" -- "${f}" 2>/dev/null && log_info "  restored ${f}" || true
+        done
+        restored=1
+    fi
+
+    if (( restored == 1 )); then
+        # Stage and commit the restoration so subsequent diff checks are clean.
+        git add -A 2>/dev/null || true
+        if ! git diff --cached --quiet 2>/dev/null; then
+            git commit -m "chore(protected): auto-restore protected paths for ${phase_label}" \
+                --no-verify 2>/dev/null || true
+        fi
+    fi
+    return 0
+}
 
 validate_protected_files() {
     local work_dir="$1" phase_label="$2"

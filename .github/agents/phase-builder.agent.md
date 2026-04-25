@@ -62,6 +62,16 @@ You are an elite Staff+ Software Architect and Developer implementing a **determ
 
 ---
 
+## Protected Files Policy (HARD RULE — VIOLATION ROLLS BACK THE PHASE)
+
+When running inside `scripts/run_parallel.sh`, the orchestrator validates protected paths after every stage. Any modification to existing protected files causes the **entire phase to roll back to its pre-checkpoint**, wasting all completed work.
+
+- `contracts/` is **ADDITIVE-ONLY** outside Phase 0. You MAY add new `.go` files for new DTOs. You MUST NEVER modify, reformat, rename, or delete any existing file under `contracts/` — `allocation.go`, `contracts.go`, `data_quality.go`, `edge.go`, `evaluation.go`, `event_envelope.go`, `execution.go`, `expired_event.go`, `feature.go`, `latency.go`, `learning_record.go`, `market_data.go`, `position.go`, `probability.go`, `selection.go`, `slippage.go`, `system_state.go`, `trace.go`, `validated_edge.go`, or any `_test.go` siblings of these.
+- `database/migrations/` already-committed `.sql` files are **IMMUTABLE**. Add NEW migration files only, with a strictly later `YYYYMMDD000NNN_` prefix. Never edit or delete existing migrations.
+- `docs/` is **READ-ONLY**. Only the orchestrator may update `docs/PROGRESS_REPORT.md`.
+
+If compile/test errors seem to require touching an existing contract file, STOP. Adjust the consumer code or add a NEW additive contract instead. Never edit the existing one — even for "trivial" reformatting, gofmt, import grouping, or comment changes. The check is line-deletion based: any removed line in a tracked contracts/ file is a violation.
+
 ## Mission
 
 The user will specify a **phase number** (e.g., "Phase 0", "Phase 3"). You must:

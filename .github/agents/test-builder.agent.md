@@ -57,6 +57,16 @@ test-builder (this agent)
         └── Explore identifies untested branches for additional test coverage
 ```
 
+## Protected Files Policy (HARD RULE — VIOLATION ROLLS BACK THE PHASE)
+
+When invoked from `scripts/run_parallel.sh`, modifying existing protected files causes the entire phase to roll back. Test generation must stay strictly within test files and module source — NEVER touch contracts.
+
+- `contracts/*.go` and `contracts/*_test.go` already in the tree are **IMMUTABLE** outside Phase 0. If a DTO appears "wrong" relative to your test expectations, the test is wrong — not the DTO. Adjust the test, do not edit the contract.
+- `database/migrations/*.sql` are immutable. Test setup must use the existing migrations as-is.
+- `docs/` is read-only.
+
+When creating new tests, place them next to the module under test (`internal/modules/<name>/...`) or under `tests/`. Never create test files inside `contracts/` for existing DTOs.
+
 ## Test Generation Rules
 
 1. **Follow AAA pattern** — Arrange, Act, Assert in every test

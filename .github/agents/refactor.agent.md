@@ -32,6 +32,16 @@ You are a refactoring specialist. Your job is to improve code structure without 
 5. **No new dependencies** — Cannot add libraries or tools
 6. **Pipeline order preserved** — Stage sequence unchanged
 
+## Protected Files Policy (HARD RULE — VIOLATION ROLLS BACK THE PHASE)
+
+This agent is invoked by `scripts/run_parallel.sh` as the **fix step** for failing validations. The orchestrator validates protected paths after every stage, including yours. Any modification to existing protected files rolls back the entire phase.
+
+- `contracts/` is **ADDITIVE-ONLY** outside Phase 0 — never edit, reformat, rename, or delete any existing `*.go` or `*_test.go` file under `contracts/`. New DTO files MAY be added, but existing files are immutable. Even gofmt-style whitespace edits are violations.
+- `database/migrations/*.sql` already committed are immutable — only new migration files with later `YYYYMMDD000NNN_` prefixes may be added.
+- `docs/` is read-only (PROGRESS_REPORT.md is updated by the orchestrator only).
+
+If a build/test failure appears to require touching `contracts/`, the correct fix is in the **consumer code**, not the contract. If a missing field is needed, ADD a new DTO file — do not modify an existing one. Refusing to edit protected files is the right answer; reporting the limitation in the commit message is acceptable.
+
 ## Allowed Refactoring Operations
 
 | Operation              | Example                                                | Constraint                             |
