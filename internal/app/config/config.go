@@ -14,11 +14,11 @@ import (
 // All thresholds and tunable parameters must come from YAML — no hardcoded values.
 // See docs/implementation_roadmap.md § 0.5.
 type Config struct {
-	Pipeline  PipelineConfig          `yaml:"pipeline"`
-	Database  DatabaseConfig          `yaml:"database"`
-	Worker    WorkerConfig            `yaml:"worker"`
-	Logging   LoggingConfig           `yaml:"logging"`
-	Chains    map[string]ChainConfig  `yaml:"chains"` // per-chain ingestion config
+	Pipeline PipelineConfig         `yaml:"pipeline"`
+	Database DatabaseConfig         `yaml:"database"`
+	Worker   WorkerConfig           `yaml:"worker"`
+	Logging  LoggingConfig          `yaml:"logging"`
+	Chains   map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -49,9 +49,9 @@ type PoolConfig struct {
 
 // WorkerConfig holds worker loop parameters.
 type WorkerConfig struct {
-	IdleBackoffMs  int  `yaml:"idle_backoff_ms"`
-	MaxRetryCount  int  `yaml:"max_retry_count"`
-	PanicRecovery  bool `yaml:"panic_recovery"`
+	IdleBackoffMs int  `yaml:"idle_backoff_ms"`
+	MaxRetryCount int  `yaml:"max_retry_count"`
+	PanicRecovery bool `yaml:"panic_recovery"`
 }
 
 // LoggingConfig holds structured logging settings.
@@ -66,12 +66,16 @@ type LoggingConfig struct {
 // Returns an error if any required key is missing or files cannot be parsed.
 func Load(paths ...string) (*Config, error) {
 	if len(paths) == 0 {
-		// Default: load pipeline.yaml from config/ relative to cwd.
+		// Default: load pipeline.yaml; merge chains.yaml when present.
 		cwd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("config: get working directory: %w", err)
 		}
 		paths = []string{filepath.Join(cwd, "config", "pipeline.yaml")}
+		chainsPath := filepath.Join(cwd, "config", "chains.yaml")
+		if _, statErr := os.Stat(chainsPath); statErr == nil {
+			paths = append(paths, chainsPath)
+		}
 	}
 
 	cfg := &Config{}

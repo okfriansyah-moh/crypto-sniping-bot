@@ -14,18 +14,22 @@ import (
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/ingestion"
+	"crypto-sniping-bot/internal/rpc"
 )
 
 // RunIngestion starts the ingestion module for every chain defined in cfg.Chains.
 // It is the ONLY component allowed to call adapter.InsertEvent and adapter.InsertMarketData.
 //
+// factory is a ClientFactory used to create a fresh RPC client per reconnect attempt.
+// When factory is nil, modules run in no-op mode (useful in integration tests).
+//
 // Flow:
 //  1. Get active strategy version (pins VersionID for the run).
 //  2. For each configured chain (sorted for determinism): get ingestion watermark.
 //  3. Create EventEmitter wrapping adapter.InsertEvent + adapter.InsertMarketData.
-//  4. Create ingestion.Module with chain config + emit callback.
+//  4. Create ingestion.Module with chain config + emit callback + client factory.
 //  5. Start module goroutine; block until ctx cancelled.
-func RunIngestion(ctx context.Context, adapter database.Adapter, cfg *config.Config, logger *slog.Logger) error {
+func RunIngestion(ctx context.Context, adapter database.Adapter, cfg *config.Config, factory rpc.ClientFactory, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -147,12 +151,16 @@ func RunIngestion(ctx context.Context, adapter database.Adapter, cfg *config.Con
 				MaxMs:      chainCfg.Backoff.MaxMs,
 				Multiplier: chainCfg.Backoff.Multiplier,
 			},
-			PollIntervalMs:    chainCfg.PollIntervalMs,
-			HeartbeatInterval: chainCfg.HeartbeatIntervalMs,
-			HeartbeatTimeout:  chainCfg.HeartbeatTimeoutMs,
+			PollIntervalMs:     chainCfg.PollIntervalMs,
+			HeartbeatInterval:  chainCfg.HeartbeatIntervalMs,
+			HeartbeatTimeout:   chainCfg.HeartbeatTimeoutMs,
+			LastProcessedBlock: lastBlock, // seeds gap recovery on restart
 		}
 
 		mod := ingestion.New(ingCfg, versionID, emit, logger)
+		if factory != nil {
+			mod.WithClientFactory(factory)
+		}
 		modules = append(modules, mod)
 	}
 

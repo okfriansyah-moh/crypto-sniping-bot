@@ -19,6 +19,11 @@ type Log struct {
 	BlockTimestamp string   // ISO 8601 UTC; populated by normalizer
 }
 
+// ClientFactory creates an RPC Client for the given endpoint URL.
+// The ingestion module uses a factory to create a fresh client per reconnect
+// attempt, enabling true endpoint failover across WSEndpoints/RPCEndpoints.
+type ClientFactory func(ctx context.Context, endpoint string) (Client, error)
+
 // Client is the minimal RPC connectivity interface.
 // All implementations must be safe for concurrent use.
 type Client interface {

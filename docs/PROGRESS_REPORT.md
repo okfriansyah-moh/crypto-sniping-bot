@@ -10,11 +10,11 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 1          |
+| **Completed**    | 3          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 6          |
-| **Last Updated** | 2026-04-26 |
+| **Not Started**  | 4          |
+| **Last Updated** | 2026-04-25 |
 
 ---
 
@@ -23,7 +23,7 @@
 | Phase | Name                  | Status      | Retry Count | Notes                                                                                                                                      |
 | ----- | --------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | 0     | Core Infrastructure   | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean. |
-| 1     | Detection & Ingestion | completed   | 0           | DEX log ingestion module (Layer 0): RPC client interface, normalize PairCreated/Mint/Swap/Burn, event bus emission, gap recovery, reorg detection, reconnect backoff; all tests pass. |
+| 1     | Detection & Ingestion | completed   | 0           | All pipeline agents passed |
 | 2     | Pipeline Core         | not-started | 0           |                                                                                                                                            |
 | 3     | Position Management   | not-started | 0           |                                                                                                                                            |
 | 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
@@ -41,7 +41,7 @@
 | Phase | phase-builder | dto-guardian       | integration | security-auditor | test-builder | Final     |
 | ----- | ------------- | ------------------ | ----------- | ---------------- | ------------ | --------- |
 | 0     | pass          | pass (after fixes) | pass        | pass             | pass         | completed |
-| 1     | pass          | pass               | pass        | pass             | pass         | completed |
+| 1     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
 | 2     | —             | —                  | —           | —                | —            | —         |
 | 3     | —             | —                  | —           | —                | —            | —         |
 | 4     | —             | —                  | —           | —                | —            | —         |
@@ -103,3 +103,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | Date       | Mode            | Phases | Duration      | Token Usage | Outcome   |
 | ---------- | --------------- | ------ | ------------- | ----------- | --------- |
 | 2026-04-25 | manual (mode-2) | 0      | multi-session | —           | completed |
+| 2026-04-25 | mode-2            | 1      | —            | —           | completed |

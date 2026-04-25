@@ -39,16 +39,20 @@ type Config struct {
 	PollIntervalMs    int
 	HeartbeatInterval int // ms
 	HeartbeatTimeout  int // ms
+	// LastProcessedBlock seeds gap recovery on restart (from the ingestion watermark).
+	// Used to initialise PollConfig.LastProcessedBlock when the poll fallback is active.
+	LastProcessedBlock uint64
 }
 
 // Module manages the ingestion lifecycle for a single chain.
 // It is a pure component — it holds no database handles.
 type Module struct {
-	cfg       Config
-	versionID string
-	emit      EventEmitter
-	logger    *slog.Logger
-	client    rpc.Client // injected via WithClient; nil = no-op (skip)
+	cfg           Config
+	versionID     string
+	emit          EventEmitter
+	logger        *slog.Logger
+	client        rpc.Client        // injected via WithClient; nil = use clientFactory
+	clientFactory rpc.ClientFactory // creates a fresh client per reconnect attempt
 
 	mu         sync.Mutex
 	pairTokens map[string][2]string // pool address → [token0, token1]
@@ -77,9 +81,18 @@ func New(cfg Config, versionID string, emit EventEmitter, logger *slog.Logger) *
 	}
 }
 
-// WithClient injects a custom RPC client. Primarily used in tests.
+// WithClient injects a fixed RPC client. Primarily used in tests.
+// WithClientFactory takes precedence when both are set.
 func (m *Module) WithClient(c rpc.Client) *Module {
 	m.client = c
+	return m
+}
+
+// WithClientFactory injects a factory that creates a fresh RPC client per
+// reconnect attempt, enabling true endpoint failover. Takes precedence over
+// the fixed client set via WithClient.
+func (m *Module) WithClientFactory(f rpc.ClientFactory) *Module {
+	m.clientFactory = f
 	return m
 }
 
@@ -88,8 +101,8 @@ func (m *Module) WithClient(c rpc.Client) *Module {
 // Falls back to polling if no WebSocket client or on subscription failure.
 // Blocks until ctx is cancelled.
 func (m *Module) Start(ctx context.Context) error {
-	if m.client == nil {
-		// No client injected — wait for context cancellation (useful in tests).
+	if m.client == nil && m.clientFactory == nil {
+		// No client source configured — noop until context cancels (useful in tests).
 		m.logger.Info("ingestion_no_client_noop", "chain", m.cfg.Chain)
 		<-ctx.Done()
 		return ctx.Err()
@@ -114,12 +127,33 @@ func (m *Module) Start(ctx context.Context) error {
 			endpoint = SelectEndpoint(m.cfg.RPCEndpoints, attempt)
 		}
 
+		// Resolve client for this attempt.
+		// Factory creates a fresh client per endpoint for true failover;
+		// fixed client (WithClient) is the fallback used in tests.
+		client := m.client
+		if m.clientFactory != nil {
+			var factoryErr error
+			client, factoryErr = m.clientFactory(ctx, endpoint)
+			if factoryErr != nil {
+				m.logger.Warn("ingestion_client_create_failed",
+					"chain", m.cfg.Chain, "endpoint", endpoint, "error", factoryErr)
+				attempt++
+				delay := NextDelay(m.cfg.Backoff, attempt)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(delay):
+				}
+				continue
+			}
+		}
+
 		subCtx, cancel := context.WithCancel(ctx)
 		m.mu.Lock()
 		m.cancelFn = cancel
 		m.mu.Unlock()
 
-		err := m.runSubscribeLoop(subCtx, endpoint)
+		err := m.runSubscribeLoop(subCtx, endpoint, client)
 		cancel()
 
 		if ctx.Err() != nil {
@@ -157,7 +191,7 @@ func (m *Module) Stop(_ context.Context) error {
 }
 
 // runSubscribeLoop runs the WebSocket subscription loop for one connection attempt.
-func (m *Module) runSubscribeLoop(ctx context.Context, endpoint string) error {
+func (m *Module) runSubscribeLoop(ctx context.Context, endpoint string, client rpc.Client) error {
 	m.mu.Lock()
 	pairTokens := m.pairTokens
 	m.mu.Unlock()
@@ -173,7 +207,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, endpoint string) error {
 		PairTokens:        pairTokens,
 	}
 
-	if err := SubscribeLoop(ctx, cfg, m.client, m.emit, m.logger); err != nil {
+	if err := SubscribeLoop(ctx, cfg, client, m.emit, m.logger); err != nil {
 		return fmt.Errorf("subscribe_loop: %w", err)
 	}
 	return nil

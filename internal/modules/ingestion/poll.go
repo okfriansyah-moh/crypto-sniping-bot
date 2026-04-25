@@ -77,7 +77,12 @@ func PollLoop(
 				}
 			}
 
-			ingestedAt := time.Now().UTC().Format(time.RFC3339Nano)
+			// Derive ingestedAt from block timestamp for deterministic replay;
+			// fall back to wall clock only when the node provides no timestamp.
+			ingestedAt := l.BlockTimestamp
+			if ingestedAt == "" {
+				ingestedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			}
 			subCfg := SubscribeConfig{
 				Chain:             cfg.Chain,
 				Market:            cfg.Market,

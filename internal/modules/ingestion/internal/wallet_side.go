@@ -9,7 +9,7 @@ import (
 )
 
 // WalletSide determines which token in a pair is the sniping target ("token")
-// and which is the base ("base"). baseTokens must be normalised to lowercase.
+// and which is the base ("base"). baseTokens are normalised to lowercase internally.
 //
 // Returns (tokenAddr, baseAddr) or an error if neither side is a recognised base.
 // Iteration over baseTokens is sorted for deterministic results.

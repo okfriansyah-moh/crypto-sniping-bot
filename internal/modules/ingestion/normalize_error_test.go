@@ -198,10 +198,9 @@ func TestNormalizeSwap_Token0IsBase_ReorderAmountsCorrect(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// When token0==baseAddr, reserveBase = amount0Net, reserveToken = amount1Net
-	if dto.ReserveBaseRaw == "0" && dto.Amount0Raw == amount0In.String() {
-		// amount0Net = amount0In - amount0Out = 5e18 - 0 = 5e18
-		// so reserveBaseRaw should be non-zero
-		// This is only testing that the field is populated correctly.
+	if dto.ReserveBaseRaw != amount0In.String() {
+		t.Errorf("expected reserveBaseRaw=%s when token0 is base, got %s",
+			amount0In.String(), dto.ReserveBaseRaw)
 	}
 	if dto.EventTopic != ingestion.TopicSwap {
 		t.Errorf("expected TopicSwap, got %s", dto.EventTopic)
