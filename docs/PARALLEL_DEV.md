@@ -6,6 +6,24 @@
 
 ---
 
+## Table of Contents
+
+1. [Overview](#1-overview)
+2. [Model Routing Strategy](#2-model-routing-strategy)
+3. [Mode Definitions](#3-mode-definitions)
+4. [Mode Selection Strategy](#4-mode-selection-strategy)
+5. [Phase Grouping Rules](#5-phase-grouping-rules)
+6. [Token Cost Optimization Strategy](#6-token-cost-optimization-strategy)
+7. [Resilience Framework](#7-resilience-framework)
+8. [Status Display](#8-status-display)
+9. [Requirements](#9-requirements)
+10. [Fully Autonomous Pipeline](#10-fully-autonomous-pipeline)
+11. [Hook System](#11-hook-system)
+12. [Parallel Safety Invariants](#12-parallel-safety-invariants)
+13. [Parallel Failure Modes](#13-parallel-failure-modes)
+
+---
+
 ## 1. Overview
 
 This framework supports parallel development of pipeline phases. Most phases own isolated
@@ -235,6 +253,18 @@ Phases can run simultaneously when they own **different files**:
 ```
 
 ### Canonical Phase Groups (Crypto-Sniping-Bot)
+
+Quick reference — all 7 phases at a glance. Expand the GROUP sections below for per-subsection detail.
+
+| Phase | Name                                        | Group             | Priority | Parallel?    | Blocks / Requires                 | Key DTOs Produced                                                                                                                           |
+| ----- | ------------------------------------------- | ----------------- | -------- | ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** | Core Infrastructure                         | A — Sequential    | P0       | No           | Blocks everything                 | `EventEnvelope`, `StrategyVersion`                                                                                                          |
+| **1** | Detection & Ingestion                       | A — Sequential    | P1       | No           | Requires Phase 0                  | `MarketDataDTO`                                                                                                                             |
+| **2** | Minimal Trading Pipeline (FIRST TRADE)      | A — Sequential    | P1       | No           | Requires Phase 1                  | `DataQualityDTO`, `FeatureDTO`, `EdgeDTO`, `ValidatedEdgeDTO`, `SelectionOutput`, `AllocationDTO`, `ExecutionResultDTO`, `PositionStateDTO` |
+| **3** | Evaluation & Correctness                    | B — Parallel-safe | P1.5     | ✅ with 4, 5 | Requires Phase 2                  | `EvaluationDTO`                                                                                                                             |
+| **4** | Signal Quality                              | B — Parallel-safe | P1.5     | ✅ with 3, 5 | Requires Phase 3                  | `ProbabilityEstimateDTO`, `SlippageEstimateDTO`, `LatencyProfileDTO`                                                                        |
+| **5** | Learning Engine                             | B — Parallel-safe | P2       | ✅ with 3, 4 | Requires Phase 4                  | `LearningRecordDTO`                                                                                                                         |
+| **6** | Resource Control, Wallet Sharding & Scaling | C — Final         | P2       | No           | Requires Phase 5 + Group B merged | `SystemStateDTO`                                                                                                                            |
 
 ---
 
@@ -628,6 +658,15 @@ phase-builder (up to 5 retries)
 
 ### Stage-Specific Validation
 
+| Stage             | Agent                   | Validates                                                               | Fix Agent            | On Failure                               |
+| ----------------- | ----------------------- | ----------------------------------------------------------------------- | -------------------- | ---------------------------------------- |
+| Phase Builder     | `phase-builder`         | Module compiles; no syntax errors; imports valid                        | `refactor`           | Rollback to checkpoint                   |
+| DTO Guardian      | `dto-guardian` (STRICT) | All DTOs immutable; no missing/extra fields; no mutable defaults        | `dto-guardian`       | Rollback to checkpoint                   |
+| Integration       | `integration`           | No cross-module imports; no DB calls in modules; deterministic ordering | `refactor`           | Rollback to checkpoint                   |
+| Security Audit    | `security-auditor`      | OWASP Top 10; no secrets in code; no injection vectors                  | `refactor`           | Rollback to checkpoint                   |
+| Test Builder      | `test-builder`          | Test suite passes; no network/DB in unit tests                          | `refactor`           | Rollback to checkpoint                   |
+| Global Validation | orchestrator            | All quality gates + DTO flow + orchestrator authority                   | `refactor` (up to 5) | `remediation_failed` — operator required |
+
 #### Phase Builder
 
 - **Execute:** Copilot `phase-builder` agent implements phase
@@ -916,6 +955,15 @@ the function directly.
 
 These invariants MUST hold across all phases, all modes, and all merge combinations.
 Any violation corrupts pipeline state and cannot be recovered by retry alone.
+
+| #   | Invariant                                                                                         | Allowed                                                               | Forbidden                                                                                | Enforcement                                                                    |
+| --- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| A   | **DTO Immutability** — `contracts/` is additive-only                                              | Add new fields; add new DTO types                                     | Remove / rename fields; change field type; make immutable field mutable                  | `dto-guardian` after every `phase-builder`; violation aborts phase immediately |
+| B   | **Adapter Interface Immutability** — `database/adapter.go` does not change during parallel phases | Add a new adapter method                                              | Rename / change signature of existing method; remove a method                            | Compile error detected by `integration` agent                                  |
+| C   | **Module Isolation** — each module is a pure function                                             | Accept DTO in, return DTO out; import from `contracts/` only          | Import another module; import from `database/`; manage own state; call Telegram directly | `integration` agent cross-module import check                                  |
+| D   | **Event Contract Immutability** — event type strings are immutable once published                 | Add a new event type                                                  | Rename existing event type; change payload schema without versioning                     | `integration` agent event-type registry check                                  |
+| E   | **Lifecycle Consistency** — all state transitions use READ → VALIDATE → CAS                       | `TransitionState` with `ExpectedStateVersion`; `SKIP LOCKED` claiming | Optimistic update without CAS; two workers reading same event without SKIP LOCKED        | `quality-gates.sh` CAS pattern check                                           |
+| F   | **Event Bus Safety** — one primary consumer per event type                                        | Fan-out by publishing new events from consumer                        | Two workers both reading the same event type; consumer mutating past events              | `integration` agent consumer-group registry                                    |
 
 ### A. DTO Immutability
 
