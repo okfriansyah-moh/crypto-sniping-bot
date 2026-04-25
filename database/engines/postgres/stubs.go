@@ -162,3 +162,50 @@ func (d *DB) PinConfig(ctx context.Context, configJSON []byte) (string, error) {
 	}
 	return versionID, nil
 }
+
+// ── §11.2 Production Gap Extensions (Phase 5+) ───────────────────────────────
+
+// MarkEventExpired is a Phase 5 stub for event TTL expiry.
+func (d *DB) MarkEventExpired(_ context.Context, _ string, _ string) error {
+return database.ErrNotImplemented
+}
+
+// GetSystemState is a Phase 5 stub for the system_state singleton.
+func (d *DB) GetSystemState(_ context.Context) (*contracts.SystemStateDTO, error) {
+return nil, database.ErrNotImplemented
+}
+
+// UpsertSystemState is a Phase 5 stub for system state CAS update.
+func (d *DB) UpsertSystemState(_ context.Context, _ contracts.SystemStateDTO, _ int64) (int64, error) {
+return 0, database.ErrNotImplemented
+}
+
+// GetExposureSummary is a Phase 5 stub for aggregated capital exposure.
+func (d *DB) GetExposureSummary(_ context.Context) (*database.ExposureSummary, error) {
+return nil, database.ErrNotImplemented
+}
+
+// SetStrategyVersionStatus is a Phase 5 stub for strategy version lifecycle.
+func (d *DB) SetStrategyVersionStatus(_ context.Context, _ string, _ string, _ string) error {
+return database.ErrNotImplemented
+}
+
+// GetActiveStrategy is a Phase 5 stub returning the active StrategyVersion.
+func (d *DB) GetActiveStrategy(_ context.Context) (*database.StrategyVersion, error) {
+return nil, database.ErrNotImplemented
+}
+
+// GetShadowStrategy is a Phase 5 stub returning the shadow StrategyVersion, if any.
+func (d *DB) GetShadowStrategy(_ context.Context) (*database.StrategyVersion, error) {
+return nil, database.ErrNotImplemented
+}
+
+// ArchiveEvents is a Phase 5 stub for moving old processed events to archive.
+func (d *DB) ArchiveEvents(_ context.Context, _ time.Time, _ int) (int, error) {
+return 0, database.ErrNotImplemented
+}
+
+// GetEventsByTraceIncludeArchive is a Phase 5 stub for full-history trace queries.
+func (d *DB) GetEventsByTraceIncludeArchive(_ context.Context, _ string) ([]contracts.EventEnvelope, error) {
+return nil, database.ErrNotImplemented
+}

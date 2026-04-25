@@ -7,33 +7,45 @@ package contracts
 // Producer:    internal/modules/execution
 // Consumer:    internal/modules/position (on success)
 type ExecutionResultDTO struct {
-	EventID       string `json:"event_id"`
-	TraceID       string `json:"trace_id"`
-	CorrelationID string `json:"correlation_id"`
-	CausationID   string `json:"causation_id"`
-	VersionID     string `json:"version_id"`
+EventID       string `json:"event_id"`
+TraceID       string `json:"trace_id"`
+CorrelationID string `json:"correlation_id"`
+CausationID   string `json:"causation_id"`
+VersionID     string `json:"version_id"`
 
-	TokenLifecycleID string `json:"token_lifecycle_id"`
-	ExecutionID      string `json:"execution_id"`
-	AllocationID     string `json:"allocation_id"`
+TokenLifecycleID string `json:"token_lifecycle_id"`
+ExecutionID      string `json:"execution_id"`
+AllocationID     string `json:"allocation_id"`
 
-	Status              string `json:"status"`               // confirmed | reverted | dropped | replaced | failed
-	Success             bool   `json:"success"`
-	TxHash              string `json:"tx_hash"`              // empty if never submitted
-	BlockNumber         uint64 `json:"block_number"`
-	Attempts            int32  `json:"attempts"`
-	Replaced            bool   `json:"replaced"`
-	ReplacementCount    int32  `json:"replacement_count"`
-	MempoolRoute        string `json:"mempool_route"`        // public | private_flashbots | private_beaverbuild
-	NonceUsed           uint64 `json:"nonce_used"`
-	WalletAddress       string `json:"wallet_address"`
-	WalletShard         int32  `json:"wallet_shard"`
-	FinalGasUsed        uint64 `json:"final_gas_used"`
-	FinalMaxFeeWei      string `json:"final_max_fee_wei"`    // decimal string
-	FinalPriorityFeeWei string `json:"final_priority_fee_wei"`
-	RealizedEntryPrice  string `json:"realized_entry_price"` // decimal string
-	SlippageRealizedBps int32  `json:"slippage_realized_bps"`
-	LatencyMs           int32  `json:"latency_ms"`
-	ErrorCode           string `json:"error_code"` // enum; empty if success
-	CompletedAt         string `json:"completed_at"` // ISO 8601
+Status              string `json:"status"`               // confirmed | reverted | dropped | replaced | failed
+Success             bool   `json:"success"`
+TxHash              string `json:"tx_hash"`              // empty if never submitted
+BlockNumber         uint64 `json:"block_number"`
+Attempts            int32  `json:"attempts"`
+Replaced            bool   `json:"replaced"`
+ReplacementCount    int32  `json:"replacement_count"`
+MempoolRoute        string `json:"mempool_route"`        // public | private_flashbots | private_beaverbuild
+NonceUsed           uint64 `json:"nonce_used"`
+WalletAddress       string `json:"wallet_address"`
+WalletShard         int32  `json:"wallet_shard"`
+FinalGasUsed        uint64 `json:"final_gas_used"`
+FinalMaxFeeWei      string `json:"final_max_fee_wei"`    // decimal string
+FinalPriorityFeeWei string `json:"final_priority_fee_wei"`
+RealizedEntryPrice  string `json:"realized_entry_price"` // decimal string
+SlippageRealizedBps int32  `json:"slippage_realized_bps"`
+LatencyMs           int32  `json:"latency_ms"`
+ErrorCode           string `json:"error_code"` // enum; empty if success
+
+// §8.2 additive: MEV protection and execution path fields.
+// ExecutionPath ∈ {"public","flashbots","beaverbuild","eden"}.
+// Simulated=true marks paper-trade records.
+MEVProtected     bool   `json:"mev_protected"`      // true if routed via private relay
+ExecutionPath    string `json:"execution_path"`     // "public" | "flashbots" | "beaverbuild" | "eden"
+SlippageGuardBps int32  `json:"slippage_guard_bps"` // amountOutMin guard used
+RejectionReason  string `json:"rejection_reason"`   // populated when Status="rejected" pre-submission
+Simulated        bool   `json:"simulated"`          // true when execution_mode=shadow
+
+ExpiresAt   string `json:"expires_at"`   // ISO 8601 UTC; "" = no expiry
+Priority    int32  `json:"priority"`     // higher = processed first; default 0
+CompletedAt string `json:"completed_at"` // ISO 8601
 }

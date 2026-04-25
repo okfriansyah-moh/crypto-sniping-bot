@@ -256,6 +256,43 @@ func (m *memAdapter) GetPosition(_ context.Context, _ string) (*contracts.Positi
 	return nil, database.ErrNotImplemented
 }
 
+
+func (m *memAdapter) MarkEventExpired(_ context.Context, _ string, _ string) error {
+return database.ErrNotImplemented
+}
+
+func (m *memAdapter) GetSystemState(_ context.Context) (*contracts.SystemStateDTO, error) {
+return nil, database.ErrNotImplemented
+}
+
+func (m *memAdapter) UpsertSystemState(_ context.Context, _ contracts.SystemStateDTO, _ int64) (int64, error) {
+return 0, database.ErrNotImplemented
+}
+
+func (m *memAdapter) GetExposureSummary(_ context.Context) (*database.ExposureSummary, error) {
+return nil, database.ErrNotImplemented
+}
+
+func (m *memAdapter) SetStrategyVersionStatus(_ context.Context, _, _, _ string) error {
+return database.ErrNotImplemented
+}
+
+func (m *memAdapter) GetActiveStrategy(_ context.Context) (*database.StrategyVersion, error) {
+return nil, database.ErrNotImplemented
+}
+
+func (m *memAdapter) GetShadowStrategy(_ context.Context) (*database.StrategyVersion, error) {
+return nil, database.ErrNotImplemented
+}
+
+func (m *memAdapter) ArchiveEvents(_ context.Context, _ time.Time, _ int) (int, error) {
+return 0, database.ErrNotImplemented
+}
+
+func (m *memAdapter) GetEventsByTraceIncludeArchive(_ context.Context, _ string) ([]contracts.EventEnvelope, error) {
+return nil, database.ErrNotImplemented
+}
+
 func containsType(types []string, t string) bool {
 	for _, v := range types {
 		if v == t {

@@ -1,9 +1,10 @@
 package database
 
 import (
-	"context"
+"context"
+"time"
 
-	"crypto-sniping-bot/contracts"
+"crypto-sniping-bot/contracts"
 )
 
 // Adapter is the single entry point for all database operations.
@@ -13,160 +14,203 @@ import (
 //
 // See docs/db_adapter_spec.md § 2 for the full specification.
 type Adapter interface {
-	// ── Lifecycle ────────────────────────────────────────────────────────────
+// ── Lifecycle ────────────────────────────────────────────────────────────
 
-	// Initialize establishes the database connection pool.
-	Initialize(ctx context.Context, cfg Config) error
+// Initialize establishes the database connection pool.
+Initialize(ctx context.Context, cfg Config) error
 
-	// RunMigrations applies all pending SQL migration files in order.
-	// Tracks applied migrations in the _migrations table.
-	// Idempotent: safe to call on every startup.
-	RunMigrations(ctx context.Context) error
+// RunMigrations applies all pending SQL migration files in order.
+// Tracks applied migrations in the _migrations table.
+// Idempotent: safe to call on every startup.
+RunMigrations(ctx context.Context) error
 
-	// Close releases the connection pool.
-	Close(ctx context.Context) error
+// Close releases the connection pool.
+Close(ctx context.Context) error
 
-	// ── Event Bus (append-only) ──────────────────────────────────────────────
+// ── Event Bus (append-only) ──────────────────────────────────────────────
 
-	// InsertEvent appends a DTO transition to the event bus.
-	// Idempotent: ON CONFLICT (event_id) DO NOTHING.
-	// Validates trace_id, correlation_id, causation_id (except Layer 0), version_id.
-	// Returns ErrMissingTraceField if required trace fields are absent.
-	// Returns ErrOrphanEvent if causation_id references a non-existent event.
-	InsertEvent(ctx context.Context, evt Event) error
+// InsertEvent appends a DTO transition to the event bus.
+// Idempotent: ON CONFLICT (event_id) DO NOTHING.
+// Validates trace_id, correlation_id, causation_id (except Layer 0), version_id.
+// Returns ErrMissingTraceField if required trace fields are absent.
+// Returns ErrOrphanEvent if causation_id references a non-existent event.
+InsertEvent(ctx context.Context, evt Event) error
 
-	// ClaimNextEvent atomically claims the next unprocessed event for a worker
-	// group using SELECT ... FOR UPDATE SKIP LOCKED. Returns nil if queue is empty.
-	ClaimNextEvent(ctx context.Context, group string, eventTypes []string) (*Event, error)
+// ClaimNextEvent atomically claims the next unprocessed event for a worker
+// group using SELECT ... FOR UPDATE SKIP LOCKED. Returns nil if queue is empty.
+// Ordering: priority DESC, created_at ASC. Excludes rows where expires_at < NOW().
+ClaimNextEvent(ctx context.Context, group string, eventTypes []string) (*Event, error)
 
-	// MarkEventProcessed marks an event as handled. Call only after successful
-	// stage execution and any resulting event writes.
-	MarkEventProcessed(ctx context.Context, eventID string) error
+// MarkEventProcessed marks an event as handled. Call only after successful
+// stage execution and any resulting event writes.
+MarkEventProcessed(ctx context.Context, eventID string) error
 
-	// GetEventByID fetches a specific event by its ID (used for trace traversal).
-	GetEventByID(ctx context.Context, eventID string) (*Event, error)
+// MarkEventExpired marks an event as expired without processing.
+// Emits an expired_event in the same transaction.
+MarkEventExpired(ctx context.Context, eventID string, reason string) error
 
-	// ── Ingestion (Layer 0) ──────────────────────────────────────────────────
+// GetEventByID fetches a specific event by its ID (used for trace traversal).
+GetEventByID(ctx context.Context, eventID string) (*Event, error)
 
-	// UpsertIngestionWatermark records the last processed block per chain.
-	UpsertIngestionWatermark(ctx context.Context, chain string, blockNumber uint64) error
+// ── Ingestion (Layer 0) ──────────────────────────────────────────────────
 
-	// GetIngestionWatermark returns the last processed block for a chain.
-	GetIngestionWatermark(ctx context.Context, chain string) (uint64, error)
+// UpsertIngestionWatermark records the last processed block per chain.
+UpsertIngestionWatermark(ctx context.Context, chain string, blockNumber uint64) error
 
-	// InsertMarketData persists a MarketDataDTO.
-	InsertMarketData(ctx context.Context, dto contracts.MarketDataDTO) error
+// GetIngestionWatermark returns the last processed block for a chain.
+GetIngestionWatermark(ctx context.Context, chain string) (uint64, error)
 
-	// GetMarketData retrieves a MarketDataDTO by event ID.
-	GetMarketData(ctx context.Context, eventID string) (*contracts.MarketDataDTO, error)
+// InsertMarketData persists a MarketDataDTO.
+InsertMarketData(ctx context.Context, dto contracts.MarketDataDTO) error
 
-	// ── Token Lifecycle State Machine ────────────────────────────────────────
+// GetMarketData retrieves a MarketDataDTO by event ID.
+GetMarketData(ctx context.Context, eventID string) (*contracts.MarketDataDTO, error)
 
-	// StartLifecycle creates a new lifecycle entry at state DETECTED.
-	StartLifecycle(ctx context.Context, dto contracts.MarketDataDTO) (lifecycleID string, err error)
+// ── Token Lifecycle State Machine ────────────────────────────────────────
 
-	// TransitionState applies a forward-only CAS transition.
-	// Returns ErrInvalidTransition if the CAS guard (state_version or current_state) fails.
-	TransitionState(ctx context.Context, req TransitionRequest) error
+// StartLifecycle creates a new lifecycle entry at state DETECTED.
+StartLifecycle(ctx context.Context, dto contracts.MarketDataDTO) (lifecycleID string, err error)
 
-	// GetLifecycle fetches a lifecycle by ID.
-	GetLifecycle(ctx context.Context, lifecycleID string) (*Lifecycle, error)
+// TransitionState applies a forward-only CAS transition.
+// Returns ErrInvalidTransition if the CAS guard (state_version or current_state) fails.
+TransitionState(ctx context.Context, req TransitionRequest) error
 
-	// GetLifecycleByToken fetches the active lifecycle for a token address.
-	GetLifecycleByToken(ctx context.Context, tokenAddress string) (*Lifecycle, error)
+// GetLifecycle fetches a lifecycle by ID.
+GetLifecycle(ctx context.Context, lifecycleID string) (*Lifecycle, error)
 
-	// QuarantineToken marks a token as quarantined and transitions its lifecycle to REJECTED.
-	QuarantineToken(ctx context.Context, tokenAddress string, reason string) error
+// GetLifecycleByToken fetches the active lifecycle for a token address.
+GetLifecycleByToken(ctx context.Context, tokenAddress string) (*Lifecycle, error)
 
-	// InsertStateViolation records a CAS conflict violation for audit purposes.
-	InsertStateViolation(ctx context.Context, lifecycleID, fromState, toState, reason string) error
+// QuarantineToken marks a token as quarantined and transitions its lifecycle to REJECTED.
+QuarantineToken(ctx context.Context, tokenAddress string, reason string) error
 
-	// ── DTO Persistence (one method per DTO type) ────────────────────────────
+// InsertStateViolation records a CAS conflict violation for audit purposes.
+InsertStateViolation(ctx context.Context, lifecycleID, fromState, toState, reason string) error
 
-	// InsertDataQuality persists a DataQualityDTO.
-	InsertDataQuality(ctx context.Context, dto contracts.DataQualityDTO) error
+// ── DTO Persistence (one method per DTO type) ────────────────────────────
 
-	// InsertFeature persists a FeatureDTO.
-	InsertFeature(ctx context.Context, dto contracts.FeatureDTO) error
+// InsertDataQuality persists a DataQualityDTO.
+InsertDataQuality(ctx context.Context, dto contracts.DataQualityDTO) error
 
-	// InsertEdge persists an EdgeDTO.
-	InsertEdge(ctx context.Context, dto contracts.EdgeDTO) error
+// InsertFeature persists a FeatureDTO.
+InsertFeature(ctx context.Context, dto contracts.FeatureDTO) error
 
-	// InsertValidatedEdge persists a ValidatedEdgeDTO.
-	InsertValidatedEdge(ctx context.Context, dto contracts.ValidatedEdgeDTO) error
+// InsertEdge persists an EdgeDTO.
+InsertEdge(ctx context.Context, dto contracts.EdgeDTO) error
 
-	// InsertSelection persists a SelectionOutputDTO.
-	InsertSelection(ctx context.Context, dto contracts.SelectionOutputDTO) error
+// InsertValidatedEdge persists a ValidatedEdgeDTO.
+InsertValidatedEdge(ctx context.Context, dto contracts.ValidatedEdgeDTO) error
 
-	// InsertAllocation persists an AllocationDTO.
-	InsertAllocation(ctx context.Context, dto contracts.AllocationDTO) error
+// InsertSelection persists a SelectionOutputDTO.
+InsertSelection(ctx context.Context, dto contracts.SelectionOutputDTO) error
 
-	// InsertExecutionResult persists an ExecutionResultDTO.
-	InsertExecutionResult(ctx context.Context, dto contracts.ExecutionResultDTO) error
+// InsertAllocation persists an AllocationDTO.
+InsertAllocation(ctx context.Context, dto contracts.AllocationDTO) error
 
-	// InsertPositionState persists a PositionStateDTO.
-	InsertPositionState(ctx context.Context, dto contracts.PositionStateDTO) error
+// InsertExecutionResult persists an ExecutionResultDTO.
+InsertExecutionResult(ctx context.Context, dto contracts.ExecutionResultDTO) error
 
-	// InsertEvaluation persists an EvaluationDTO.
-	InsertEvaluation(ctx context.Context, dto contracts.EvaluationDTO) error
+// InsertPositionState persists a PositionStateDTO.
+InsertPositionState(ctx context.Context, dto contracts.PositionStateDTO) error
 
-	// InsertLearningRecord persists a LearningRecordDTO.
-	InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
+// InsertEvaluation persists an EvaluationDTO.
+InsertEvaluation(ctx context.Context, dto contracts.EvaluationDTO) error
 
-	// ── Execution: Nonce Manager ─────────────────────────────────────────────
+// InsertLearningRecord persists a LearningRecordDTO.
+InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
 
-	// AllocateNonce atomically reserves the next nonce for a wallet.
-	AllocateNonce(ctx context.Context, walletAddress string, chain string) (nonce uint64, err error)
+// ── Execution: Nonce Manager ─────────────────────────────────────────────
 
-	// ReconcileNonce updates local state from the on-chain nonce value.
-	ReconcileNonce(ctx context.Context, walletAddress string, chain string, onchainNonce uint64) error
+// AllocateNonce atomically reserves the next nonce for a wallet.
+AllocateNonce(ctx context.Context, walletAddress string, chain string) (nonce uint64, err error)
 
-	// ── Positions ────────────────────────────────────────────────────────────
+// ReconcileNonce updates local state from the on-chain nonce value.
+ReconcileNonce(ctx context.Context, walletAddress string, chain string, onchainNonce uint64) error
 
-	// GetOpenPositions returns all currently open positions.
-	GetOpenPositions(ctx context.Context) ([]contracts.PositionStateDTO, error)
+// ── Positions ────────────────────────────────────────────────────────────
 
-	// GetPosition fetches a single position by ID.
-	GetPosition(ctx context.Context, positionID string) (*contracts.PositionStateDTO, error)
+// GetOpenPositions returns all currently open positions.
+GetOpenPositions(ctx context.Context) ([]contracts.PositionStateDTO, error)
 
-	// ── Strategy Versions ────────────────────────────────────────────────────
+// GetPosition fetches a single position by ID.
+GetPosition(ctx context.Context, positionID string) (*contracts.PositionStateDTO, error)
 
-	// CreateStrategyVersion persists an immutable strategy version snapshot.
-	// Idempotent: ON CONFLICT DO NOTHING.
-	CreateStrategyVersion(ctx context.Context, sv StrategyVersion) error
+// ── Strategy Versions ────────────────────────────────────────────────────
 
-	// GetActiveStrategyVersion returns the currently active strategy version.
-	GetActiveStrategyVersion(ctx context.Context) (*StrategyVersion, error)
+// CreateStrategyVersion persists an immutable strategy version snapshot.
+// Idempotent: ON CONFLICT DO NOTHING.
+CreateStrategyVersion(ctx context.Context, sv StrategyVersion) error
 
-	// GetStrategyVersion fetches a strategy version by ID.
-	// Returns ErrUnknownVersion if not found.
-	GetStrategyVersion(ctx context.Context, versionID string) (*StrategyVersion, error)
+// GetActiveStrategyVersion returns the currently active strategy version.
+GetActiveStrategyVersion(ctx context.Context) (*StrategyVersion, error)
 
-	// ── Trace Queries ────────────────────────────────────────────────────────
+// GetStrategyVersion fetches a strategy version by ID.
+// Returns ErrUnknownVersion if not found.
+GetStrategyVersion(ctx context.Context, versionID string) (*StrategyVersion, error)
 
-	// GetEventsByTrace returns all events sharing a trace ID, ordered by created_at.
-	GetEventsByTrace(ctx context.Context, traceID string) ([]Event, error)
+// SetStrategyVersionStatus transitions a strategy version through its lifecycle.
+// Legal transitions: draft→shadow|deactivated, shadow→active|deactivated,
+// active→rolled_back|deactivated. Promotion to active atomically demotes the
+// existing active version to deactivated.
+// Returns ErrIllegalTransition if the transition is not permitted.
+SetStrategyVersionStatus(ctx context.Context, versionID string, newStatus string, reason string) error
 
-	// GetEventsByCorrelation returns all events sharing a correlation ID.
-	GetEventsByCorrelation(ctx context.Context, correlationID string) ([]Event, error)
+// GetActiveStrategy returns the version with status="active".
+GetActiveStrategy(ctx context.Context) (*StrategyVersion, error)
 
-	// GetFailureChain reconstructs the causal chain leading to a failed event.
-	GetFailureChain(ctx context.Context, failedEventID string) ([]Event, error)
+// GetShadowStrategy returns the version with status="shadow", or nil if none.
+GetShadowStrategy(ctx context.Context) (*StrategyVersion, error)
 
-	// ── Pipeline Runs ────────────────────────────────────────────────────────
+// ── System State ─────────────────────────────────────────────────────────
 
-	// CreateRun creates a new pipeline run record.
-	// Idempotent: ON CONFLICT DO NOTHING.
-	CreateRun(ctx context.Context, run PipelineRun) error
+// GetSystemState returns the singleton system state row.
+GetSystemState(ctx context.Context) (*contracts.SystemStateDTO, error)
 
-	// UpdateRunStage checkpoints the last completed stage for a run.
-	UpdateRunStage(ctx context.Context, runID string, stage string) error
+// UpsertSystemState updates the system state using CAS on state_version.
+// Returns ErrStaleState if expectedVersion does not match the current state_version.
+UpsertSystemState(ctx context.Context, state contracts.SystemStateDTO, expectedVersion int64) (newVersion int64, err error)
 
-	// UpdateRunStatus sets the terminal status (completed, failed, partial).
-	UpdateRunStatus(ctx context.Context, runID string, status string) error
+// ── Exposure Summary ─────────────────────────────────────────────────────
 
-	// GetRun fetches a pipeline run by ID.
-	GetRun(ctx context.Context, runID string) (*PipelineRun, error)
+// GetExposureSummary returns aggregated capital exposure in O(1) via maintained aggregates.
+GetExposureSummary(ctx context.Context) (*ExposureSummary, error)
+
+// ── Trace Queries ────────────────────────────────────────────────────────
+
+// GetEventsByTrace returns all events sharing a trace ID, ordered by created_at.
+GetEventsByTrace(ctx context.Context, traceID string) ([]Event, error)
+
+// GetEventsByCorrelation returns all events sharing a correlation ID.
+GetEventsByCorrelation(ctx context.Context, correlationID string) ([]Event, error)
+
+// GetFailureChain reconstructs the causal chain leading to a failed event.
+GetFailureChain(ctx context.Context, failedEventID string) ([]Event, error)
+
+// GetEventsByTraceIncludeArchive returns events from both events and events_archive.
+// Used by replay and audit tools.
+GetEventsByTraceIncludeArchive(ctx context.Context, traceID string) ([]contracts.EventEnvelope, error)
+
+// ── Archival ─────────────────────────────────────────────────────────────
+
+// ArchiveEvents moves processed events older than olderThan to events_archive.
+// Runs in single transaction per batch; idempotent.
+// Never archives events linked to open positions.
+ArchiveEvents(ctx context.Context, olderThan time.Time, batchSize int) (archivedCount int, err error)
+
+// ── Pipeline Runs ────────────────────────────────────────────────────────
+
+// CreateRun creates a new pipeline run record.
+// Idempotent: ON CONFLICT DO NOTHING.
+CreateRun(ctx context.Context, run PipelineRun) error
+
+// UpdateRunStage checkpoints the last completed stage for a run.
+UpdateRunStage(ctx context.Context, runID string, stage string) error
+
+// UpdateRunStatus sets the terminal status (completed, failed, partial).
+UpdateRunStatus(ctx context.Context, runID string, status string) error
+
+// GetRun fetches a pipeline run by ID.
+GetRun(ctx context.Context, runID string) (*PipelineRun, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────
@@ -174,74 +218,92 @@ type Adapter interface {
 // Config holds database connection parameters.
 // Values are loaded from config/pipeline.yaml via the config package.
 type Config struct {
-	Engine              string // postgres
-	Host                string
-	Port                int
-	Database            string
-	User                string
-	Password            string
-	SSLMode             string // disable | require | verify-ca | verify-full
-	MaxOpenConns        int
-	MaxIdleConns        int
-	ConnMaxLifetimeSecs int
-	MigrationsDir       string // absolute path to database/migrations/
+Engine              string // postgres
+Host                string
+Port                int
+Database            string
+User                string
+Password            string
+SSLMode             string // disable | require | verify-ca | verify-full
+MaxOpenConns        int
+MaxIdleConns        int
+ConnMaxLifetimeSecs int
+MigrationsDir       string // absolute path to database/migrations/
 }
 
 // Event is the event bus row representation.
 // See docs/db_adapter_spec.md § 2.
 type Event struct {
-	EventID       string  // SHA256(payload_signature)[:16]
-	EventType     string  // e.g., "market_data_event"
-	Payload       []byte  // canonical JSON of the DTO
-	TraceID       string
-	CorrelationID string
-	CausationID   *string // nil only for Layer 0 root events
-	VersionID     string
-	CreatedAt     string // ISO 8601
-	Processed     bool
+EventID       string  // SHA256(payload_signature)[:16]
+EventType     string  // e.g., "market_data_event"
+Payload       []byte  // canonical JSON of the DTO
+TraceID       string
+CorrelationID string
+CausationID   *string // nil only for Layer 0 root events
+VersionID     string
+CreatedAt     string // ISO 8601
+Processed     bool
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
 // See docs/implementation_roadmap.md § 0.7.
 type TransitionRequest struct {
-	LifecycleID       string
-	ExpectedFromState string // current_state value at time of read
-	ExpectedVersion   int64  // state_version value at time of read (CAS guard)
-	NewState          string // target state (must be a valid forward transition)
-	TraceID           string
-	CorrelationID     string
-	Reason            string
-	ActorWorker       string
+LifecycleID       string
+ExpectedFromState string // current_state value at time of read
+ExpectedVersion   int64  // state_version value at time of read (CAS guard)
+NewState          string // target state (must be a valid forward transition)
+TraceID           string
+CorrelationID     string
+Reason            string
+ActorWorker       string // worker group name stored in audit row
 }
 
 // Lifecycle is the current state of a token's journey through the pipeline.
 type Lifecycle struct {
-	TokenLifecycleID string
-	TokenAddress     string
-	CurrentState     string
-	StateVersion     int64
-	TerminalReason   *string
-	CreatedAt        string
-	UpdatedAt        string
+TokenLifecycleID string
+TokenAddress     string
+CurrentState     string
+StateVersion     int64
+TerminalReason   *string
+CreatedAt        string
+UpdatedAt        string
 }
 
 // StrategyVersion is an immutable snapshot of all tunable configuration.
 // StrategyVersionID = SHA256(config_snapshot)[:16].
 type StrategyVersion struct {
-	StrategyVersionID string
-	ConfigSnapshot    []byte  // canonical JSON of all config parameters
-	CreatedAt         string  // ISO 8601
-	ActivatedAt       *string // ISO 8601; nil if not yet activated
-	DeactivatedAt     *string // ISO 8601; nil if still active
+StrategyVersionID string
+ConfigSnapshot    []byte  // canonical JSON of all config parameters
+CreatedAt         string  // ISO 8601
+ActivatedAt       *string // ISO 8601; nil if not yet activated
+DeactivatedAt     *string // ISO 8601; nil if still active
+
+// §8.7 additive: shadow/rollback lifecycle fields.
+// Status ∈ {"draft","shadow","active","deactivated","rolled_back"}.
+// Exactly one version has Status="active" at any time (partial unique index).
+Status          string  // "draft" | "shadow" | "active" | "deactivated" | "rolled_back"
+ShadowStartedAt *string // ISO 8601; nil if never in shadow
+PromotedAt      *string // ISO 8601; nil if never promoted to active
+RolledBackAt    *string // ISO 8601; nil if never rolled back
+ParentVersionID string  // previous active version ID for rollback target; "" if none
 }
 
 // PipelineRun tracks a per-market pipeline execution.
 type PipelineRun struct {
-	RunID              string
-	TraceID            string
-	Status             string  // started | processing | completed | partial | failed
-	LastCompletedStage *string // nil if no stage has completed yet
-	StrategyVersionID  string
-	CreatedAt          string // ISO 8601
-	UpdatedAt          string // ISO 8601
+RunID              string
+TraceID            string
+Status             string  // started | processing | completed | partial | failed
+LastCompletedStage *string // nil if no stage has completed yet
+StrategyVersionID  string
+CreatedAt          string // ISO 8601
+UpdatedAt          string // ISO 8601
+}
+
+// ExposureSummary is the aggregated capital exposure snapshot.
+// Returned by GetExposureSummary; computed via maintained aggregates (O(1)).
+type ExposureSummary struct {
+TotalUsd      float64            // total USD value of open positions
+PerToken      map[string]float64 // tokenAddress → usd
+PerCohort     map[string]float64 // cohortID     → usd
+OpenPositions int32
 }
