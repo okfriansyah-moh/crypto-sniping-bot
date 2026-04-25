@@ -113,10 +113,10 @@ REMEDIATION_AGENT="refactor"
 MAX_RETRIES_SECURITY="${MAX_RETRIES_SECURITY:-3}"
 MAX_RETRIES_TESTS="${MAX_RETRIES_TESTS:-3}"
 
-# All 41 skills — injected into every Copilot call so agents always have full knowledge access
-# Core (28): framework patterns, quality, standards, testing, tooling
-# Domain (13): sniper pipeline layers 0-10, safety, observability
-CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk, dex-scanning, event-bus, rpc-management, token-lifecycle, data-quality-engine, anti-manipulation, edge-detection, momentum-detector, signal-normalizer, feature-stability-checker, liquidity-event-detector, probability-modeling, overfit-detector, replay-engine-pattern, capital-sizing, execution-engine, execution-quality-analyzer, drawdown-protection, exposure-monitor, position-management, monitoring-loop-engine, learning-engine, loss-pattern-analyzer, strategy-decay-detector, strategy-auto-disable, strategy-versioning, observability, operational-modes, telegram-dispatcher, traceability, profit-first"
+# All 60 skills — injected into every Copilot call so agents always have full knowledge access
+# Core (29): framework patterns, quality, standards, testing, tooling, docs
+# Domain (31): sniper pipeline layers 0-10, safety, observability
+CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk, parallel-dev-docs, dex-scanning, event-bus, rpc-management, token-lifecycle, data-quality-engine, anti-manipulation, edge-detection, momentum-detector, signal-normalizer, feature-stability-checker, liquidity-event-detector, probability-modeling, overfit-detector, replay-engine-pattern, capital-sizing, execution-engine, execution-quality-analyzer, drawdown-protection, exposure-monitor, position-management, monitoring-loop-engine, learning-engine, loss-pattern-analyzer, strategy-decay-detector, strategy-auto-disable, strategy-versioning, observability, operational-modes, telegram-dispatcher, traceability, profit-first"
 
 # Workspace confinement rule — injected into every agent prompt
 # Prevents agents from writing to /tmp or paths outside the project (Permission denied errors)
@@ -396,6 +396,81 @@ entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 tmp = path + ".tmp"
 with open(tmp, "w") as f: json.dump(data, f, indent=2)
 os.replace(tmp, path)
+PYEOF
+}
+
+update_progress_report() {
+    # update_progress_report PHASE_LABEL STATUS [KEY VALUE ...]
+    # Updates docs/PROGRESS_REPORT.md in place. Called by the shell orchestrator only.
+    # Does NOT git commit — leaves the file as a working-tree change.
+    # Keys: notes "text", session_mode "mode-2"
+    local _pr_phase_label="$1" _pr_status="$2"
+    shift 2
+    local _report_path="${PROJECT_ROOT}/docs/PROGRESS_REPORT.md"
+    [[ -f "${_report_path}" ]] || return 0
+    python3 - "${_report_path}" "${_pr_phase_label}" "${_pr_status}" "$@" <<'PYEOF'
+import sys, re
+from datetime import datetime, timezone
+
+report_path, phase_label, status = sys.argv[1], sys.argv[2], sys.argv[3]
+args = sys.argv[4:]
+extras = dict(zip(args[::2], args[1::2]))
+notes        = extras.get("notes", "")
+session_mode = extras.get("session_mode", "")
+
+# Extract phase numbers from label: "group-0"→[0], "phase-1"→[1], "group-0-1"→[0,1]
+phase_nums = []
+m = re.match(r'^(?:group|phase)-(\d+(?:-\d+)*)$', phase_label)
+if m:
+    phase_nums = [int(x) for x in m.group(1).split('-')]
+
+now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+with open(report_path) as f:
+    content = f.read()
+
+# -- Update Phase Progress rows -------------------------------------------------
+for pn in phase_nums:
+    def _upd(m_row, _pn=pn):
+        cols = m_row.group(0).split('|')
+        if len(cols) >= 6:
+            cols[3] = f' {status:<11} '
+            if notes:
+                cols[5] = f' {notes} '
+        return '|'.join(cols)
+    content = re.sub(
+        rf'^\|\s*{re.escape(str(pn))}\s*\|[^|]+\|[^|]+\|[^|]+\|[^|]*\|',
+        _upd, content, flags=re.MULTILINE)
+
+# -- Update Last Updated in Summary --------------------------------------------
+content = re.sub(
+    r'(\|\s*\*\*Last Updated\*\*\s*\|)[^|]*(\|)',
+    rf'\g<1> {now_date} \2', content)
+
+# -- Update Completed / Not Started counts -------------------------------------
+if status == 'completed':
+    def _inc(m_c):
+        try:    n = int(m_c.group(1).strip()) + 1
+        except: n = 1
+        return f'| **Completed**    | {n:<10} |'
+    content = re.sub(r'\|\s*\*\*Completed\*\*\s*\|\s*(\S+)\s*\|', _inc, content)
+
+    def _dec(m_ns):
+        try:    n = max(0, int(m_ns.group(1).strip()) - 1)
+        except: return m_ns.group(0)
+        return f'| **Not Started**  | {n:<10} |'
+    content = re.sub(r'\|\s*\*\*Not Started\*\*\s*\|\s*(\d+)\s*\|', _dec, content)
+
+# -- Append session history row -------------------------------------------------
+if session_mode:
+    phases_str = ', '.join(str(p) for p in phase_nums) if phase_nums else phase_label
+    new_row = f'| {now_date} | {session_mode:<17} | {phases_str:<6} | —            | —           | {status:<9} |'
+    # Append after the last data row of the Session History table
+    # The table is the last table in the file; append before EOF
+    content = content.rstrip('\n') + '\n' + new_row + '\n'
+
+with open(report_path, 'w') as f:
+    f.write(content)
 PYEOF
 }
 
@@ -884,9 +959,10 @@ validate_protected_files() {
         fi
     fi
 
-    # docs/ — read-only
+    # docs/ — read-only (PROGRESS_REPORT.md is the sole exception — updated by the orchestrator)
     local doc_changes
-    doc_changes=$(git diff --name-only "${base_branch}" -- docs/ 2>/dev/null || true)
+    doc_changes=$(git diff --name-only "${base_branch}" -- docs/ 2>/dev/null \
+        | grep -v '^docs/PROGRESS_REPORT\.md$' || true)
     if [[ -n "${doc_changes}" ]]; then
         log_error "[protected-files] docs/ modified (read-only policy):"
         echo "${doc_changes}" | while read -r f; do log_error "  ${f}"; done
@@ -916,6 +992,7 @@ run_agent_pipeline() {
     if ! retry_stage "phase-builder" "${MAX_RETRIES_PHASE_BUILDER}" \
             "${phase_label}" "${model}" "${work_dir}" \
             phase_builder_execute phase_builder_validate phase_builder_fix; then
+        update_progress_report "${phase_label}" "failed" notes "phase-builder exceeded ${MAX_RETRIES_PHASE_BUILDER} retries"
         rollback_to_checkpoint "${phase_label}" "phase-builder exceeded ${MAX_RETRIES_PHASE_BUILDER} retries" "${work_dir}"
         return 1
     fi
@@ -924,6 +1001,7 @@ run_agent_pipeline() {
     if ! retry_stage "dto-guardian" "${MAX_RETRIES_DTO}" \
             "${phase_label}" "${model}" "${work_dir}" \
             dto_guardian_execute dto_guardian_validate dto_guardian_fix; then
+        update_progress_report "${phase_label}" "failed" notes "dto-guardian exceeded ${MAX_RETRIES_DTO} retries"
         rollback_to_checkpoint "${phase_label}" "dto-guardian exceeded ${MAX_RETRIES_DTO} retries" "${work_dir}"
         return 1
     fi
@@ -932,6 +1010,7 @@ run_agent_pipeline() {
     if ! retry_stage "integration" "${MAX_RETRIES_INTEGRATION}" \
             "${phase_label}" "${model}" "${work_dir}" \
             integration_execute integration_validate integration_fix; then
+        update_progress_report "${phase_label}" "failed" notes "integration exceeded ${MAX_RETRIES_INTEGRATION} retries"
         rollback_to_checkpoint "${phase_label}" "integration exceeded ${MAX_RETRIES_INTEGRATION} retries" "${work_dir}"
         return 1
     fi
@@ -940,6 +1019,7 @@ run_agent_pipeline() {
     if ! retry_stage "security-auditor" "${MAX_RETRIES_SECURITY}" \
             "${phase_label}" "${model}" "${work_dir}" \
             security_auditor_execute security_auditor_validate security_auditor_fix; then
+        update_progress_report "${phase_label}" "failed" notes "security-auditor exceeded ${MAX_RETRIES_SECURITY} retries"
         rollback_to_checkpoint "${phase_label}" "security-auditor exceeded ${MAX_RETRIES_SECURITY} retries" "${work_dir}"
         return 1
     fi
@@ -948,6 +1028,7 @@ run_agent_pipeline() {
     if ! retry_stage "test-builder" "${MAX_RETRIES_TESTS}" \
             "${phase_label}" "${model}" "${work_dir}" \
             test_builder_execute test_builder_validate test_builder_fix; then
+        update_progress_report "${phase_label}" "failed" notes "test-builder exceeded ${MAX_RETRIES_TESTS} retries"
         rollback_to_checkpoint "${phase_label}" "test-builder exceeded ${MAX_RETRIES_TESTS} retries" "${work_dir}"
         return 1
     fi
@@ -955,6 +1036,7 @@ run_agent_pipeline() {
     # Step 6: protected file enforcement
     if ! validate_protected_files "${work_dir}" "${phase_label}"; then
         log_error "Protected file policy violated — rollback"
+        update_progress_report "${phase_label}" "failed" notes "protected file policy violation"
         rollback_to_checkpoint "${phase_label}" "protected file policy violation" "${work_dir}"
         return 1
     fi
@@ -985,6 +1067,7 @@ run_agent_pipeline() {
 
             if (( qg_attempt >= MAX_REMEDIATION_RETRIES )); then
                 log_error "[quality-gates] failed after ${MAX_REMEDIATION_RETRIES} remediation attempts → rollback"
+                update_progress_report "${phase_label}" "failed" notes "quality gates failed after ${MAX_REMEDIATION_RETRIES} remediations"
                 rollback_to_checkpoint "${phase_label}" "quality gates exceeded ${MAX_REMEDIATION_RETRIES} remediations" "${work_dir}"
                 return 1
             fi
@@ -992,6 +1075,7 @@ run_agent_pipeline() {
     fi
 
     cleanup_checkpoint "${phase_label}" "${work_dir}"
+    update_progress_report "${phase_label}" "completed" notes "All pipeline agents passed"
     log_success "Agent pipeline completed for ${phase_label}"
     unset _CURRENT_SKILL_PROMPT
     return 0
@@ -1936,6 +2020,16 @@ create_pr() {
         log_warn "PR creation failed — branch is pushed. Create PR manually:"
         log_info "  gh pr create --title '${pr_title}' --base main --head ${pr_branch}"
     fi
+
+    # Record completed session in PROGRESS_REPORT.md
+    local _mode_val
+    _mode_val=$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['mode'])" 2>/dev/null || echo "0")
+    local _session_label="mode-${_mode_val}"
+    # Derive a phase_label suitable for update_progress_report
+    # phases_str is space-separated ("0 1 2") or single digit — map to group label
+    local _group_key
+    _group_key=$(echo "${phases_str}" | tr ' ' '-')
+    update_progress_report "group-${_group_key}" "completed" session_mode "${_session_label}"
     return 0
 }
 

@@ -1,32 +1,34 @@
 # Progress Report
 
 > Track implementation progress, failures, and retry counts across all phases.
-> Update this document after each development session.
+> Updated automatically by `run_parallel.sh` after each pipeline run and manually after manual sessions.
 
 ---
 
 ## Summary
 
-| Metric           | Value |
-| ---------------- | ----- |
-| **Total Phases** | —     |
-| **Completed**    | 0     |
-| **In Progress**  | 0     |
-| **Failed**       | 0     |
-| **Not Started**  | —     |
-| **Last Updated** | —     |
+| Metric           | Value      |
+| ---------------- | ---------- |
+| **Total Phases** | 7          |
+| **Completed**    | 1          |
+| **In Progress**  | 0          |
+| **Failed**       | 0          |
+| **Not Started**  | 6          |
+| **Last Updated** | 2026-04-25 |
 
 ---
 
 ## Phase Progress
 
-| Phase | Name                | Status      | Retry Count | Notes |
-| ----- | ------------------- | ----------- | ----------- | ----- |
-| 0     | Core Infrastructure | not-started | 0           |       |
-| 1     | —                   | not-started | 0           |       |
-| 2     | —                   | not-started | 0           |       |
-| 3     | —                   | not-started | 0           |       |
-| ...   | —                   | not-started | 0           |       |
+| Phase | Name                  | Status      | Retry Count | Notes                                                                                                                                      |
+| ----- | --------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0     | Core Infrastructure   | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean. |
+| 1     | Detection & Ingestion | not-started | 0           |                                                                                                                                            |
+| 2     | Pipeline Core         | not-started | 0           |                                                                                                                                            |
+| 3     | Position Management   | not-started | 0           |                                                                                                                                            |
+| 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
+| 5     | Learning Engine       | not-started | 0           |                                                                                                                                            |
+| 6     | Observability & Risk  | not-started | 0           |                                                                                                                                            |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 
@@ -36,38 +38,47 @@
 
 ### Latest Run
 
-| Phase | phase-builder | dto-guardian | integration | refactor | Final |
-| ----- | ------------- | ------------ | ----------- | -------- | ----- |
-| 0     | —             | —            | —           | —        | —     |
-| 1     | —             | —            | —           | —        | —     |
-| ...   | —             | —            | —           | —        | —     |
+| Phase | phase-builder | dto-guardian       | integration | security-auditor | test-builder | Final     |
+| ----- | ------------- | ------------------ | ----------- | ---------------- | ------------ | --------- |
+| 0     | pass          | pass (after fixes) | pass        | pass             | pass         | completed |
+| 1     | —             | —                  | —           | —                | —            | —         |
+| 2     | —             | —                  | —           | —                | —            | —         |
+| 3     | —             | —                  | —           | —                | —            | —         |
+| 4     | —             | —                  | —           | —                | —            | —         |
+| 5     | —             | —                  | —           | —                | —            | —         |
+| 6     | —             | —                  | —           | —                | —            | —         |
 
 **Values:** `pass`, `fail (N retries)`, `skipped`, `rolled-back`
+
+**Phase 0 notes:** DTO guardian found 3 structural violations (json.RawMessage→string, time.Now()
+non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 PR review items.
 
 ---
 
 ## Quality Gate Results
 
-| Gate                   | Status | Details |
-| ---------------------- | ------ | ------- |
-| Import check           | —      |         |
-| Lint check             | —      |         |
-| Test check             | —      |         |
-| SQL check              | —      |         |
-| Cross-module check     | —      |         |
-| Print check            | —      |         |
-| DTO validation         | —      |         |
-| Orchestrator integrity | —      |         |
-| Protected files        | —      |         |
-| Deterministic ordering | —      |         |
+| Gate                   | Status | Details                                                              |
+| ---------------------- | ------ | -------------------------------------------------------------------- |
+| Import check           | pass   | `go build ./...` clean                                               |
+| Lint check             | pass   | `go vet ./...` clean                                                 |
+| Test check             | pass   | `go test ./contracts/... ./database/... ./internal/orchestrator/...` |
+| SQL check              | pass   | All SQL uses parameterized queries and portable syntax               |
+| Cross-module check     | pass   | No cross-module imports; only `contracts/` types                     |
+| Print check            | pass   | No unstructured console output                                       |
+| DTO validation         | pass   | All 17 DTOs verified; no forbidden types; no methods                 |
+| Orchestrator integrity | pass   | Only orchestrator calls adapter; modules are pure                    |
+| Protected files        | pass   | `contracts/` additive-only; `database/` Phase 0 only                 |
+| Deterministic ordering | pass   | Content-addressable IDs; sorted collections                          |
 
 ---
 
 ## Failure Log
 
-| Timestamp | Phase | Agent | Attempt | Error Summary | Resolution |
-| --------- | ----- | ----- | ------- | ------------- | ---------- |
-|           |       |       |         |               |            |
+| Timestamp  | Phase | Agent        | Attempt | Error Summary                                          | Resolution                              |
+| ---------- | ----- | ------------ | ------- | ------------------------------------------------------ | --------------------------------------- |
+| 2026-04-25 | 0     | dto-guardian | 1       | EventEnvelope.Payload used json.RawMessage ([]byte)    | Changed Payload field to string type    |
+| 2026-04-25 | 0     | dto-guardian | 2       | NewEventEnvelope called time.Now() (non-deterministic) | Moved createdAt to caller parameter     |
+| 2026-04-25 | 0     | dto-guardian | 3       | TraceFields.Propagate() was a method on a DTO          | Added PropagateTrace() package-level fn |
 
 ---
 
@@ -81,14 +92,14 @@
 
 ## Merge Results
 
-| Branch | Merge Status | Conflicts | Resolution |
-| ------ | ------------ | --------- | ---------- |
-|        |              |           |            |
+| Branch        | Merge Status | Conflicts | Resolution                          |
+| ------------- | ------------ | --------- | ----------------------------------- |
+| track/group-0 | merged       | none      | Pushed to origin; PR merged to main |
 
 ---
 
 ## Session History
 
-| Date | Mode | Phases | Duration | Token Usage | Outcome |
-| ---- | ---- | ------ | -------- | ----------- | ------- |
-|      |      |        |          |             |         |
+| Date       | Mode            | Phases | Duration      | Token Usage | Outcome   |
+| ---------- | --------------- | ------ | ------------- | ----------- | --------- |
+| 2026-04-25 | manual (mode-2) | 0      | multi-session | —           | completed |

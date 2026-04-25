@@ -182,3 +182,18 @@ Resume:
 ```
 @phase-builder continue Phase 5 from task 4
 ```
+
+---
+
+## Progress Report
+
+After completing all implementation tasks for the phase, update `docs/PROGRESS_REPORT.md`:
+
+1. Find the row for the phase number in the **Phase Progress** table and update **Status** to `completed` (or `failed` if the phase could not be completed).
+2. Update the **Agent Pipeline Results** table row for the phase with `pass`/`fail` per agent.
+3. Update **Last Updated** in the Summary table to today's date (ISO 8601, `YYYY-MM-DD`).
+4. If any DTO violations were found and fixed, log them in the **Failure Log** table.
+
+> **Note:** `docs/PROGRESS_REPORT.md` is the **sole exception** to the `docs/` read-only policy.
+> All other files under `docs/` remain read-only — never modify them.
+> The automated pipeline (`run_parallel.sh`) also updates PROGRESS_REPORT.md automatically on pipeline success/failure. Manual updates are only needed when running outside the automated pipeline.

@@ -493,12 +493,26 @@ Agents delegate to specialized subagents via `runSubagent`:
 
 These files/directories have strict modification rules during parallel development:
 
-| Path          | Rule                                                                 |
-| ------------- | -------------------------------------------------------------------- |
-| `contracts/*` | **Additive only** — new DTOs allowed, existing fields never modified |
-| `database/*`  | **Phase 0 only** — only infrastructure phase may modify              |
-| `docs/*`      | **Read-only** — no agent may modify documentation                    |
-| `config/*`    | **Append-only** — new keys allowed, existing keys never removed      |
+| Path                      | Rule                                                                    |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `contracts/*`             | **Additive only** — new DTOs allowed, existing fields never modified    |
+| `database/*`              | **Phase 0 only** — only infrastructure phase may modify                 |
+| `docs/*`                  | **Read-only** — no agent may modify documentation                       |
+| `docs/PROGRESS_REPORT.md` | **Exception** — must be updated after each phase completion (see below) |
+| `config/*`                | **Append-only** — new keys allowed, existing keys never removed         |
+
+### PROGRESS_REPORT.md Exception
+
+`docs/PROGRESS_REPORT.md` is the **sole writable file** under `docs/`. It tracks implementation
+status and must be kept current:
+
+- **Automated:** `run_parallel.sh` updates it automatically on pipeline success/failure/rollback.
+- **Manual:** After any manual implementation session, update Phase Progress, Agent Pipeline
+  Results, Quality Gates, and Session History tables in `docs/PROGRESS_REPORT.md`.
+- **Agents:** The `phase-builder` agent updates it after completing a phase.
+- **All other `docs/` files remain strictly read-only.** Never modify `architecture.md`,
+  `dto_contracts.md`, `orchestrator_spec.md`, `db_adapter_spec.md`, `implementation_roadmap.md`,
+  `PARALLEL_DEV.md`, `AGENTS_AND_SKILLS.md`, `STARTER_GUIDE.md`, or any file in `docs/architecture-context/`.
 
 ---
 
