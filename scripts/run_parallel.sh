@@ -948,13 +948,19 @@ validate_protected_files() {
         fi
     fi
 
-    # database/ — only Phase 0 allowed
-    local db_changes
-    db_changes=$(git diff --name-only "${base_branch}" -- database/ 2>/dev/null || true)
-    if [[ -n "${db_changes}" ]]; then
-        if [[ "${phase_label}" != *"phase-0"* ]] && [[ "${phase_label}" != *"group-0"* ]]; then
-            log_error "[protected-files] database/ modified outside Phase 0:"
-            echo "${db_changes}" | while read -r f; do log_error "  ${f}"; done
+    # database/ — additive only outside Phase 0.
+    # Per docs/implementation_roadmap.md, every phase legitimately adds migrations
+    # (Phase 1 → 000002_ingestion_tables, Phase 2 → 000003_trading_tables, etc.) and
+    # extends the adapter / engine code with new methods and tables. The hard
+    # invariant is migration IMMUTABILITY: previously-committed migration files
+    # MUST NOT be modified or deleted. Adapter, engines, and new migration files
+    # are free to grow.
+    if [[ "${phase_label}" != *"phase-0"* ]] && [[ "${phase_label}" != *"group-0"* ]]; then
+        local migration_mods
+        migration_mods=$(git diff --name-only --diff-filter=MD "${base_branch}" -- database/migrations/ 2>/dev/null || true)
+        if [[ -n "${migration_mods}" ]]; then
+            log_error "[protected-files] Existing migration files modified or deleted (immutable policy):"
+            echo "${migration_mods}" | while read -r f; do log_error "  ${f}"; done
             ((violations++))
         fi
     fi
@@ -1190,7 +1196,7 @@ generate_phase_task() {
 ## Protected File Policy (STRICT)
 
 - `contracts/*` — **additive only**. You may ADD new DTOs. You MUST NOT modify existing DTO fields. Violation = pipeline rollback.
-- `database/*` — **Phase 0 only**. No other phase may modify database files. Violation = pipeline rollback.
+- `database/*` — **Migrations immutable**. New migrations (e.g. `000002_ingestion_tables.sql`) and adapter/engine additions are required and allowed in any phase, but existing files in `database/migrations/` must never be modified or deleted. Violation = pipeline rollback.
 - `docs/*` — **read-only**. No modifications allowed. Violation = pipeline rollback.
 - Do NOT modify files outside your owned directories (see ownership below).
 
@@ -1240,7 +1246,7 @@ HEADER
 - All IDs are content-addressable (SHA256-based)
 - All collections must be explicitly sorted (deterministic ordering)
 - Tests must work without GPU, network, or real data files
-- Protected files: \`contracts/*\` (additive only), \`database/*\` (Phase 0 only), \`docs/*\` (read-only)
+- Protected files: \`contracts/*\` (additive only), \`database/migrations/*\` (immutable — never modify existing files; new migrations OK), \`docs/*\` (read-only)
 
 **After implementation:**
 1. Run tests and fix all failures
@@ -2087,9 +2093,9 @@ if os.path.isfile(phases_yaml):
             if m:
                 current = m.group(1)
             if current:
-                nm = re.match(r'^\s{4}name:\s*["\']?([^"\'\'#\n]+)["\']?\s*$', line)
+                nm = re.match(r'^\s{4}name:\s*["\']?([^"\'#\n]+)["\']?\s*$', line)
                 if nm:
-                    phase_names[current] = nm.group(1).strip().strip('"\')
+                    phase_names[current] = nm.group(1).strip().strip('"').strip("'")
     except Exception:
         pass
 

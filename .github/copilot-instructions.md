@@ -493,13 +493,13 @@ Agents delegate to specialized subagents via `runSubagent`:
 
 These files/directories have strict modification rules during parallel development:
 
-| Path                      | Rule                                                                    |
-| ------------------------- | ----------------------------------------------------------------------- |
-| `contracts/*`             | **Additive only** — new DTOs allowed, existing fields never modified    |
-| `database/*`              | **Phase 0 only** — only infrastructure phase may modify                 |
-| `docs/*`                  | **Read-only** — no agent may modify documentation                       |
-| `docs/PROGRESS_REPORT.md` | **Exception** — must be updated after each phase completion (see below) |
-| `config/*`                | **Append-only** — new keys allowed, existing keys never removed         |
+| Path                      | Rule                                                                                                                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contracts/*`             | **Additive only** — new DTOs allowed, existing fields never modified                                                                                                              |
+| `database/*`              | **Migrations immutable** — new migrations and adapter/engine additions allowed in any phase; existing migration files in `database/migrations/` must never be modified or deleted |
+| `docs/*`                  | **Read-only** — no agent may modify documentation                                                                                                                                 |
+| `docs/PROGRESS_REPORT.md` | **Exception** — must be updated after each phase completion (see below)                                                                                                           |
+| `config/*`                | **Append-only** — new keys allowed, existing keys never removed                                                                                                                   |
 
 ### PROGRESS_REPORT.md Exception
 
