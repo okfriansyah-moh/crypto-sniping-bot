@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"runtime/debug"
 	"time"
@@ -41,6 +42,9 @@ func RunWorker(
 	idleBackoff time.Duration,
 	logger *slog.Logger,
 ) error {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	workerLog := logger.With("worker_group", group)
 
 	for {

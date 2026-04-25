@@ -49,6 +49,11 @@ func (d *DB) InsertEvent(ctx context.Context, evt database.Event) error {
 // ClaimNextEvent atomically claims the next unprocessed event for a worker group
 // using SELECT ... FOR UPDATE SKIP LOCKED.
 // Returns nil if the queue is empty.
+//
+// Note: group is passed for future consumer_offsets tracking (per-group progress
+// isolation). The current implementation uses a single processed=TRUE flag, which
+// is correct for a strictly linear pipeline (no fan-out). Fan-out support will
+// require per-group offset rows and must not set processed=TRUE globally.
 func (d *DB) ClaimNextEvent(ctx context.Context, group string, eventTypes []string) (*database.Event, error) {
 	if len(eventTypes) == 0 {
 		return nil, nil

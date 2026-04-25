@@ -3,11 +3,16 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
 	"crypto-sniping-bot/database"
 )
+
+func noopLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // Checkpoint writes the last completed stage for a pipeline run to the database.
 // Must be called after every stage completion — never skip.
@@ -15,6 +20,9 @@ import (
 //
 // See docs/orchestrator_spec.md for checkpoint rules.
 func Checkpoint(ctx context.Context, adapter database.Adapter, logger *slog.Logger, runID, stage string) error {
+	if logger == nil {
+		logger = noopLogger()
+	}
 	if err := adapter.UpdateRunStage(ctx, runID, stage); err != nil {
 		return fmt.Errorf("checkpoint stage %s for run %s: %w", stage, runID, err)
 	}
@@ -29,6 +37,9 @@ func Checkpoint(ctx context.Context, adapter database.Adapter, logger *slog.Logg
 // FinalizeRun marks a pipeline run with its terminal status.
 // Status must be one of: completed, partial, failed.
 func FinalizeRun(ctx context.Context, adapter database.Adapter, logger *slog.Logger, runID, status string) error {
+	if logger == nil {
+		logger = noopLogger()
+	}
 	if err := adapter.UpdateRunStatus(ctx, runID, status); err != nil {
 		return fmt.Errorf("finalize run %s with status %s: %w", runID, status, err)
 	}
