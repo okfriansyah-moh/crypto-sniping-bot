@@ -22,6 +22,13 @@ chains:
       - address: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
         protocol: uniswap-v3
         market: eth-uniswap-v3
+    backoff:
+      initial_ms: 500
+      max_ms: 30000
+      multiplier: 2.0
+    poll_interval_ms: 2000
+    heartbeat_interval_ms: 10000
+    heartbeat_timeout_ms: 30000
 
   bsc:
     name: "BNB Smart Chain"
@@ -41,3 +48,17 @@ chains:
       - address: "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
         protocol: pancakeswap-v2
         market: bsc-pancake-v2
+    backoff:
+      initial_ms: 500
+      max_ms: 30000
+      multiplier: 2.0
+    poll_interval_ms: 2000
+    heartbeat_interval_ms: 10000
+    heartbeat_timeout_ms: 30000
+
+# Ingestion backoff and polling defaults (applied per-chain if not overridden).
+# To override for a specific chain, add these keys under chains.<chain>:
+#   backoff: { initial_ms: 500, max_ms: 30000, multiplier: 2.0 }
+#   poll_interval_ms: 2000
+#   heartbeat_interval_ms: 10000
+#   heartbeat_timeout_ms: 30000

@@ -15,30 +15,6 @@ import (
 	"crypto-sniping-bot/database"
 )
 
-// ── Ingestion (Layer 0 — Phase 1) ────────────────────────────────────────────
-
-// UpsertIngestionWatermark is a Phase 1 stub. The ingestion_state table is
-// created in the Phase 1 migration. Returns ErrNotImplemented until then.
-func (d *DB) UpsertIngestionWatermark(_ context.Context, _ string, _ uint64) error {
-	return database.ErrNotImplemented
-}
-
-// GetIngestionWatermark is a Phase 1 stub. Returns ErrNotImplemented until
-// the ingestion_state table is created in the Phase 1 migration.
-func (d *DB) GetIngestionWatermark(_ context.Context, _ string) (uint64, error) {
-	return 0, database.ErrNotImplemented
-}
-
-// InsertMarketData is a Phase 1 stub. The market_data table is created in
-// the Phase 1 migration. Returns ErrNotImplemented until then.
-func (d *DB) InsertMarketData(_ context.Context, _ contracts.MarketDataDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) GetMarketData(_ context.Context, _ string) (*contracts.MarketDataDTO, error) {
-	return nil, database.ErrNotImplemented
-}
-
 // ── Token Lifecycle State Machine (Phase 2) ───────────────────────────────────
 
 func (d *DB) StartLifecycle(_ context.Context, _ contracts.MarketDataDTO) (string, error) {

@@ -45,6 +45,9 @@ type Adapter interface {
 	// stage execution and any resulting event writes.
 	MarkEventProcessed(ctx context.Context, eventID string) error
 
+	// GetEventByID fetches a specific event by its ID. Used for trace traversal and failure chain reconstruction.
+	GetEventByID(ctx context.Context, eventID string) (*Event, error)
+
 	// MarkEventExpired marks an event as expired without processing.
 	// Emits an expired_event in the same transaction.
 	MarkEventExpired(ctx context.Context, eventID string, reason string) error
