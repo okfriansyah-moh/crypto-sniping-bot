@@ -14,10 +14,11 @@ import (
 // All thresholds and tunable parameters must come from YAML — no hardcoded values.
 // See docs/implementation_roadmap.md § 0.5.
 type Config struct {
-	Pipeline  PipelineConfig  `yaml:"pipeline"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Worker    WorkerConfig    `yaml:"worker"`
-	Logging   LoggingConfig   `yaml:"logging"`
+	Pipeline  PipelineConfig          `yaml:"pipeline"`
+	Database  DatabaseConfig          `yaml:"database"`
+	Worker    WorkerConfig            `yaml:"worker"`
+	Logging   LoggingConfig           `yaml:"logging"`
+	Chains    map[string]ChainConfig  `yaml:"chains"` // per-chain ingestion config
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string

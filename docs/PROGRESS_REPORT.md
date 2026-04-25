@@ -14,7 +14,7 @@
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
 | **Not Started**  | 6          |
-| **Last Updated** | 2026-04-25 |
+| **Last Updated** | 2026-04-26 |
 
 ---
 
@@ -23,7 +23,7 @@
 | Phase | Name                  | Status      | Retry Count | Notes                                                                                                                                      |
 | ----- | --------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | 0     | Core Infrastructure   | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean. |
-| 1     | Detection & Ingestion | not-started | 0           |                                                                                                                                            |
+| 1     | Detection & Ingestion | completed   | 0           | DEX log ingestion module (Layer 0): RPC client interface, normalize PairCreated/Mint/Swap/Burn, event bus emission, gap recovery, reorg detection, reconnect backoff; all tests pass. |
 | 2     | Pipeline Core         | not-started | 0           |                                                                                                                                            |
 | 3     | Position Management   | not-started | 0           |                                                                                                                                            |
 | 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
@@ -41,7 +41,7 @@
 | Phase | phase-builder | dto-guardian       | integration | security-auditor | test-builder | Final     |
 | ----- | ------------- | ------------------ | ----------- | ---------------- | ------------ | --------- |
 | 0     | pass          | pass (after fixes) | pass        | pass             | pass         | completed |
-| 1     | —             | —                  | —           | —                | —            | —         |
+| 1     | pass          | pass               | pass        | pass             | pass         | completed |
 | 2     | —             | —                  | —           | —                | —            | —         |
 | 3     | —             | —                  | —           | —                | —            | —         |
 | 4     | —             | —                  | —           | —                | —            | —         |
