@@ -39,6 +39,34 @@
 
 ---
 
+## Phase Overview
+
+Quick reference for all 7 implementation phases. Each phase maps to one or more pipeline layers and introduces specific DTOs. See [Global Conventions](#global-conventions) for shared patterns applied across all phases.
+
+| Phase | Name                                        | Priority | Parallel Group    | Pipeline Layer(s)           | New DTOs Introduced                                                                                                                         | Migration                   | Requires |
+| ----- | ------------------------------------------- | -------- | ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------- |
+| **0** | Core Infrastructure                         | P0       | A — Sequential    | —                           | `EventEnvelope`, `StrategyVersion`                                                                                                          | `000001_initial_schema`     | —        |
+| **1** | Detection & Ingestion                       | P1       | A — Sequential    | L0 (Ingestion)              | `MarketDataDTO`                                                                                                                             | `000002_ingestion_tables`   | Phase 0  |
+| **2** | Minimal Trading Pipeline (FIRST TRADE)      | P1       | A — Sequential    | L1 → L9                     | `DataQualityDTO`, `FeatureDTO`, `EdgeDTO`, `ValidatedEdgeDTO`, `SelectionOutput`, `AllocationDTO`, `ExecutionResultDTO`, `PositionStateDTO` | `000003_trading_tables`     | Phase 1  |
+| **3** | Evaluation & Correctness                    | P1.5     | B — Parallel-safe | L10 (pre-learning)          | `EvaluationDTO`                                                                                                                             | `000004_state_machine`      | Phase 2  |
+| **4** | Signal Quality                              | P1.5     | B — Parallel-safe | L1–L5 (models)              | `ProbabilityEstimateDTO`, `SlippageEstimateDTO`, `LatencyProfileDTO`                                                                        | —                           | Phase 3  |
+| **5** | Learning Engine                             | P2       | B — Parallel-safe | L10 (full)                  | `LearningRecordDTO`                                                                                                                         | `000005_learning_tables`    | Phase 4  |
+| **6** | Resource Control, Wallet Sharding & Scaling | P2       | C — Final         | All (operational hardening) | `SystemStateDTO`                                                                                                                            | `000006_event_partitioning` | Phase 5  |
+
+### Subsection Count by Phase
+
+| Phase | Subsections                      | Workers Added           | New Contracts                                 |
+| ----- | -------------------------------- | ----------------------- | --------------------------------------------- |
+| 0     | 0.1 – 0.7 (7 global conventions) | —                       | `trace.go`, `event_envelope.go`               |
+| 1     | 9 components                     | 1 (`run_ingestion.go`)  | `market_data.go`                              |
+| 2     | 2.1 – 2.11 (11 subsections)      | 9 workers               | 8 contracts                                   |
+| 3     | 8 subsections + §3.1             | 1 (`run_evaluation.go`) | `evaluation.go`                               |
+| 4     | 8 subsections                    | 3 model workers         | `probability.go`, `slippage.go`, `latency.go` |
+| 5     | 10 subsections + §5.1            | 6 workers               | `learning_record.go`                          |
+| 6     | 12 subsections                   | 2 workers               | — (no new DTOs)                               |
+
+---
+
 # Global Conventions
 
 ## 0.1 Priority Layers
