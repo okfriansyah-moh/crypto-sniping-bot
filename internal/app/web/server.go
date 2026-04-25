@@ -26,8 +26,5 @@ func (s *Server) Router() http.Handler {
 	// Register module endpoints (vertical slice — each module owns its routes)
 	healthEndpoint.Register(mux)
 
-	// Future modules register here:
-	// templateEndpoint.Register(mux)
-
 	return mux
 }

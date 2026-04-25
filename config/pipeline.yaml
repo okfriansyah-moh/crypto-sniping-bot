@@ -1,0 +1,26 @@
+pipeline:
+  schema_version: "1"
+
+database:
+  engine: postgres
+  host: localhost
+  port: 5432
+  database: sniper
+  user: sniper
+  # Password is read from SNIPER_DB_PASSWORD env var.
+  # ssl_mode controls PostgreSQL TLS. Use 'require' or 'verify-full' in production.
+  # Override with SNIPER_DB_SSL_MODE env var.
+  ssl_mode: disable  # local dev only
+  pool:
+    max_open_conns: 20
+    max_idle_conns: 5
+    conn_max_lifetime_seconds: 3600
+
+worker:
+  idle_backoff_ms: 100      # sleep when queue is empty
+  max_retry_count: 3        # retries before dead-lettering an event
+  panic_recovery: true      # recover from handler panics
+
+logging:
+  level: info               # debug | info | warn | error
+  format: json              # json | text

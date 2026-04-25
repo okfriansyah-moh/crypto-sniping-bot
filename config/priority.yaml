@@ -1,0 +1,38 @@
+priority:
+  # Operational mode thresholds (STRICT | BALANCED | EXPLORATION)
+  # See docs/architecture.md § 7.
+  modes:
+    strict:
+      explore_budget_pct: 1.0
+      edge_strength_min: 0.75
+      ev_threshold_bps: 150
+      max_positions: 5
+
+    balanced:
+      explore_budget_pct: 2.0
+      edge_strength_min: 0.60
+      ev_threshold_bps: 100
+      max_positions: 15
+
+    exploration:
+      explore_budget_pct: 5.0
+      edge_strength_min: 0.45
+      ev_threshold_bps: 60
+      max_positions: 20
+
+  # Active mode (overridden at runtime by /mode command)
+  active_mode: balanced
+
+  # Starvation recovery threshold (trades/hour before auto-switching to EXPLORATION)
+  starvation_threshold_trades_per_hour: 2
+
+  # Mode transition cooldown
+  mode_transition_cooldown_minutes: 30
+
+  # Capital allocation weights (used by capital engine)
+  allocation:
+    base_size_usd: 100.0
+    max_portfolio_exposure_pct: 80.0
+    max_single_position_pct: 0.5
+    absolute_max_position_pct: 5.0
+    max_concurrent_positions: 20

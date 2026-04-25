@@ -1,0 +1,43 @@
+chains:
+  eth:
+    name: "Ethereum Mainnet"
+    chain_id: 1
+    rpc_endpoints:
+      - "${ETH_RPC_1}"
+      - "${ETH_RPC_2}"
+    ws_endpoints:
+      - "${ETH_WS_1}"
+    confirmation_depth: 2
+    base_tokens:
+      - address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH
+        symbol: WETH
+      - address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"  # USDT
+        symbol: USDT
+      - address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC
+        symbol: USDC
+    factories:
+      - address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+        protocol: uniswap-v2
+        market: eth-uniswap-v2
+      - address: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        protocol: uniswap-v3
+        market: eth-uniswap-v3
+
+  bsc:
+    name: "BNB Smart Chain"
+    chain_id: 56
+    rpc_endpoints:
+      - "${BSC_RPC_1}"
+      - "${BSC_RPC_2}"
+    ws_endpoints:
+      - "${BSC_WS_1}"
+    confirmation_depth: 3
+    base_tokens:
+      - address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"  # WBNB
+        symbol: WBNB
+      - address: "0x55d398326f99059fF775485246999027B3197955"  # USDT
+        symbol: USDT
+    factories:
+      - address: "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+        protocol: pancakeswap-v2
+        market: bsc-pancake-v2

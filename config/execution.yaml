@@ -1,0 +1,24 @@
+execution:
+  # Concurrency
+  concurrency_limit: 10       # global semaphore for in-flight transactions
+  concurrency_min: 5
+  concurrency_max: 20
+
+  # Wallet sharding
+  wallet_shard_count: 4       # number of wallet shards (hash(token_addr) % n)
+
+  # Fee policy
+  fee_bump_delta_pct: 15      # percentage increase on stuck tx fee bumps
+  fee_bump_max_attempts: 3    # max fee bump retries per tx
+  base_fee_multiplier: 1.2    # multiply latest base fee for max_fee_per_gas
+  priority_fee_gwei: 2        # priority fee tip in gwei
+
+  # Submission
+  tx_timeout_seconds: 30      # max time to wait for tx confirmation
+  mempool_route: public       # public | private_flashbots | private_beaverbuild
+
+  # Slippage
+  default_max_slippage_bps: 100   # 1% default max slippage
+
+  # Idempotency
+  duplicate_window_seconds: 300   # dedup window for execution_id checks
