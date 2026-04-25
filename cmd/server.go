@@ -79,5 +79,12 @@ func runServer() {
 		os.Exit(1)
 	}
 
+	// Graceful HTTP shutdown: give in-flight requests 10 s to drain.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("http_server_shutdown_failed", "error", err)
+	}
+
 	logger.Info("server_shutdown")
 }

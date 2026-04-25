@@ -123,26 +123,8 @@ func pinStrategyVersion(ctx context.Context, adapter database.Adapter, snapshot 
 		return "", fmt.Errorf("create strategy version: %w", err)
 	}
 
-	// Activate via the concrete postgres type — adapter interface doesn't expose ActivateStrategyVersion.
-	// We use a type assertion to avoid leaking this into the general interface.
-	type activator interface {
-		ActivateStrategyVersion(context.Context, string) error
-	}
-	if a, ok := adapter.(activator); ok {
-		if err := a.ActivateStrategyVersion(ctx, versionID); err != nil {
-			return "", fmt.Errorf("activate strategy version: %w", err)
-		}
-	} else {
-		// Fallback: set activated_at by upserting with activated_at.
-		activatedAt := now
-		activated := database.StrategyVersion{
-			StrategyVersionID: versionID,
-			ConfigSnapshot:    snapshot,
-			CreatedAt:         now,
-			ActivatedAt:       &activatedAt,
-		}
-		// Re-create with activated_at (idempotent — DO NOTHING on conflict).
-		_ = adapter.CreateStrategyVersion(ctx, activated)
+	if err := adapter.ActivateStrategyVersion(ctx, versionID); err != nil {
+		return "", fmt.Errorf("activate strategy version: %w", err)
 	}
 
 	// Verify the pin.

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"crypto-sniping-bot/database"
 )
 
@@ -41,6 +43,10 @@ func (d *DB) InsertEvent(ctx context.Context, evt database.Event) error {
 		createdAt,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return database.ErrOrphanEvent
+		}
 		return fmt.Errorf("insert event: %w", err)
 	}
 	return nil
@@ -54,7 +60,10 @@ func (d *DB) InsertEvent(ctx context.Context, evt database.Event) error {
 // MarkEventProcessed is called, allowing two workers to process the same event).
 //
 // A stale-claim guard reclaims events whose claimed_at exceeded
-// claimTimeoutSeconds (default 300 s), recovering from crashed workers.
+// ClaimTimeoutSecs from Config (default 300 s), recovering from crashed workers.
+//
+// Ordering: priority DESC, created_at ASC (higher-priority events served first).
+// Excludes events past their expires_at TTL.
 //
 // Note: group is passed for future consumer_offsets tracking (per-group progress
 // isolation). The current implementation uses a single processed=TRUE flag, which
@@ -65,11 +74,16 @@ func (d *DB) ClaimNextEvent(ctx context.Context, group string, eventTypes []stri
 		return nil, nil
 	}
 
+	claimTimeout := d.cfg.ClaimTimeoutSecs
+	if claimTimeout <= 0 {
+		claimTimeout = 300
+	}
+
 	// Atomic claim: UPDATE sets claimed_at, RETURNING delivers the row.
 	// The subquery uses FOR UPDATE SKIP LOCKED so concurrent workers skip
 	// a row that is already being updated by a peer.
-	// Stale claims older than claimTimeoutSeconds are also eligible.
-	const claimTimeoutSeconds = 300
+	// Stale claims older than claimTimeout are also eligible.
+	// TTL filter: exclude events whose expires_at has elapsed.
 	const q = `
 		UPDATE events
 		SET claimed_at = CURRENT_TIMESTAMP
@@ -79,13 +93,14 @@ func (d *DB) ClaimNextEvent(ctx context.Context, group string, eventTypes []stri
 		      AND event_type = ANY($1)
 		      AND (claimed_at IS NULL
 		           OR claimed_at < CURRENT_TIMESTAMP - ($2 * INTERVAL '1 second'))
-		    ORDER BY created_at
+		      AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+		    ORDER BY priority DESC, created_at ASC
 		    FOR UPDATE SKIP LOCKED
 		    LIMIT 1
 		)
 		RETURNING event_id, event_type, payload, trace_id, correlation_id, causation_id, version_id, created_at, processed`
 
-	row := d.pool.QueryRowContext(ctx, q, eventTypes, claimTimeoutSeconds)
+	row := d.pool.QueryRowContext(ctx, q, eventTypes, claimTimeout)
 	evt, err := scanEvent(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -102,6 +117,18 @@ func (d *DB) MarkEventProcessed(ctx context.Context, eventID string) error {
 	_, err := d.pool.ExecContext(ctx, q, eventID)
 	if err != nil {
 		return fmt.Errorf("mark event processed: %w", err)
+	}
+	return nil
+}
+
+// ReleaseEventClaim clears claimed_at so the event is immediately eligible
+// for re-claiming by the next worker. Call on stage handler failure to bypass
+// the stale-claim timeout window.
+func (d *DB) ReleaseEventClaim(ctx context.Context, eventID string) error {
+	const q = `UPDATE events SET claimed_at = NULL WHERE event_id = $1 AND processed = FALSE`
+	_, err := d.pool.ExecContext(ctx, q, eventID)
+	if err != nil {
+		return fmt.Errorf("release event claim: %w", err)
 	}
 	return nil
 }

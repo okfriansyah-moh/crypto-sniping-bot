@@ -17,7 +17,7 @@ ALTER TABLE events
 
 -- Index for ClaimNextEvent ordering: priority DESC, created_at ASC, with TTL filter.
 CREATE INDEX IF NOT EXISTS idx_events_claim_order
-    ON events (group_name, event_type, processed, priority DESC, created_at ASC)
+    ON events (event_type, processed, priority DESC, created_at ASC)
     WHERE processed = FALSE;
 
 -- ── 2. System state singleton ─────────────────────────────────────────────────
@@ -78,7 +78,21 @@ ALTER TABLE learning_records
     ADD COLUMN IF NOT EXISTS strategy_status TEXT    NOT NULL DEFAULT '';
 
 -- ── 7. Events archive table ───────────────────────────────────────────────────
+-- Explicit column list used instead of LIKE events INCLUDING ALL to ensure
+-- portability across database engines and to avoid copying FK constraints
+-- (causation_id FK would reference the live events table, not valid for archive).
 
 CREATE TABLE IF NOT EXISTS events_archive (
-    LIKE events INCLUDING ALL
+    event_id       TEXT        PRIMARY KEY,
+    event_type     TEXT        NOT NULL,
+    payload        JSONB       NOT NULL,
+    trace_id       TEXT        NOT NULL,
+    correlation_id TEXT        NOT NULL,
+    causation_id   TEXT,
+    version_id     TEXT        NOT NULL,
+    created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed      BOOLEAN     NOT NULL DEFAULT FALSE,
+    claimed_at     TIMESTAMP,
+    priority       INTEGER     NOT NULL DEFAULT 0,
+    expires_at     TIMESTAMP WITH TIME ZONE
 );

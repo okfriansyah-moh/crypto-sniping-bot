@@ -4,23 +4,25 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // EventEnvelope is the canonical payload wrapper for every event on the bus.
 // It wraps the inner DTO payload with routing and traceability fields.
+// Payload is a JSON string (canonical JSON of the inner DTO).
 // See docs/implementation_roadmap.md § 0.4 and docs/dto_contracts.md § 1.
 type EventEnvelope struct {
-	EventID   string          `json:"event_id"`
-	EventType string          `json:"event_type"`
-	Payload   json.RawMessage `json:"payload"`
+	EventID   string `json:"event_id"`
+	EventType string `json:"event_type"`
+	Payload   string `json:"payload"` // canonical JSON of the inner DTO
 	TraceFields
-	CreatedAt string `json:"created_at"`
+	CreatedAt string `json:"created_at"` // ISO 8601 UTC; caller must provide
 }
 
 // NewEventEnvelope constructs an EventEnvelope with a content-addressable EventID.
 // EventID = SHA256(canonical_json(payload))[:16].
-func NewEventEnvelope(eventType string, payload any, trace TraceFields) (EventEnvelope, error) {
+// createdAt must be an ISO 8601 UTC timestamp — callers are responsible for
+// providing a deterministic value (use block_timestamp or a fixed value in tests).
+func NewEventEnvelope(eventType string, payload any, trace TraceFields, createdAt string) (EventEnvelope, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return EventEnvelope{}, fmt.Errorf("marshal payload: %w", err)
@@ -29,16 +31,16 @@ func NewEventEnvelope(eventType string, payload any, trace TraceFields) (EventEn
 	return EventEnvelope{
 		EventID:     eventID,
 		EventType:   eventType,
-		Payload:     payloadBytes,
+		Payload:     string(payloadBytes),
 		TraceFields: trace,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		CreatedAt:   createdAt,
 	}, nil
 }
 
 // DecodePayload deserializes the envelope payload into the target type.
 func DecodePayload[T any](env EventEnvelope) (T, error) {
 	var out T
-	if err := json.Unmarshal(env.Payload, &out); err != nil {
+	if err := json.Unmarshal([]byte(env.Payload), &out); err != nil {
 		return out, fmt.Errorf("decode payload: %w", err)
 	}
 	return out, nil

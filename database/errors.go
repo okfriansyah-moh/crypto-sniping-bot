@@ -48,3 +48,8 @@ var ErrNotFound = errors.New("database: record not found")
 // ErrNonceGap is returned when the on-chain nonce is ahead of the local
 // nonce manager, indicating a transaction was submitted outside the system.
 var ErrNonceGap = errors.New("database: nonce gap detected")
+
+// ErrStagePanic is returned by safeProcess when a stage handler panics.
+// Distinct from context.DeadlineExceeded so metrics and alerting can
+// distinguish panics from timeouts.
+var ErrStagePanic = errors.New("orchestrator: stage handler panicked")

@@ -43,8 +43,8 @@ func newMemAdapter() *memAdapter {
 }
 
 func (m *memAdapter) Initialize(_ context.Context, _ database.Config) error { return nil }
-func (m *memAdapter) RunMigrations(_ context.Context) error                  { return nil }
-func (m *memAdapter) Close(_ context.Context) error                          { return nil }
+func (m *memAdapter) RunMigrations(_ context.Context) error                 { return nil }
+func (m *memAdapter) Close(_ context.Context) error                         { return nil }
 
 func (m *memAdapter) InsertEvent(_ context.Context, e database.Event) error {
 	m.mu.Lock()
@@ -160,6 +160,7 @@ func (m *memAdapter) ActivateStrategyVersion(_ context.Context, id string) error
 	m.active = &id
 	return nil
 }
+func (m *memAdapter) ReleaseEventClaim(_ context.Context, _ string) error { return nil }
 func (m *memAdapter) GetActiveStrategyVersion(_ context.Context) (*database.StrategyVersion, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -256,41 +257,40 @@ func (m *memAdapter) GetPosition(_ context.Context, _ string) (*contracts.Positi
 	return nil, database.ErrNotImplemented
 }
 
-
 func (m *memAdapter) MarkEventExpired(_ context.Context, _ string, _ string) error {
-return database.ErrNotImplemented
+	return database.ErrNotImplemented
 }
 
 func (m *memAdapter) GetSystemState(_ context.Context) (*contracts.SystemStateDTO, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *memAdapter) UpsertSystemState(_ context.Context, _ contracts.SystemStateDTO, _ int64) (int64, error) {
-return 0, database.ErrNotImplemented
+	return 0, database.ErrNotImplemented
 }
 
 func (m *memAdapter) GetExposureSummary(_ context.Context) (*database.ExposureSummary, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *memAdapter) SetStrategyVersionStatus(_ context.Context, _, _, _ string) error {
-return database.ErrNotImplemented
+	return database.ErrNotImplemented
 }
 
 func (m *memAdapter) GetActiveStrategy(_ context.Context) (*database.StrategyVersion, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *memAdapter) GetShadowStrategy(_ context.Context) (*database.StrategyVersion, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *memAdapter) ArchiveEvents(_ context.Context, _ time.Time, _ int) (int, error) {
-return 0, database.ErrNotImplemented
+	return 0, database.ErrNotImplemented
 }
 
 func (m *memAdapter) GetEventsByTraceIncludeArchive(_ context.Context, _ string) ([]contracts.EventEnvelope, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func containsType(types []string, t string) bool {

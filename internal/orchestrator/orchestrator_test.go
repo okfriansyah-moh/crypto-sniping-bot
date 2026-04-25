@@ -29,8 +29,8 @@ func newMock() *mockAdapter {
 }
 
 func (m *mockAdapter) Initialize(_ context.Context, _ database.Config) error { return nil }
-func (m *mockAdapter) RunMigrations(_ context.Context) error                  { return nil }
-func (m *mockAdapter) Close(_ context.Context) error                          { return nil }
+func (m *mockAdapter) RunMigrations(_ context.Context) error                 { return nil }
+func (m *mockAdapter) Close(_ context.Context) error                         { return nil }
 
 func (m *mockAdapter) InsertEvent(_ context.Context, e database.Event) error {
 	m.events = append(m.events, e)
@@ -90,6 +90,7 @@ func (m *mockAdapter) ActivateStrategyVersion(_ context.Context, id string) erro
 	m.active = &id
 	return nil
 }
+func (m *mockAdapter) ReleaseEventClaim(_ context.Context, _ string) error { return nil }
 func (m *mockAdapter) GetActiveStrategyVersion(_ context.Context) (*database.StrategyVersion, error) {
 	if m.active == nil {
 		return nil, database.ErrNotFound
@@ -180,41 +181,40 @@ func (m *mockAdapter) GetPosition(_ context.Context, _ string) (*contracts.Posit
 	return nil, database.ErrNotImplemented
 }
 
-
 func (m *mockAdapter) MarkEventExpired(_ context.Context, _ string, _ string) error {
-return database.ErrNotImplemented
+	return database.ErrNotImplemented
 }
 
 func (m *mockAdapter) GetSystemState(_ context.Context) (*contracts.SystemStateDTO, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *mockAdapter) UpsertSystemState(_ context.Context, _ contracts.SystemStateDTO, _ int64) (int64, error) {
-return 0, database.ErrNotImplemented
+	return 0, database.ErrNotImplemented
 }
 
 func (m *mockAdapter) GetExposureSummary(_ context.Context) (*database.ExposureSummary, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *mockAdapter) SetStrategyVersionStatus(_ context.Context, _, _, _ string) error {
-return database.ErrNotImplemented
+	return database.ErrNotImplemented
 }
 
 func (m *mockAdapter) GetActiveStrategy(_ context.Context) (*database.StrategyVersion, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *mockAdapter) GetShadowStrategy(_ context.Context) (*database.StrategyVersion, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 func (m *mockAdapter) ArchiveEvents(_ context.Context, _ time.Time, _ int) (int, error) {
-return 0, database.ErrNotImplemented
+	return 0, database.ErrNotImplemented
 }
 
 func (m *mockAdapter) GetEventsByTraceIncludeArchive(_ context.Context, _ string) ([]contracts.EventEnvelope, error) {
-return nil, database.ErrNotImplemented
+	return nil, database.ErrNotImplemented
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -326,4 +326,3 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 	r.Register("stage-a", noopHandler{}, "event.a")
 	r.Register("stage-a", noopHandler{}, "event.a") // must panic
 }
-

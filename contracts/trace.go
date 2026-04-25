@@ -29,11 +29,26 @@ func NewTraceFields(traceID, correlationID, causationID, versionID string) Trace
 
 // Propagate returns a new TraceFields derived from this one, with the given
 // causationID (the EventID of the event being processed) and same versionID.
+//
+// Deprecated: use PropagateTrace instead — package-level functions are preferred
+// over methods on DTO structs to satisfy the no-methods-on-DTOs invariant.
 func (t TraceFields) Propagate(causationID string) TraceFields {
 	return TraceFields{
 		TraceID:       t.TraceID,
 		CorrelationID: t.CorrelationID,
 		CausationID:   causationID,
 		VersionID:     t.VersionID,
+	}
+}
+
+// PropagateTrace returns a new TraceFields derived from tf with the given
+// causationID (the EventID of the event being processed). All other fields are
+// copied from tf unchanged. Prefer this over the deprecated Propagate method.
+func PropagateTrace(tf TraceFields, causationID string) TraceFields {
+	return TraceFields{
+		TraceID:       tf.TraceID,
+		CorrelationID: tf.CorrelationID,
+		CausationID:   causationID,
+		VersionID:     tf.VersionID,
 	}
 }

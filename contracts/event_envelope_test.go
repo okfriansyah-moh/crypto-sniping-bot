@@ -1,7 +1,6 @@
 package contracts_test
 
 import (
-	"encoding/json"
 	"testing"
 
 	"crypto-sniping-bot/contracts"
@@ -82,7 +81,7 @@ func TestNewEventEnvelope_Happy(t *testing.T) {
 	payload := samplePayload{Chain: "eth", Token: "0xDEAD"}
 
 	// Act
-	env, err := contracts.NewEventEnvelope("market_data_event", payload, trace)
+	env, err := contracts.NewEventEnvelope("market_data_event", payload, trace, "2026-01-01T00:00:00Z")
 
 	// Assert
 	if err != nil {
@@ -112,8 +111,8 @@ func TestNewEventEnvelope_ContentAddressable(t *testing.T) {
 	payload := samplePayload{Chain: "eth", Token: "0xBEEF"}
 
 	// Act
-	env1, err1 := contracts.NewEventEnvelope("evt", payload, trace)
-	env2, err2 := contracts.NewEventEnvelope("evt", payload, trace)
+	env1, err1 := contracts.NewEventEnvelope("evt", payload, trace, "2026-01-01T00:00:00Z")
+	env2, err2 := contracts.NewEventEnvelope("evt", payload, trace, "2026-01-01T00:00:00Z")
 
 	// Assert
 	if err1 != nil || err2 != nil {
@@ -129,8 +128,8 @@ func TestNewEventEnvelope_DifferentPayloads_DifferentIDs(t *testing.T) {
 	trace := contracts.NewTraceFields("tr-3", "corr-3", "", "ver-3")
 
 	// Act
-	env1, _ := contracts.NewEventEnvelope("evt", samplePayload{Chain: "eth"}, trace)
-	env2, _ := contracts.NewEventEnvelope("evt", samplePayload{Chain: "bsc"}, trace)
+	env1, _ := contracts.NewEventEnvelope("evt", samplePayload{Chain: "eth"}, trace, "2026-01-01T00:00:00Z")
+	env2, _ := contracts.NewEventEnvelope("evt", samplePayload{Chain: "bsc"}, trace, "2026-01-01T00:00:00Z")
 
 	// Assert
 	if env1.EventID == env2.EventID {
@@ -144,7 +143,7 @@ func TestDecodePayload_Happy(t *testing.T) {
 	// Arrange
 	trace := contracts.NewTraceFields("tr-4", "corr-4", "c4", "v4")
 	want := samplePayload{Chain: "eth", Token: "0xCAFE"}
-	env, err := contracts.NewEventEnvelope("test_event", want, trace)
+	env, err := contracts.NewEventEnvelope("test_event", want, trace, "2026-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("NewEventEnvelope: %v", err)
 	}
@@ -166,7 +165,7 @@ func TestDecodePayload_InvalidJSON(t *testing.T) {
 	env := contracts.EventEnvelope{
 		EventID:   "bad-001",
 		EventType: "bad_event",
-		Payload:   json.RawMessage(`{not valid json`),
+		Payload:   `{not valid json`,
 	}
 
 	// Act

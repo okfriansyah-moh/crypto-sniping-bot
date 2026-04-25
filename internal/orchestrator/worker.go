@@ -80,8 +80,13 @@ func RunWorker(
 		if stageErr != nil {
 			evtLog.Error("stage_handler_failed",
 				"error", stageErr,
-				"note", "event stays unprocessed for retry",
+				"note", "releasing claim for immediate retry",
 			)
+			// Release the claim so the event is immediately re-claimable
+			// by another worker, bypassing the stale-claim timeout window.
+			if releaseErr := adapter.ReleaseEventClaim(ctx, evt.EventID); releaseErr != nil {
+				evtLog.Error("release_claim_failed", "error", releaseErr)
+			}
 			continue
 		}
 
@@ -102,6 +107,8 @@ func RunWorker(
 }
 
 // safeProcess calls handler.Process and recovers from panics.
+// Returns database.ErrStagePanic on panic so callers can distinguish
+// a handler panic from a legitimate context.DeadlineExceeded timeout.
 func safeProcess(ctx context.Context, h StageHandler, evt *database.Event, logger *slog.Logger) (output *database.Event, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -109,7 +116,7 @@ func safeProcess(ctx context.Context, h StageHandler, evt *database.Event, logge
 				"panic", r,
 				"stack", string(debug.Stack()),
 			)
-			err = context.DeadlineExceeded // non-nil error to skip mark-processed
+			err = database.ErrStagePanic
 		}
 	}()
 	return h.Process(ctx, evt)
