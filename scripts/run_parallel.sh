@@ -858,12 +858,16 @@ validate_protected_files() {
     local base_branch="main"
     if ! git rev-parse --verify "${base_branch}" &>/dev/null; then return 0; fi
 
-    # contracts/ — additive only
-    local modified_contracts
-    modified_contracts=$(git diff --name-only --diff-filter=M "${base_branch}" -- contracts/ 2>/dev/null || true)
-    if [[ -n "${modified_contracts}" ]]; then
+    # contracts/ — additive only: new files and new lines are allowed; deletions are not.
+    # Use the raw diff to detect removed lines rather than blocking all modifications.
+    # Phase 0 legitimately extends contracts/contracts.go with new DTOs — that is additive.
+    local contract_deletions
+    contract_deletions=$(git diff "${base_branch}" -- contracts/ 2>/dev/null \
+        | grep '^-' | grep -v '^--- ' || true)
+    if [[ -n "${contract_deletions}" ]]; then
         log_error "[protected-files] Existing contracts modified (additive-only policy):"
-        echo "${modified_contracts}" | while read -r f; do log_error "  ${f}"; done
+        git diff --name-only --diff-filter=MD "${base_branch}" -- contracts/ 2>/dev/null \
+            | while read -r f; do log_error "  ${f}"; done
         ((violations++))
     fi
 
