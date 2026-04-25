@@ -1,10 +1,13 @@
 package postgres
 
 // This file contains stub implementations of database.Adapter methods
-// that belong to later phases (Phase 1–6). Each stub returns ErrNotImplemented
+// that belong to later phases (Phase 3+). Each stub returns ErrNotImplemented
 // until its migration is applied and the full implementation is added.
 //
-// Protected file: database/ is Phase 0 only. All methods must be declared here.
+// Phase 2 methods have been moved to their own files:
+//   - lifecycle.go   — token lifecycle state machine
+//   - trading.go     — DTO persistence (data_quality, features, edges, etc.)
+//   - positions.go   — nonce manager, open positions, GetPosition
 
 import (
 	"context"
@@ -14,96 +17,6 @@ import (
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
 )
-
-// ── Token Lifecycle State Machine (Phase 2) ───────────────────────────────────
-
-func (d *DB) StartLifecycle(_ context.Context, _ contracts.MarketDataDTO) (string, error) {
-	return "", database.ErrNotImplemented
-}
-
-func (d *DB) TransitionState(_ context.Context, _ database.TransitionRequest) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) GetLifecycle(_ context.Context, _ string) (*database.Lifecycle, error) {
-	return nil, database.ErrNotImplemented
-}
-
-func (d *DB) GetLifecycleByToken(_ context.Context, _ string) (*database.Lifecycle, error) {
-	return nil, database.ErrNotImplemented
-}
-
-func (d *DB) QuarantineToken(_ context.Context, _ string, _ string) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertStateViolation(_ context.Context, _, _, _, _ string) error {
-	return database.ErrNotImplemented
-}
-
-// ── DTO Persistence (Phase 2) ─────────────────────────────────────────────────
-
-func (d *DB) InsertDataQuality(_ context.Context, _ contracts.DataQualityDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertFeature(_ context.Context, _ contracts.FeatureDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertEdge(_ context.Context, _ contracts.EdgeDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertValidatedEdge(_ context.Context, _ contracts.ValidatedEdgeDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertSelection(_ context.Context, _ contracts.SelectionOutputDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertAllocation(_ context.Context, _ contracts.AllocationDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertExecutionResult(_ context.Context, _ contracts.ExecutionResultDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertPositionState(_ context.Context, _ contracts.PositionStateDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertEvaluation(_ context.Context, _ contracts.EvaluationDTO) error {
-	return database.ErrNotImplemented
-}
-
-func (d *DB) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
-	return database.ErrNotImplemented
-}
-
-// ── Nonce Manager (Phase 2) ───────────────────────────────────────────────────
-
-func (d *DB) AllocateNonce(_ context.Context, _ string, _ string) (uint64, error) {
-	return 0, database.ErrNotImplemented
-}
-
-func (d *DB) ReconcileNonce(_ context.Context, _ string, _ string, _ uint64) error {
-	return database.ErrNotImplemented
-}
-
-// ── Positions (Phase 2) ───────────────────────────────────────────────────────
-
-func (d *DB) GetOpenPositions(_ context.Context) ([]contracts.PositionStateDTO, error) {
-	return nil, database.ErrNotImplemented
-}
-
-func (d *DB) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
-	return nil, database.ErrNotImplemented
-}
-
-// ── ActivateStrategyVersion wrapper for interface ─────────────────────────────
 
 // pinActivatorAdapter wraps DB to satisfy PinStrategyVersion's interface.
 type pinActivatorAdapter struct {

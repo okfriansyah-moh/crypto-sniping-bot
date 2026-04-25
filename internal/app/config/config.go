@@ -14,11 +14,16 @@ import (
 // All thresholds and tunable parameters must come from YAML — no hardcoded values.
 // See docs/implementation_roadmap.md § 0.5.
 type Config struct {
-	Pipeline PipelineConfig         `yaml:"pipeline"`
-	Database DatabaseConfig         `yaml:"database"`
-	Worker   WorkerConfig           `yaml:"worker"`
-	Logging  LoggingConfig          `yaml:"logging"`
-	Chains   map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
+	Pipeline   PipelineConfig         `yaml:"pipeline"`
+	Database   DatabaseConfig         `yaml:"database"`
+	Worker     WorkerConfig           `yaml:"worker"`
+	Logging    LoggingConfig          `yaml:"logging"`
+	Chains     map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
+	Edge       EdgeConfig             `yaml:"edge"`
+	Validation ValidationConfig       `yaml:"validation"`
+	Selection  SelectionConfig        `yaml:"selection"`
+	Capital    CapitalConfig          `yaml:"capital"`
+	Position   PositionConfig         `yaml:"position"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -58,6 +63,53 @@ type WorkerConfig struct {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+}
+
+// EdgeConfig holds Phase 2 edge detection parameters.
+type EdgeConfig struct {
+	MinVelocityScore    float64 `yaml:"min_velocity_score"`
+	MinLiquidityScore   float64 `yaml:"min_liquidity_score"`
+	MaxAgeSeconds       int64   `yaml:"max_age_seconds"`
+	BaseWindowMs        int32   `yaml:"base_window_ms"`
+	WindowMomentumFactor float64 `yaml:"window_momentum_factor"`
+	TTLSeconds          int     `yaml:"ttl_seconds"`
+}
+
+// ValidationConfig holds Phase 2 EV gate parameters (fixed priors).
+type ValidationConfig struct {
+	PriorProbability   float64 `yaml:"prior_probability"`
+	PriorGainBps       int32   `yaml:"prior_gain_bps"`
+	PriorLossBps       int32   `yaml:"prior_loss_bps"`
+	PriorSlippageBps   int32   `yaml:"prior_slippage_bps"`
+	EvThresholdBps     int32   `yaml:"ev_threshold_bps"`
+	FixedCostsBps      int32   `yaml:"fixed_costs_bps"`
+	BuildSubmitP95Ms   int32   `yaml:"build_submit_p95_ms"`
+	TTLSeconds         int     `yaml:"ttl_seconds"`
+}
+
+// SelectionConfig holds Phase 2 selection parameters.
+type SelectionConfig struct {
+	MaxOpenPositions int `yaml:"max_open_positions"`
+}
+
+// CapitalConfig holds Phase 2 capital sizing parameters.
+type CapitalConfig struct {
+	WalletAddress          string  `yaml:"wallet_address"`
+	WalletPrivateKey       string  `yaml:"wallet_private_key"`
+	FixedEntrySizeUsd      float64 `yaml:"fixed_entry_size_usd"`
+	MaxTotalExposureUsd    float64 `yaml:"max_total_exposure_usd"`
+	MaxConcurrentPositions int     `yaml:"max_concurrent_positions"`
+	MaxSizeUsd             float64 `yaml:"max_size_usd"`
+	TTLSeconds             int     `yaml:"ttl_seconds"`
+}
+
+// PositionConfig holds Phase 2 position management parameters.
+type PositionConfig struct {
+	Tp1Bps              int32 `yaml:"tp1_bps"`
+	Tp2Bps              int32 `yaml:"tp2_bps"`
+	SlBps               int32 `yaml:"sl_bps"`
+	MaxHoldSeconds      int32 `yaml:"max_hold_seconds"`
+	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
 }
 
 // Load reads configuration from one or more YAML config files.
@@ -161,6 +213,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		cfg.Logging.Level = v
+	}
+	if v := os.Getenv("SNIPER_WALLET_ADDRESS"); v != "" {
+		cfg.Capital.WalletAddress = v
+	}
+	if v := os.Getenv("SNIPER_WALLET_KEY"); v != "" {
+		cfg.Capital.WalletPrivateKey = v
 	}
 }
 
