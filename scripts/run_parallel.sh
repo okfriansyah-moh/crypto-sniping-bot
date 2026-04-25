@@ -858,17 +858,19 @@ validate_protected_files() {
     local base_branch="main"
     if ! git rev-parse --verify "${base_branch}" &>/dev/null; then return 0; fi
 
-    # contracts/ — additive only: new files and new lines are allowed; deletions are not.
-    # Use the raw diff to detect removed lines rather than blocking all modifications.
-    # Phase 0 legitimately extends contracts/contracts.go with new DTOs — that is additive.
-    local contract_deletions
-    contract_deletions=$(git diff "${base_branch}" -- contracts/ 2>/dev/null \
-        | grep '^-' | grep -v '^--- ' || true)
-    if [[ -n "${contract_deletions}" ]]; then
-        log_error "[protected-files] Existing contracts modified (additive-only policy):"
-        git diff --name-only --diff-filter=MD "${base_branch}" -- contracts/ 2>/dev/null \
-            | while read -r f; do log_error "  ${f}"; done
-        ((violations++))
+    # contracts/ — additive only for all phases EXCEPT Phase 0.
+    # Phase 0 establishes the contract foundation and may replace skeleton stubs with real DTOs.
+    # All subsequent phases may only ADD new DTOs — removing or modifying existing fields is forbidden.
+    if [[ "${phase_label}" != *"phase-0"* ]] && [[ "${phase_label}" != *"group-0"* ]]; then
+        local contract_deletions
+        contract_deletions=$(git diff "${base_branch}" -- contracts/ 2>/dev/null \
+            | grep '^-' | grep -v '^--- ' || true)
+        if [[ -n "${contract_deletions}" ]]; then
+            log_error "[protected-files] Existing contracts modified (additive-only policy):"
+            git diff --name-only --diff-filter=MD "${base_branch}" -- contracts/ 2>/dev/null \
+                | while read -r f; do log_error "  ${f}"; done
+            ((violations++))
+        fi
     fi
 
     # database/ — only Phase 0 allowed
