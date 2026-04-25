@@ -37,6 +37,10 @@ func (d *DB) Initialize(ctx context.Context, cfg database.Config) error {
 	if sslMode == "" {
 		sslMode = "disable"
 	}
+	if sslMode == "disable" {
+		d.logger.Warn("postgres_tls_disabled",
+			"note", "set ssl_mode to 'require' or 'verify-full' in production")
+	}
 	dsn := fmt.Sprintf(
 		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.Database, cfg.User, cfg.Password, sslMode,
