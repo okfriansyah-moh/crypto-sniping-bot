@@ -68,6 +68,14 @@ result = rejectedExecResult(alloc, now)
 } else if w.evmClient == nil || w.privKey == "" {
 result = simulatedExecResult(alloc, now)
 } else {
+// SECURITY WARNING: Phase 2 uses amountOutMin=0 (no slippage protection).
+// Every live swap is vulnerable to sandwich attacks until Phase 3 adds a
+// real-time price feed and sets amountOutMin from the AllocationDTO.
+w.logger.Warn("execution_zero_slippage_protection",
+"token", alloc.TokenAddress,
+"size_usd", alloc.SizeUsd,
+"note", "amountOutMin=0: upgrade to Phase 3 before using real capital",
+)
 nonce, nonceErr := w.adapter.AllocateNonce(ctx, alloc.WalletAddress, alloc.Chain)
 if nonceErr != nil {
 w.logger.Warn("execution_worker_nonce_failed", "error", nonceErr)
@@ -97,7 +105,7 @@ nextState = "FAILED"
 if lc, ok := fetchLifecycle(ctx, w.adapter, alloc.TokenLifecycleID, w.logger); ok {
 transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
 LifecycleID:       alloc.TokenLifecycleID,
-ExpectedFromState: "ALLOCATED",
+ExpectedFromState: "SELECTED",
 ExpectedVersion:   lc.StateVersion,
 NewState:          nextState,
 Reason:            result.ErrorCode,

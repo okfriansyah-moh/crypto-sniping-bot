@@ -282,3 +282,61 @@ database:
 		t.Errorf("expected override-host from env, got %q", cfg.Database.Host)
 	}
 }
+
+// ── Security: credential redaction from Snapshot ─────────────────────────────
+
+// TestSnapshot_PrivateKeyNotInOutput verifies that Config.Snapshot() never
+// serializes WalletPrivateKey into the JSON that gets stored as the strategy
+// version's config_snapshot in the database.
+// Regression guard for the Critical finding: private key leaked in DB snapshot.
+func TestSnapshot_PrivateKeyNotInOutput(t *testing.T) {
+cfg := minimalValidConfig()
+cfg.Capital.WalletPrivateKey = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+cfg.Capital.WalletAddress = "0xAbCdEf1234567890AbCdEf1234567890AbCdEf12"
+
+snap, err := cfg.Snapshot()
+if err != nil {
+t.Fatalf("Snapshot: %v", err)
+}
+
+if containsAny(string(snap), "deadbeef", "0xdeadbeef", cfg.Capital.WalletPrivateKey) {
+t.Errorf("Snapshot must not contain WalletPrivateKey; got: %s", snap)
+}
+if containsAny(string(snap), "AbCdEf1234567890", cfg.Capital.WalletAddress) {
+t.Errorf("Snapshot must not contain WalletAddress; got: %s", snap)
+}
+}
+
+// TestSnapshot_AlgorithmicParamsPresent verifies that the snapshot still
+// captures all tunable algorithmic parameters needed for StrategyVersionID.
+func TestSnapshot_AlgorithmicParamsPresent(t *testing.T) {
+cfg := minimalValidConfig()
+cfg.Edge.MinVelocityScore = 0.42
+cfg.Validation.PriorProbability = 0.35
+cfg.Capital.FixedEntrySizeUsd = 99.0
+
+snap, err := cfg.Snapshot()
+if err != nil {
+t.Fatalf("Snapshot: %v", err)
+}
+
+snapStr := string(snap)
+// Snapshot uses Go PascalCase keys (structs have no json name-override tags).
+if !containsAny(snapStr, "FixedEntrySizeUsd", "MinVelocityScore") {
+t.Errorf("Snapshot must contain algorithmic parameters; got: %s", snap)
+}
+}
+
+// containsAny reports whether s contains any of the given substrings.
+func containsAny(s string, subs ...string) bool {
+for _, sub := range subs {
+if sub != "" && len(sub) > 0 {
+for i := 0; i <= len(s)-len(sub); i++ {
+if s[i:i+len(sub)] == sub {
+return true
+}
+}
+}
+}
+return false
+}

@@ -94,8 +94,13 @@ type SelectionConfig struct {
 
 // CapitalConfig holds Phase 2 capital sizing parameters.
 type CapitalConfig struct {
-	WalletAddress          string  `yaml:"wallet_address"`
-	WalletPrivateKey       string  `yaml:"wallet_private_key"`
+	// WalletAddress and WalletPrivateKey are excluded from JSON serialization
+	// (json:"-") so that Config.Snapshot() never embeds credentials in the
+	// strategy_versions.config_snapshot column. They are runtime-only values
+	// loaded from env vars (SNIPER_WALLET_ADDRESS / SNIPER_WALLET_KEY) and
+	// must never be stored in the database.
+	WalletAddress          string  `yaml:"wallet_address"    json:"-"`
+	WalletPrivateKey       string  `yaml:"wallet_private_key" json:"-"`
 	FixedEntrySizeUsd      float64 `yaml:"fixed_entry_size_usd"`
 	MaxTotalExposureUsd    float64 `yaml:"max_total_exposure_usd"`
 	MaxConcurrentPositions int     `yaml:"max_concurrent_positions"`
