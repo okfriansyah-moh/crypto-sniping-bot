@@ -58,3 +58,4 @@ secrets/
 *.log
 logs/
 
+PHASE_TASK.md

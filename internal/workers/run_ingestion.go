@@ -143,13 +143,13 @@ func RunIngestion(ctx context.Context, adapter database.Adapter, cfg *config.Con
 			RPCEndpoints:      chainCfg.RPCEndpoints,
 			ConfirmationDepth: chainCfg.ConfirmationDepth,
 			Backoff: ingestion.BackoffConfig{
-				InitialMs:  500,
-				MaxMs:      30000,
-				Multiplier: 2.0,
+				InitialMs:  chainCfg.Backoff.InitialMs,
+				MaxMs:      chainCfg.Backoff.MaxMs,
+				Multiplier: chainCfg.Backoff.Multiplier,
 			},
-			PollIntervalMs:    2000,
-			HeartbeatInterval: 10000,
-			HeartbeatTimeout:  30000,
+			PollIntervalMs:    chainCfg.PollIntervalMs,
+			HeartbeatInterval: chainCfg.HeartbeatIntervalMs,
+			HeartbeatTimeout:  chainCfg.HeartbeatTimeoutMs,
 		}
 
 		mod := ingestion.New(ingCfg, versionID, emit, logger)
