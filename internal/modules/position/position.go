@@ -137,16 +137,16 @@ func (m *Module) PollExit(
 
 	pricePct := (currentPrice - entryPrice) / entryPrice
 
+	// TP2 check (higher threshold — must be evaluated before TP1).
+	tp2Threshold := float64(pos.Tp2Bps) / 10000.0
+	if pricePct >= tp2Threshold {
+		return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TP2", now), nil
+	}
+
 	// TP1 check.
 	tp1Threshold := float64(pos.Tp1Bps) / 10000.0
 	if pricePct >= tp1Threshold {
 		return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TP1", now), nil
-	}
-
-	// TP2 check.
-	tp2Threshold := float64(pos.Tp2Bps) / 10000.0
-	if pricePct >= tp2Threshold {
-		return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TP2", now), nil
 	}
 
 	// Stop-loss check.

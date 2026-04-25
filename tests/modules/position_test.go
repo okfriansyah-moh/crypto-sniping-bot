@@ -147,3 +147,22 @@ func TestPollExit_NoExitInRange(t *testing.T) {
 		t.Errorf("CurrentPrice not updated: %q", updated.CurrentPrice)
 	}
 }
+
+func TestPollExit_TakeProfit2(t *testing.T) {
+mod := position.New(positionCfg())
+pos := openPositionFixture()
+// Entry = 1.0, TP2 = 10% → trigger at >= 1.10; must NOT fire TP1 instead.
+updated, err := mod.PollExit(context.Background(), pos, "1.12")
+if err != nil {
+t.Fatalf("unexpected error: %v", err)
+}
+if updated.Status != "exited" {
+t.Errorf("expected exited, got %q", updated.Status)
+}
+if updated.ExitReason != "TP2" {
+t.Errorf("expected TP2 exit, got %q (TP2 must be checked before TP1)", updated.ExitReason)
+}
+if updated.PnlPct <= 0 {
+t.Errorf("expected positive PnL at TP2, got %v", updated.PnlPct)
+}
+}
