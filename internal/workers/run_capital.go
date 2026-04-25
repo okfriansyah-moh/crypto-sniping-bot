@@ -54,15 +54,7 @@ if err := w.adapter.InsertAllocation(ctx, allocDTO); err != nil {
 w.logger.Warn("capital_worker_persist_failed", "event_id", allocDTO.EventID, "error", err)
 }
 
-if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-LifecycleID:       dto.TokenLifecycleID,
-ExpectedFromState: "SELECTED",
-ExpectedVersion:   lc.StateVersion,
-NewState:          "ALLOCATED",
-ActorWorker:       "capital_worker",
-}, w.logger)
-}
+// No lifecycle transition here — lifecycle stays SELECTED until execution completes.
 
 return makeOutputEvent(
 allocDTO.EventID, allocDTO, "allocation_event",

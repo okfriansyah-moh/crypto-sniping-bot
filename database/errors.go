@@ -10,9 +10,13 @@ var ErrNotImplemented = errors.New("database: method not yet implemented")
 // ErrUnknownVersion is returned when a strategy version ID does not exist.
 var ErrUnknownVersion = errors.New("database: unknown strategy version")
 
-// ErrInvalidTransition is returned when a state machine transition request
-// violates the allowed forward-only state graph (CAS guard failure on state).
+// ErrInvalidTransition is returned when the CAS guard (state_version or current_state)
+// fails on a state machine transition attempt.
 var ErrInvalidTransition = errors.New("database: invalid state transition")
+
+// ErrForbiddenTransition is returned when the requested target state is not a
+// permitted forward transition from the current state (topology violation).
+var ErrForbiddenTransition = errors.New("database: forbidden state transition")
 
 // ErrMissingTraceField is returned when an event is inserted without the
 // required trace fields (trace_id, correlation_id, version_id).

@@ -35,13 +35,14 @@ ON CONFLICT (token_lifecycle_id) DO NOTHING`
 
 // TransitionState applies a forward-only CAS transition on a token lifecycle.
 // Uses UPDATE ... WHERE current_state = $expected AND state_version = $ver (optimistic lock).
-// Returns ErrInvalidTransition if the CAS guard fails.
+// Returns ErrForbiddenTransition if the target is not a valid forward state.
+// Returns ErrInvalidTransition if the CAS guard (state_version or current_state) fails.
 func (d *DB) TransitionState(ctx context.Context, req database.TransitionRequest) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	// Validate forward transition.
+	// Validate forward transition topology.
 	if !isValidTransition(req.ExpectedFromState, req.NewState) {
-		return fmt.Errorf("transition %s→%s: %w", req.ExpectedFromState, req.NewState, database.ErrInvalidTransition)
+		return fmt.Errorf("transition %s→%s: %w", req.ExpectedFromState, req.NewState, database.ErrForbiddenTransition)
 	}
 
 	var terminalReason *string
