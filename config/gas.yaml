@@ -1,0 +1,22 @@
+gas:
+  # EIP-1559 defaults
+  eip1559_enabled: true
+
+  # Base fee multipliers
+  base_fee_multiplier: 1.2    # multiply latest base fee for max_fee_per_gas
+
+  # Priority fee (tip) by chain
+  priority_fee_gwei:
+    eth: 2
+    bsc: 1
+
+  # Gas limits by operation
+  gas_limits:
+    swap:     250000
+    approve:  60000
+    transfer: 21000
+
+  # Max gas price caps (in gwei) — safety hard stops
+  max_gas_price_gwei:
+    eth: 500
+    bsc: 20

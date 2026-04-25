@@ -1,0 +1,292 @@
+package orchestrator_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"crypto-sniping-bot/contracts"
+	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/internal/app/config"
+	"crypto-sniping-bot/internal/orchestrator"
+)
+
+// ─── Mock Adapter ─────────────────────────────────────────────────────────────
+
+type mockAdapter struct {
+	versions map[string]*database.StrategyVersion
+	runs     map[string]*database.PipelineRun
+	events   []database.Event
+	active   *string
+}
+
+func newMock() *mockAdapter {
+	return &mockAdapter{
+		versions: make(map[string]*database.StrategyVersion),
+		runs:     make(map[string]*database.PipelineRun),
+	}
+}
+
+func (m *mockAdapter) Initialize(_ context.Context, _ database.Config) error { return nil }
+func (m *mockAdapter) RunMigrations(_ context.Context) error                  { return nil }
+func (m *mockAdapter) Close(_ context.Context) error                          { return nil }
+
+func (m *mockAdapter) InsertEvent(_ context.Context, e database.Event) error {
+	m.events = append(m.events, e)
+	return nil
+}
+func (m *mockAdapter) ClaimNextEvent(_ context.Context, _ string, _ []string) (*database.Event, error) {
+	return nil, nil
+}
+func (m *mockAdapter) MarkEventProcessed(_ context.Context, _ string) error { return nil }
+func (m *mockAdapter) GetEventByID(_ context.Context, _ string) (*database.Event, error) {
+	return nil, database.ErrNotFound
+}
+func (m *mockAdapter) GetEventsByTrace(_ context.Context, _ string) ([]database.Event, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetEventsByCorrelation(_ context.Context, _ string) ([]database.Event, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetFailureChain(_ context.Context, _ string) ([]database.Event, error) {
+	return nil, nil
+}
+
+func (m *mockAdapter) CreateRun(_ context.Context, run database.PipelineRun) error {
+	if _, ok := m.runs[run.RunID]; !ok {
+		cp := run
+		m.runs[run.RunID] = &cp
+	}
+	return nil
+}
+func (m *mockAdapter) UpdateRunStage(_ context.Context, runID, stage string) error {
+	if r, ok := m.runs[runID]; ok {
+		r.LastCompletedStage = &stage
+	}
+	return nil
+}
+func (m *mockAdapter) UpdateRunStatus(_ context.Context, runID, status string) error {
+	if r, ok := m.runs[runID]; ok {
+		r.Status = status
+	}
+	return nil
+}
+func (m *mockAdapter) GetRun(_ context.Context, runID string) (*database.PipelineRun, error) {
+	if r, ok := m.runs[runID]; ok {
+		return r, nil
+	}
+	return nil, database.ErrNotFound
+}
+
+func (m *mockAdapter) CreateStrategyVersion(_ context.Context, sv database.StrategyVersion) error {
+	if _, ok := m.versions[sv.StrategyVersionID]; !ok {
+		cp := sv
+		m.versions[sv.StrategyVersionID] = &cp
+	}
+	return nil
+}
+func (m *mockAdapter) ActivateStrategyVersion(_ context.Context, id string) error {
+	m.active = &id
+	return nil
+}
+func (m *mockAdapter) GetActiveStrategyVersion(_ context.Context) (*database.StrategyVersion, error) {
+	if m.active == nil {
+		return nil, database.ErrNotFound
+	}
+	if sv, ok := m.versions[*m.active]; ok {
+		return sv, nil
+	}
+	return nil, database.ErrNotFound
+}
+func (m *mockAdapter) GetStrategyVersion(_ context.Context, id string) (*database.StrategyVersion, error) {
+	if sv, ok := m.versions[id]; ok {
+		return sv, nil
+	}
+	return nil, database.ErrUnknownVersion
+}
+
+// Stub all Phase 1–6 methods.
+func (m *mockAdapter) UpsertIngestionWatermark(_ context.Context, _ string, _ uint64) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) GetIngestionWatermark(_ context.Context, _ string) (uint64, error) {
+	return 0, database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertMarketData(_ context.Context, _ contracts.MarketDataDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) GetMarketData(_ context.Context, _ string) (*contracts.MarketDataDTO, error) {
+	return nil, database.ErrNotImplemented
+}
+func (m *mockAdapter) StartLifecycle(_ context.Context, _ contracts.MarketDataDTO) (string, error) {
+	return "", database.ErrNotImplemented
+}
+func (m *mockAdapter) TransitionState(_ context.Context, _ database.TransitionRequest) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) GetLifecycle(_ context.Context, _ string) (*database.Lifecycle, error) {
+	return nil, database.ErrNotImplemented
+}
+func (m *mockAdapter) GetLifecycleByToken(_ context.Context, _ string) (*database.Lifecycle, error) {
+	return nil, database.ErrNotImplemented
+}
+func (m *mockAdapter) QuarantineToken(_ context.Context, _, _ string) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertStateViolation(_ context.Context, _, _, _, _ string) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertDataQuality(_ context.Context, _ contracts.DataQualityDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertFeature(_ context.Context, _ contracts.FeatureDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertEdge(_ context.Context, _ contracts.EdgeDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertValidatedEdge(_ context.Context, _ contracts.ValidatedEdgeDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertSelection(_ context.Context, _ contracts.SelectionOutputDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertAllocation(_ context.Context, _ contracts.AllocationDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertExecutionResult(_ context.Context, _ contracts.ExecutionResultDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertPositionState(_ context.Context, _ contracts.PositionStateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error) {
+	return 0, database.ErrNotImplemented
+}
+func (m *mockAdapter) ReconcileNonce(_ context.Context, _, _ string, _ uint64) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotImplemented
+}
+func (m *mockAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotImplemented
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+type noopHandler struct{}
+
+func (noopHandler) Process(_ context.Context, _ *database.Event) (*database.Event, error) {
+	return nil, nil
+}
+
+func minimalConfig() *config.Config {
+	return &config.Config{
+		Logging: config.LoggingConfig{Level: "info", Format: "text"},
+		Worker:  config.WorkerConfig{IdleBackoffMs: 100},
+	}
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+func TestBoot_PinsStrategyVersion(t *testing.T) {
+	ctx := context.Background()
+	mock := newMock()
+	cfg := minimalConfig()
+
+	orch, err := orchestrator.Boot(ctx, mock, cfg, nil)
+	if err != nil {
+		t.Fatalf("Boot failed: %v", err)
+	}
+	if orch.VersionID() == "" {
+		t.Error("expected non-empty VersionID after Boot")
+	}
+	if mock.active == nil || *mock.active == "" {
+		t.Error("expected a version to be activated")
+	}
+}
+
+func TestBoot_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	mock := newMock()
+	cfg := minimalConfig()
+
+	orch1, err := orchestrator.Boot(ctx, mock, cfg, nil)
+	if err != nil {
+		t.Fatalf("first Boot failed: %v", err)
+	}
+	orch2, err := orchestrator.Boot(ctx, mock, cfg, nil)
+	if err != nil {
+		t.Fatalf("second Boot failed: %v", err)
+	}
+	if orch1.VersionID() != orch2.VersionID() {
+		t.Errorf("versionIDs differ: %s vs %s", orch1.VersionID(), orch2.VersionID())
+	}
+}
+
+func TestRun_NoStages_ExitsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	mock := newMock()
+	cfg := minimalConfig()
+
+	orch, err := orchestrator.Boot(ctx, mock, cfg, nil)
+	if err != nil {
+		t.Fatalf("Boot failed: %v", err)
+	}
+
+	err = orch.Run(ctx)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context error, got: %v", err)
+	}
+}
+
+func TestRegistry_RegisterAndEntries(t *testing.T) {
+	r := orchestrator.NewRegistry()
+
+	if !r.Empty() {
+		t.Error("new registry should be empty")
+	}
+
+	r.Register("stage-a", noopHandler{}, "event.a")
+	r.Register("stage-b", noopHandler{}, "event.b1", "event.b2")
+
+	if r.Len() != 2 {
+		t.Errorf("expected 2 entries, got %d", r.Len())
+	}
+
+	entries := r.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries from Entries(), got %d", len(entries))
+	}
+
+	// Entries must be in sorted (deterministic) order.
+	if entries[0].Group != "stage-a" {
+		t.Errorf("expected stage-a first, got %s", entries[0].Group)
+	}
+	if entries[1].Group != "stage-b" {
+		t.Errorf("expected stage-b second, got %s", entries[1].Group)
+	}
+}
+
+func TestRegistry_DuplicatePanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on duplicate registration")
+		}
+	}()
+
+	r := orchestrator.NewRegistry()
+	r.Register("stage-a", noopHandler{}, "event.a")
+	r.Register("stage-a", noopHandler{}, "event.a") // must panic
+}
+
