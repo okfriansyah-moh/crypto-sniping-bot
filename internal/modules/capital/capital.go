@@ -31,7 +31,7 @@ return &Module{cfg: cfg}
 
 // Process computes the capital allocation for a selected trade.
 // Phase 2: fixed base allocation; Phase 7 adds Kelly-adjacent sizing.
-// ExecutionID is content-addressable: SHA256(tokenAddress + chain + correlationID).
+// ExecutionID is content-addressable: SHA256(trace_id || version_id || token_address || chain) per architecture § 4.10.D.2.
 func (m *Module) Process(_ context.Context, in contracts.SelectionOutputDTO, chain string) (contracts.AllocationDTO, error) {
 nowTime := time.Now().UTC()
 now := nowTime.Format(time.RFC3339Nano)
@@ -68,10 +68,8 @@ expiresAt := nowTime.Add(
 time.Duration(m.cfg.TTLSeconds) * time.Second,
 ).Format(time.RFC3339Nano)
 
-// ExecutionID: content-addressable for idempotency.
-executionID := contracts.ContentIDFromString(
-fmt.Sprintf("%s:%s:%s", in.TokenAddress, chain, in.CorrelationID),
-)
+// ExecutionID: content-addressable per architecture § 4.10.D.2.
+executionID := contracts.ContentIDFromString(in.TraceID + in.VersionID + in.TokenAddress + chain)
 
 eventID := contracts.ContentIDFromString(fmt.Sprintf("alloc:%s", in.EventID))
 

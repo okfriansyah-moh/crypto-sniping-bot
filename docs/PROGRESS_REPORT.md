@@ -10,11 +10,11 @@
 | Metric           | Value                             |
 | ---------------- | --------------------------------- |
 | **Total Phases** | 9                                 |
-| **Completed**    | 9                                 |
+| **Completed**    | 10         |
 | **In Progress**  | 0                                 |
 | **Failed**       | 0                                 |
-| **Not Started**  | 0                                 |
-| **Last Updated** | 2026-04-26 (phase-7 solana-market) |
+| **Not Started**  | 0          |
+| **Last Updated** | 2026-04-26 |
 
 ---
 
@@ -30,7 +30,7 @@
 | 5     | Learning Engine        | completed | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass.                                                                                                                           |
 | 6     | Observability & Risk   | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
 | —     | Production Hardening   | completed | 0           | 8 critical/significant/moderate fixes: C4 CAS bypass, C2 circuit-breaker wiring, C3 hardcoded ETH price, S4 hardcoded gas limit, S6 hardcoded poll timeouts, C1 wallet sharding, S3 double MarkEventProcessed, M1 unstructured logging. Build/vet/all-30-packages clean.  |
-| 7     | Solana Market          | completed | 0           | ingestion_solana (Raydium V4 + Pump.fun, Borsh decode, gap recovery), execution_solana (ed25519, swap instruction, tx sign/confirm), execution router (EVM+Solana dispatch), run_ingestion_solana worker, WithSolanaExecutor on ExecutionWorker; migration 000012; all 30 packages pass. |
+| 7     | Solana Market          | completed   | 0           | All pipeline agents passed |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 
