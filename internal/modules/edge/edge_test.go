@@ -123,8 +123,9 @@ func TestProcess_EdgeDetected_OpportunityWindowCalculated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// window = 5000 * (1 + 0.2 * 0.5) = 5000 * 1.1 = 5500
-	expected := int32(5500)
+	// MomentumScore(priceMomentum=0, volumeMomentum=0.5) = 0.6*0.5 + 0.4*0 = 0.30
+	// window = 5000 * (1 + 0.2 * 0.30) = 5000 * 1.06 = 5300
+	expected := int32(5300)
 	if out.OpportunityWindowMs != expected {
 		t.Errorf("expected OpportunityWindowMs=%d, got %d", expected, out.OpportunityWindowMs)
 	}
