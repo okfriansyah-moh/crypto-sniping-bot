@@ -68,7 +68,7 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | DTO validation         | pass   | All 17 DTOs verified; no forbidden types; no methods                 |
 | Orchestrator integrity | pass   | Only orchestrator calls adapter; modules are pure                    |
 | Protected files        | pass   | `contracts/` additive-only; `database/` Phase 0 only                 |
-| Deterministic ordering | pass   | Content-addressable IDs; sorted collections                          |
+| Deterministic ordering | pass   | Content-addressable IDs; sorted collections; single time.Now() per fn |
 
 ---
 
@@ -105,3 +105,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | 2026-04-25 | manual (mode-2) | 0      | multi-session | —           | completed |
 | 2026-04-25 | mode-2            | 1      | —            | —           | completed |
 | 2026-04-25 | mode-2            | 2      | —            | —           | completed |
+| 2026-04-26 | integration-agent | 3    | —            | —           | integration-validated |
