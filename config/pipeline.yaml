@@ -24,3 +24,42 @@ worker:
 logging:
   level: info               # debug | info | warn | error
   format: json              # json | text
+
+# ── Phase 2: Pipeline Stage Configuration ─────────────────────────────────────
+
+edge:
+  min_velocity_score: 0.3        # minimum tx velocity score to detect edge
+  min_liquidity_score: 0.2       # minimum liquidity score to detect edge
+  max_age_seconds: 300           # token age ceiling for NEW_LAUNCH rule (5 min)
+  base_window_ms: 4000           # base opportunity window in milliseconds
+  window_momentum_factor: 0.5    # scales window by edge strength
+  ttl_seconds: 8                 # EdgeDTO TTL before expiry
+
+validation:
+  prior_probability: 0.35        # fixed prior P(success) — Phase 2 simplification
+  prior_gain_bps: 3000           # expected gain on win (30%)
+  prior_loss_bps: 4000           # expected loss on loss (40%)
+  prior_slippage_bps: 200        # P95 slippage estimate
+  ev_threshold_bps: 100          # minimum EV to ACCEPT (1%)
+  fixed_costs_bps: 150           # gas + protocol fees
+  build_submit_p95_ms: 500       # estimated build+submit latency overhead
+  ttl_seconds: 5                 # ValidatedEdgeDTO TTL before expiry
+
+selection:
+  max_open_positions: 1          # Phase 2: one concurrent position only
+
+capital:
+  wallet_address: ""             # EIP-55 wallet address (set via env or config)
+  wallet_private_key: ""         # hex private key — override with env SNIPER_WALLET_KEY
+  fixed_entry_size_usd: 50.0     # fixed trade size in USD (Phase 2 simplification)
+  max_total_exposure_usd: 500.0  # hard cap on total open exposure
+  max_concurrent_positions: 1    # Phase 2: max 1 position at once
+  max_size_usd: 100.0            # single position USD ceiling
+  ttl_seconds: 3                 # AllocationDTO TTL before expiry
+
+position:
+  tp1_bps: 2000                  # take-profit 1 threshold (20%)
+  tp2_bps: 5000                  # take-profit 2 threshold (50%)
+  sl_bps: 1500                   # stop-loss threshold (15%)
+  max_hold_seconds: 3600         # maximum hold time (1 hour)
+  poll_interval_seconds: 15      # how often to poll open position prices

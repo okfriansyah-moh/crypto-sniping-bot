@@ -15,6 +15,7 @@ import (
 	"crypto-sniping-bot/internal/app/logging"
 	"crypto-sniping-bot/internal/app/web"
 	"crypto-sniping-bot/internal/orchestrator"
+	"crypto-sniping-bot/internal/workers"
 )
 
 // server.go — Main daemon entry point.
@@ -52,6 +53,26 @@ func runServer() {
 		logger.Error("orchestrator_boot_failed", "error", err)
 		os.Exit(1)
 	}
+
+	// Register Phase 2 pipeline stage workers.
+	orch.RegisterStage("dq_worker", workers.NewDataQualityWorker(db, cfg, logger), "market_data_event")
+	orch.RegisterStage("features_worker", workers.NewFeaturesWorker(db, cfg, logger), "data_quality_event")
+	orch.RegisterStage("edge_worker", workers.NewEdgeWorker(db, cfg, logger), "feature_event")
+	orch.RegisterStage("validation_worker", workers.NewValidationWorker(db, cfg, logger), "edge_event")
+	orch.RegisterStage("selection_worker", workers.NewSelectionWorker(db, cfg, logger), "validated_edge_event")
+	orch.RegisterStage("capital_worker", workers.NewCapitalWorker(db, cfg, logger), "selection_event")
+	orch.RegisterStage("execution_worker",
+		workers.NewExecutionWorker(db, cfg, nil, cfg.Capital.WalletPrivateKey, 1, "", logger),
+		"allocation_event",
+	)
+	orch.RegisterStage("position_open_worker", workers.NewPositionOpenWorker(db, cfg, logger), "execution_result_event")
+
+	// Position poll runs as a separate goroutine (timer-driven, not event-driven).
+	go func() {
+		if err := workers.RunPositionPoll(ctx, db, cfg, nil, logger); err != nil && err != ctx.Err() {
+			logger.Error("position_poll_failed", "error", err)
+		}
+	}()
 
 	logger.Info("orchestrator_ready", "version_id", orch.VersionID())
 

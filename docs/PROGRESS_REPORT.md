@@ -10,10 +10,10 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 3          |
+| **Completed**    | 6          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 4          |
+| **Not Started**  | 1          |
 | **Last Updated** | 2026-04-25 |
 
 ---
@@ -24,7 +24,7 @@
 | ----- | --------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | 0     | Core Infrastructure   | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean. |
 | 1     | Detection & Ingestion | completed   | 0           | All pipeline agents passed |
-| 2     | Pipeline Core         | not-started | 0           |                                                                                                                                            |
+| 2     | Pipeline Core         | completed   | 0           | All pipeline agents passed |
 | 3     | Position Management   | not-started | 0           |                                                                                                                                            |
 | 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
 | 5     | Learning Engine       | not-started | 0           |                                                                                                                                            |
@@ -42,7 +42,7 @@
 | ----- | ------------- | ------------------ | ----------- | ---------------- | ------------ | --------- |
 | 0     | pass          | pass (after fixes) | pass        | pass             | pass         | completed |
 | 1     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
-| 2     | —             | —                  | —           | —                | —            | —         |
+| 2     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
 | 3     | —             | —                  | —           | —                | —            | —         |
 | 4     | —             | —                  | —           | —                | —            | —         |
 | 5     | —             | —                  | —           | —                | —            | —         |
@@ -104,3 +104,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | ---------- | --------------- | ------ | ------------- | ----------- | --------- |
 | 2026-04-25 | manual (mode-2) | 0      | multi-session | —           | completed |
 | 2026-04-25 | mode-2            | 1      | —            | —           | completed |
+| 2026-04-25 | mode-2            | 2      | —            | —           | completed |

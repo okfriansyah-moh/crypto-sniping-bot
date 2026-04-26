@@ -161,6 +161,10 @@ type Adapter interface {
 	// GetActiveStrategy returns the version with status="active".
 	GetActiveStrategy(ctx context.Context) (*StrategyVersion, error)
 
+	// GetShadowStrategy returns the strategy version with status="shadow", if any.
+	// Returns nil (no error) when no shadow version exists.
+	GetShadowStrategy(ctx context.Context) (*StrategyVersion, error)
+
 	// ActivateStrategyVersion deactivates the current active version and
 	// activates the given version in a single transaction.
 	// Safe to call on restart: re-activating an already-active version is a no-op.
