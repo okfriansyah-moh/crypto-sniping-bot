@@ -9,9 +9,19 @@ import (
 	"time"
 
 	"crypto-sniping-bot/contracts"
-	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 )
+
+// VersionProposal is the module-level output of a parameter update cycle.
+// It contains all data needed to construct a database.StrategyVersion; the
+// caller (worker/orchestrator) is responsible for the database conversion.
+type VersionProposal struct {
+	StrategyVersionID string
+	ConfigSnapshot    []byte
+	CreatedAt         string
+	Status            string // always "draft"
+	ParentVersionID   string
+}
 
 // Updater creates bounded StrategyVersion candidates when evaluation data
 // indicates a parameter family should be adjusted.
@@ -63,29 +73,32 @@ func (u *Updater) Propose(
 }
 
 // ProposeVersion is a convenience wrapper: it calls Propose and then BuildStrategyVersion
-// in one step, returning the ready-to-persist StrategyVersion.
-// minSampleSize is read from cfg — returns ErrInsufficientSamples when gate not met.
+// in one step, returning a ready-to-persist VersionProposal.
+// activeSnapshot is the JSON config snapshot of the active strategy version.
+// parentVersionID is the ID of the active strategy version (used for rollback linkage).
+// minSampleSize is read from cfg — returns error when sample gate not met.
 func (u *Updater) ProposeVersion(
 	ctx context.Context,
-	activeVersion database.StrategyVersion,
+	activeSnapshot []byte,
+	parentVersionID string,
 	eval contracts.EvaluationDTO,
 	traceID string,
-) (database.StrategyVersion, error) {
+) (VersionProposal, error) {
 	minSamples := u.cfg.MinSampleSize
 	if minSamples <= 0 {
 		minSamples = 30
 	}
 	if int(eval.SampleSize) < minSamples {
-		return database.StrategyVersion{}, fmt.Errorf("updater: insufficient samples: have %d need %d",
+		return VersionProposal{}, fmt.Errorf("updater: insufficient samples: have %d need %d",
 			eval.SampleSize, minSamples)
 	}
 
-	params, family, err := u.Propose(ctx, activeVersion.ConfigSnapshot, eval)
+	params, family, err := u.Propose(ctx, activeSnapshot, eval)
 	if err != nil {
-		return database.StrategyVersion{}, err
+		return VersionProposal{}, err
 	}
 
-	return BuildStrategyVersion(params, activeVersion.StrategyVersionID, family, eval.SampleSize, traceID)
+	return BuildStrategyVersion(params, parentVersionID, family, eval.SampleSize, traceID)
 }
 
 
@@ -112,30 +125,30 @@ func NewVersionID(params paramMap) (string, error) {
 	return contracts.ContentIDFromString(string(b)), nil
 }
 
-// BuildStrategyVersion constructs a StrategyVersion from a proposed param map.
+// BuildStrategyVersion constructs a VersionProposal from a proposed param map.
 func BuildStrategyVersion(
 	params paramMap,
 	parentVersionID string,
 	family string,
 	sampleSize int32,
 	traceID string,
-) (database.StrategyVersion, error) {
+) (VersionProposal, error) {
 	versionID, err := NewVersionID(params)
 	if err != nil {
-		return database.StrategyVersion{}, err
+		return VersionProposal{}, err
 	}
 
 	snapshot, err := json.Marshal(params)
 	if err != nil {
-		return database.StrategyVersion{}, fmt.Errorf("build strategy version: marshal: %w", err)
+		return VersionProposal{}, fmt.Errorf("build strategy version: marshal: %w", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_ = family    // stored in event payload
+	_ = family     // stored in event payload
 	_ = sampleSize // stored in event payload
-	_ = traceID   // stored in event payload
+	_ = traceID    // stored in event payload
 
-	return database.StrategyVersion{
+	return VersionProposal{
 		StrategyVersionID: versionID,
 		ConfigSnapshot:    snapshot,
 		CreatedAt:         now,

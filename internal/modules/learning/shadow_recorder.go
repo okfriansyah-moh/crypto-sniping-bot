@@ -6,8 +6,22 @@ import (
 	"time"
 
 	"crypto-sniping-bot/contracts"
-	"crypto-sniping-bot/database"
 )
+
+// ShadowProposal carries the data needed to persist a shadow trade observation.
+// It contains no database package dependency; the caller converts it to
+// database.ShadowTrade before persisting.
+type ShadowProposal struct {
+	ShadowID            string
+	TokenAddress        string
+	Stage               string
+	RejectedAt          string
+	ObservationComplete bool
+	ObservedReturnPct   float64
+	Classification      string // initial: "TN"
+	LearningRecordID    string
+	VersionID           string
+}
 
 // ShadowRecorder emits shadow LearningRecordDTOs for every rejection event.
 // Shadow=true records track tokens we rejected so we can measure false negatives.
@@ -20,13 +34,13 @@ func NewShadowRecorder() *ShadowRecorder {
 	return &ShadowRecorder{classifier: &Classifier{}}
 }
 
-// RecordRejection builds a shadow LearningRecordDTO and a ShadowTrade row for
-// a rejected token. The ShadowTrade's observation_complete is false until the
+// RecordRejection builds a shadow LearningRecordDTO and a ShadowProposal for
+// a rejected token. The ShadowProposal's observation_complete is false until the
 // shadow observer closes the window.
 //
 // stage:    data_quality | edge | validated_edge | selection
 // tokenAddress / tokenLifecycleID: from the rejected event.
-// Returns the LearningRecordDTO, ShadowTrade (ready to persist), and shadowID.
+// Returns the LearningRecordDTO, ShadowProposal (ready to convert and persist), and shadowID.
 func (s *ShadowRecorder) RecordRejection(
 	_ context.Context,
 	stage string,
@@ -35,9 +49,9 @@ func (s *ShadowRecorder) RecordRejection(
 	causationEventID string,
 	versionID string,
 	strategyStatus string,
-) (contracts.LearningRecordDTO, database.ShadowTrade, error) {
+) (contracts.LearningRecordDTO, ShadowProposal, error) {
 	if stage == "" {
-		return contracts.LearningRecordDTO{}, database.ShadowTrade{},
+		return contracts.LearningRecordDTO{}, ShadowProposal{},
 			fmt.Errorf("shadow recorder: stage must not be empty")
 	}
 
@@ -74,7 +88,7 @@ func (s *ShadowRecorder) RecordRejection(
 		RecordedAt: now,
 	}
 
-	st := database.ShadowTrade{
+	sp := ShadowProposal{
 		ShadowID:            shadowID,
 		TokenAddress:        tokenAddress,
 		Stage:               stage,
@@ -86,5 +100,5 @@ func (s *ShadowRecorder) RecordRejection(
 		VersionID:           versionID,
 	}
 
-	return dto, st, nil
+	return dto, sp, nil
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"crypto-sniping-bot/contracts"
-	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/learning"
 )
@@ -150,7 +149,7 @@ func TestRecorder_RecordExecuted_Loss(t *testing.T) {
 
 func TestShadowRecorder_RecordRejection(t *testing.T) {
 	recorder := learning.NewShadowRecorder()
-	lr, st, err := recorder.RecordRejection(context.Background(),
+	lr, sp, err := recorder.RecordRejection(context.Background(),
 		"data_quality", "0xJKL", "lc-shadow-1", "evt-3", "v-1", "active")
 	if err != nil {
 		t.Fatalf("RecordRejection failed: %v", err)
@@ -158,10 +157,10 @@ func TestShadowRecorder_RecordRejection(t *testing.T) {
 	if !lr.Shadow {
 		t.Error("rejected trade should be shadow")
 	}
-	if st.ShadowID == "" {
+	if sp.ShadowID == "" {
 		t.Error("expected non-empty ShadowID")
 	}
-	if st.ObservationComplete {
+	if sp.ObservationComplete {
 		t.Error("observation should not be complete at rejection time")
 	}
 }
@@ -221,7 +220,8 @@ func TestUpdater_ProposeVersion_InsufficientSamples(t *testing.T) {
 	updater := learning.NewUpdater(cfg)
 
 	eval := contracts.EvaluationDTO{SampleSize: 5, Expectancy: 0.10, VersionID: "v-1"}
-	_, err := updater.ProposeVersion(context.Background(), makeSV("v-1"), eval, "trace-1")
+	_, err := updater.ProposeVersion(context.Background(),
+		[]byte(`{"threshold":0.3}`), "v-1", eval, "trace-1")
 	if err == nil {
 		t.Fatal("expected error for insufficient samples")
 	}
@@ -232,7 +232,8 @@ func TestUpdater_ProposeVersion_Success(t *testing.T) {
 	updater := learning.NewUpdater(cfg)
 
 	eval := contracts.EvaluationDTO{SampleSize: 10, Expectancy: 0.12, VersionID: "v-1"}
-	sv, err := updater.ProposeVersion(context.Background(), makeSV("v-1"), eval, "trace-1")
+	sv, err := updater.ProposeVersion(context.Background(),
+		[]byte(`{"threshold":0.3,"weight":0.5}`), "v-1", eval, "trace-1")
 	if err != nil {
 		t.Fatalf("ProposeVersion failed: %v", err)
 	}
@@ -369,12 +370,3 @@ func TestOpportunityMonitor_Healthy(t *testing.T) {
 }
 
 // ─── test helpers ────────────────────────────────────────────────────────────
-
-func makeSV(versionID string) database.StrategyVersion {
-	return database.StrategyVersion{
-		StrategyVersionID: versionID,
-		ConfigSnapshot:    []byte(`{"threshold":0.3,"weight":0.5}`),
-		Status:            "active",
-		ParentVersionID:   "",
-	}
-}

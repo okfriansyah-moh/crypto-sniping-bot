@@ -99,7 +99,7 @@ func RunShadowRecorder(
 		return nil
 	}
 
-	lrDTO, st, err := recorder.RecordRejection(ctx, stage, tokenAddress, lifecycleID,
+	lrDTO, sp, err := recorder.RecordRejection(ctx, stage, tokenAddress, lifecycleID,
 		evt.EventID, activeVersion.StrategyVersionID, "active")
 	if err != nil {
 		logger.Error("shadow_recorder_record_failed", "event_id", evt.EventID, "error", err)
@@ -113,6 +113,17 @@ func RunShadowRecorder(
 		return err
 	}
 
+	st := database.ShadowTrade{
+		ShadowID:            sp.ShadowID,
+		TokenAddress:        sp.TokenAddress,
+		Stage:               sp.Stage,
+		RejectedAt:          sp.RejectedAt,
+		ObservationComplete: sp.ObservationComplete,
+		ObservedReturnPct:   sp.ObservedReturnPct,
+		Classification:      sp.Classification,
+		LearningRecordID:    sp.LearningRecordID,
+		VersionID:           sp.VersionID,
+	}
 	if err := adapter.InsertShadowTrade(ctx, st); err != nil {
 		logger.Warn("shadow_recorder_persist_st_failed", "shadow_id", st.ShadowID, "error", err)
 		// Non-fatal: learning record is persisted; shadow trade is best-effort.

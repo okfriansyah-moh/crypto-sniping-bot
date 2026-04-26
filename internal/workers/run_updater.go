@@ -48,27 +48,35 @@ func RunUpdater(
 		return nil
 	}
 
-	newVersion, err := updater.ProposeVersion(ctx, *activeVersion, evalDTO, evt.TraceID)
+	newVersion, err := updater.ProposeVersion(ctx, activeVersion.ConfigSnapshot, activeVersion.StrategyVersionID, evalDTO, evt.TraceID)
 	if err != nil {
 		logger.Warn("updater_propose_failed", "error", err)
 		_ = adapter.MarkEventProcessed(ctx, evt.EventID)
 		return nil // non-fatal: insufficient samples or no update needed
 	}
 
-	if err := adapter.CreateStrategyVersion(ctx, newVersion); err != nil {
-		logger.Error("updater_create_version_failed", "version_id", newVersion.StrategyVersionID, "error", err)
+	dbVersion := database.StrategyVersion{
+		StrategyVersionID: newVersion.StrategyVersionID,
+		ConfigSnapshot:    newVersion.ConfigSnapshot,
+		CreatedAt:         newVersion.CreatedAt,
+		Status:            newVersion.Status,
+		ParentVersionID:   newVersion.ParentVersionID,
+	}
+
+	if err := adapter.CreateStrategyVersion(ctx, dbVersion); err != nil {
+		logger.Error("updater_create_version_failed", "version_id", dbVersion.StrategyVersionID, "error", err)
 		_ = adapter.ReleaseEventClaim(ctx, evt.EventID)
 		return err
 	}
 
-	if err := adapter.SetStrategyVersionStatus(ctx, newVersion.StrategyVersionID, "shadow", "updater_proposed"); err != nil {
-		logger.Error("updater_set_shadow_failed", "version_id", newVersion.StrategyVersionID, "error", err)
+	if err := adapter.SetStrategyVersionStatus(ctx, dbVersion.StrategyVersionID, "shadow", "updater_proposed"); err != nil {
+		logger.Error("updater_set_shadow_failed", "version_id", dbVersion.StrategyVersionID, "error", err)
 		_ = adapter.ReleaseEventClaim(ctx, evt.EventID)
 		return err
 	}
 
 	outEvt, err := makeOutputEvent(
-		newVersion.StrategyVersionID, newVersion, "strategy_version_event",
+		dbVersion.StrategyVersionID, dbVersion, "strategy_version_event",
 		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 	)
 	if err != nil {
@@ -84,8 +92,8 @@ func RunUpdater(
 	}
 
 	logger.Info("strategy_candidate_created",
-		"version_id", newVersion.StrategyVersionID,
-		"parent_version_id", newVersion.ParentVersionID,
+		"version_id", dbVersion.StrategyVersionID,
+		"parent_version_id", dbVersion.ParentVersionID,
 	)
 	return adapter.MarkEventProcessed(ctx, evt.EventID)
 }
