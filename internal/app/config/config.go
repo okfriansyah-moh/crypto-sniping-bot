@@ -14,16 +14,20 @@ import (
 // All thresholds and tunable parameters must come from YAML — no hardcoded values.
 // See docs/implementation_roadmap.md § 0.5.
 type Config struct {
-	Pipeline   PipelineConfig         `yaml:"pipeline"`
-	Database   DatabaseConfig         `yaml:"database"`
-	Worker     WorkerConfig           `yaml:"worker"`
-	Logging    LoggingConfig          `yaml:"logging"`
-	Chains     map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
-	Edge       EdgeConfig             `yaml:"edge"`
-	Validation ValidationConfig       `yaml:"validation"`
-	Selection  SelectionConfig        `yaml:"selection"`
-	Capital    CapitalConfig          `yaml:"capital"`
-	Position   PositionConfig         `yaml:"position"`
+	Pipeline     PipelineConfig         `yaml:"pipeline"`
+	Database     DatabaseConfig         `yaml:"database"`
+	Worker       WorkerConfig           `yaml:"worker"`
+	Logging      LoggingConfig          `yaml:"logging"`
+	Chains       map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
+	Edge         EdgeConfig             `yaml:"edge"`
+	Validation   ValidationConfig       `yaml:"validation"`
+	Selection    SelectionConfig        `yaml:"selection"`
+	Capital      CapitalConfig          `yaml:"capital"`
+	Position     PositionConfig         `yaml:"position"`
+	Execution    ExecutionPhase3Config  `yaml:"execution"`
+	Evaluation   EvaluationConfig       `yaml:"evaluation"`
+	StateMachine StateMachineConfig     `yaml:"state_machine"`
+	EventWeights EventPriorityWeights   `yaml:"event_weights"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -115,6 +119,48 @@ type PositionConfig struct {
 	SlBps               int32 `yaml:"sl_bps"`
 	MaxHoldSeconds      int32 `yaml:"max_hold_seconds"`
 	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
+}
+
+// ExecutionPhase3Config holds Phase 3 execution retry and replacement parameters.
+type ExecutionPhase3Config struct {
+	MaxRetry                 int     `yaml:"max_retry"`
+	MaxReplacements          int     `yaml:"max_replacements"`
+	RetryBackoffMs           []int   `yaml:"retry_backoff_ms"`
+	ReplacementThresholdMs   int     `yaml:"replacement_threshold_ms"`
+	DropTimeoutMs            int     `yaml:"drop_timeout_ms"`
+	FeeBumpMultiplier        float64 `yaml:"fee_bump_multiplier"`
+	PollIntervalMs           int     `yaml:"poll_interval_ms"`
+	ConcurrencyLimit         int     `yaml:"concurrency_limit"`
+	ConcurrencyMin           int     `yaml:"concurrency_min"`
+	ConcurrencyMax           int     `yaml:"concurrency_max"`
+	DefaultMaxSlippageBps    int32   `yaml:"default_max_slippage_bps"`
+}
+
+// EvaluationConfig holds Phase 3 evaluation engine parameters.
+type EvaluationConfig struct {
+	FPLossThresholdPct  float64 `yaml:"fp_loss_threshold_pct"`
+	FNGainThresholdPct  float64 `yaml:"fn_gain_threshold_pct"`
+	WindowSeconds       int     `yaml:"window_seconds"`
+}
+
+// StateMachineConfig holds Phase 3 state machine enforcement parameters.
+type StateMachineConfig struct {
+	QuarantineThreshold int `yaml:"quarantine_threshold"`
+}
+
+// EventPriorityWeights maps event types to base priority values.
+// Used by ComputePriority in resource_control package.
+type EventPriorityWeights struct {
+	PositionEventExit   int32 `yaml:"position_event_exit"`
+	ExecutionReplacement int32 `yaml:"execution_replacement"`
+	PositionEventOpen   int32 `yaml:"position_event_open"`
+	AllocationEvent     int32 `yaml:"allocation_event"`
+	ValidatedEdgeEvent  int32 `yaml:"validated_edge_event"`
+	EdgeEvent           int32 `yaml:"edge_event"`
+	FeatureEvent        int32 `yaml:"feature_event"`
+	DataQualityEvent    int32 `yaml:"data_quality_event"`
+	MarketDataEvent     int32 `yaml:"market_data_event"`
+	AdjustmentEvent     int32 `yaml:"adjustment_event"`
 }
 
 // Load reads configuration from one or more YAML config files.

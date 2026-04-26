@@ -119,6 +119,14 @@ type Adapter interface {
 	// InsertEvaluation persists an EvaluationDTO.
 	InsertEvaluation(ctx context.Context, dto contracts.EvaluationDTO) error
 
+	// GetExecutionByLifecycle returns the ExecutionResultDTO for a lifecycle ID.
+	// Returns ErrNotFound if no execution record exists for the lifecycle.
+	GetExecutionByLifecycle(ctx context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error)
+
+	// GetShadowTradesByWindow returns shadow trades created between start and end.
+	// Used by the evaluation engine to compute FalseNegative candidates.
+	GetShadowTradesByWindow(ctx context.Context, start, end string) ([]ShadowTrade, error)
+
 	// InsertLearningRecord persists a LearningRecordDTO.
 	InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
 
@@ -244,15 +252,17 @@ type Config struct {
 // Event is the event bus row representation.
 // See docs/db_adapter_spec.md § 2.
 type Event struct {
-	EventID       string // SHA256(payload_signature)[:16]
-	EventType     string // e.g., "market_data_event"
-	Payload       []byte // canonical JSON of the DTO
+	EventID       string  // SHA256(payload_signature)[:16]
+	EventType     string  // e.g., "market_data_event"
+	Payload       []byte  // canonical JSON of the DTO
 	TraceID       string
 	CorrelationID string
 	CausationID   *string // nil only for Layer 0 root events
 	VersionID     string
-	CreatedAt     string // ISO 8601
+	CreatedAt     string  // ISO 8601
 	Processed     bool
+	Priority      int     // higher = processed first; default 0
+	ExpiresAt     string  // ISO 8601 UTC; "" = no expiry
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
@@ -316,4 +326,21 @@ type ExposureSummary struct {
 	PerToken      map[string]float64 // tokenAddress → usd
 	PerCohort     map[string]float64 // cohortID     → usd
 	OpenPositions int32
+}
+
+// ShadowTrade is a rejected token that was observed to pump after rejection.
+// Used by the evaluation engine to compute FalseNegative candidates.
+type ShadowTrade struct {
+	ShadowTradeID  string
+	TokenAddress   string
+	Chain          string
+	TraceID        string
+	CorrelationID  string
+	VersionID      string
+	RejectReason   string
+	RejectedAt     string
+	PeakGainPct    float64
+	ObservedAt     string
+	IsFNCandidate  bool
+	CreatedAt      string
 }

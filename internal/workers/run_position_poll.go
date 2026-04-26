@@ -113,15 +113,9 @@ func pollOnce(
 				"pnl_usd", updated.PnlUsd,
 			)
 
-			if lc, ok := fetchLifecycle(ctx, adapter, updated.TokenLifecycleID, logger); ok {
-				transitionBestEffort(ctx, adapter, database.TransitionRequest{
-					LifecycleID:       updated.TokenLifecycleID,
-					ExpectedFromState: "POSITION_OPEN",
-					ExpectedVersion:   lc.StateVersion,
-					NewState:          "POSITION_CLOSED",
-					Reason:            updated.ExitReason,
-					ActorWorker:       "position_poll",
-				}, logger)
+			if err := doMandatoryTransition(ctx, adapter, updated.TokenLifecycleID, "POSITION_OPEN", "POSITION_CLOSED", updated.ExitReason, "position_poll"); err != nil {
+				posLog.Warn("position_poll_transition_failed", "error", err)
+				continue
 			}
 
 			payload, marshalErr := json.Marshal(updated)

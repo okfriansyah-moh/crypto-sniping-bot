@@ -6,10 +6,13 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"crypto-sniping-bot/contracts"
+	"crypto-sniping-bot/database"
 )
 
 // InsertDataQuality persists a DataQualityDTO.
@@ -354,4 +357,79 @@ ON CONFLICT (event_id) DO NOTHING`
 		return fmt.Errorf("insert learning record: %w", err)
 	}
 	return nil
+}
+
+// GetExecutionByLifecycle returns the ExecutionResultDTO for a lifecycle ID.
+// Returns ErrNotFound if no execution record exists for the lifecycle.
+func (d *DB) GetExecutionByLifecycle(ctx context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error) {
+const q = `
+SELECT event_id, trace_id, correlation_id, COALESCE(causation_id,''), version_id,
+       token_lifecycle_id, execution_id, allocation_id,
+       status, success, tx_hash, block_number, attempts, replaced, replacement_count,
+       mempool_route, nonce_used, wallet_address, wallet_shard,
+       final_gas_used, final_max_fee_wei, final_priority_fee_wei,
+       realized_entry_price, slippage_realized_bps, latency_ms, error_code,
+       mev_protected, execution_path, slippage_guard_bps, rejection_reason, simulated,
+       COALESCE(expires_at,''), priority, completed_at
+FROM execution_results
+WHERE token_lifecycle_id = $1
+ORDER BY completed_at DESC
+LIMIT 1`
+
+row := d.pool.QueryRowContext(ctx, q, lifecycleID)
+dto := &contracts.ExecutionResultDTO{}
+err := row.Scan(
+&dto.EventID, &dto.TraceID, &dto.CorrelationID, &dto.CausationID, &dto.VersionID,
+&dto.TokenLifecycleID, &dto.ExecutionID, &dto.AllocationID,
+&dto.Status, &dto.Success, &dto.TxHash, &dto.BlockNumber,
+&dto.Attempts, &dto.Replaced, &dto.ReplacementCount,
+&dto.MempoolRoute, &dto.NonceUsed, &dto.WalletAddress, &dto.WalletShard,
+&dto.FinalGasUsed, &dto.FinalMaxFeeWei, &dto.FinalPriorityFeeWei,
+&dto.RealizedEntryPrice, &dto.SlippageRealizedBps, &dto.LatencyMs, &dto.ErrorCode,
+&dto.MEVProtected, &dto.ExecutionPath, &dto.SlippageGuardBps, &dto.RejectionReason, &dto.Simulated,
+&dto.ExpiresAt, &dto.Priority, &dto.CompletedAt,
+)
+if err != nil {
+if errors.Is(err, sql.ErrNoRows) {
+return nil, database.ErrNotFound
+}
+return nil, fmt.Errorf("get execution by lifecycle: %w", err)
+}
+return dto, nil
+}
+
+// GetShadowTradesByWindow returns shadow trades created between start and end (ISO 8601 strings).
+func (d *DB) GetShadowTradesByWindow(ctx context.Context, start, end string) ([]database.ShadowTrade, error) {
+const q = `
+SELECT shadow_trade_id, token_address, chain,
+       trace_id, correlation_id, version_id,
+       reject_reason, rejected_at, peak_gain_pct, observed_at, is_fn_candidate,
+       created_at
+FROM shadow_trades
+WHERE created_at >= $1::timestamp AND created_at < $2::timestamp
+ORDER BY created_at ASC`
+
+rows, err := d.pool.QueryContext(ctx, q, start, end)
+if err != nil {
+return nil, fmt.Errorf("get shadow trades by window: %w", err)
+}
+defer rows.Close()
+
+var out []database.ShadowTrade
+for rows.Next() {
+var st database.ShadowTrade
+if err := rows.Scan(
+&st.ShadowTradeID, &st.TokenAddress, &st.Chain,
+&st.TraceID, &st.CorrelationID, &st.VersionID,
+&st.RejectReason, &st.RejectedAt, &st.PeakGainPct, &st.ObservedAt, &st.IsFNCandidate,
+&st.CreatedAt,
+); err != nil {
+return nil, fmt.Errorf("scan shadow trade: %w", err)
+}
+out = append(out, st)
+}
+if err := rows.Err(); err != nil {
+return nil, fmt.Errorf("shadow trades rows: %w", err)
+}
+return out, nil
 }

@@ -47,20 +47,13 @@ if err := w.adapter.InsertValidatedEdge(ctx, vedge); err != nil {
 w.logger.Warn("validation_worker_persist_failed", "event_id", vedge.EventID, "error", err)
 }
 
-nextState := "VALIDATED"
-if vedge.Decision != "ACCEPT" {
-nextState = "REJECTED"
-}
-if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-LifecycleID:       dto.TokenLifecycleID,
-ExpectedFromState: "EDGE_DETECTED",
-ExpectedVersion:   lc.StateVersion,
-NewState:          nextState,
-Reason:            vedge.RejectReason,
-ActorWorker:       "validation_worker",
-}, w.logger)
-}
+	nextState := "VALIDATED"
+	if vedge.Decision != "ACCEPT" {
+		nextState = "REJECTED"
+	}
+	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "EDGE_DETECTED", nextState, vedge.RejectReason, "validation_worker"); err != nil {
+		return nil, fmt.Errorf("validation_worker: transition: %w", err)
+	}
 
 if vedge.Decision != "ACCEPT" {
 return nil, nil

@@ -47,15 +47,9 @@ if err := w.adapter.InsertFeature(ctx, featDTO); err != nil {
 w.logger.Warn("features_worker_persist_failed", "event_id", featDTO.EventID, "error", err)
 }
 
-if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-LifecycleID:       dto.TokenLifecycleID,
-ExpectedFromState: "DQ_PASSED",
-ExpectedVersion:   lc.StateVersion,
-NewState:          "FEATURE_READY",
-ActorWorker:       "features_worker",
-}, w.logger)
-}
+	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "DQ_PASSED", "FEATURE_READY", "", "features_worker"); err != nil {
+		return nil, fmt.Errorf("features_worker: transition: %w", err)
+	}
 
 return makeOutputEvent(
 featDTO.EventID, featDTO, "feature_event",

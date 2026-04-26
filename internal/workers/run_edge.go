@@ -47,19 +47,13 @@ if err := w.adapter.InsertEdge(ctx, edgeDTO); err != nil {
 w.logger.Warn("edge_worker_persist_failed", "event_id", edgeDTO.EventID, "error", err)
 }
 
-nextState := "EDGE_DETECTED"
-if edgeDTO.EdgeType == "" {
-nextState = "REJECTED"
-}
-if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-LifecycleID:       dto.TokenLifecycleID,
-ExpectedFromState: "FEATURE_READY",
-ExpectedVersion:   lc.StateVersion,
-NewState:          nextState,
-ActorWorker:       "edge_worker",
-}, w.logger)
-}
+	nextState := "EDGE_DETECTED"
+	if edgeDTO.EdgeType == "" {
+		nextState = "REJECTED"
+	}
+	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "FEATURE_READY", nextState, "", "edge_worker"); err != nil {
+		return nil, fmt.Errorf("edge_worker: transition: %w", err)
+	}
 
 if edgeDTO.EdgeType == "" {
 return nil, nil

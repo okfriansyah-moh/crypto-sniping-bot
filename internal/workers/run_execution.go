@@ -103,15 +103,8 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	if !result.Success {
 		nextState = "FAILED"
 	}
-	if lc, ok := fetchLifecycle(ctx, w.adapter, alloc.TokenLifecycleID, w.logger); ok {
-		transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-			LifecycleID:       alloc.TokenLifecycleID,
-			ExpectedFromState: "SELECTED",
-			ExpectedVersion:   lc.StateVersion,
-			NewState:          nextState,
-			Reason:            result.ErrorCode,
-			ActorWorker:       "execution_worker",
-		}, w.logger)
+	if err := doMandatoryTransition(ctx, w.adapter, alloc.TokenLifecycleID, "SELECTED", nextState, result.ErrorCode, "execution_worker"); err != nil {
+		return nil, fmt.Errorf("execution_worker: transition: %w", err)
 	}
 
 	return makeOutputEvent(

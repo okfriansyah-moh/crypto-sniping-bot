@@ -60,7 +60,42 @@ func transitionBestEffort(
 	}
 }
 
-// fetchLifecycle retrieves the current lifecycle for CAS guard values.
+// transitionMandatory applies a lifecycle CAS transition.
+// Returns an error on failure — Phase 3 mandatory semantics.
+// The event stays unprocessed so the worker can retry on next poll.
+func transitionMandatory(
+	ctx context.Context,
+	adapter database.Adapter,
+	req database.TransitionRequest,
+) error {
+	if err := adapter.TransitionState(ctx, req); err != nil {
+		return fmt.Errorf("lifecycle_transition %s→%s: %w", req.ExpectedFromState, req.NewState, err)
+	}
+	return nil
+}
+
+// doMandatoryTransition fetches the current lifecycle and performs a mandatory CAS transition.
+// Returns an error on any failure — Phase 3 mandatory semantics.
+func doMandatoryTransition(
+	ctx context.Context,
+	adapter database.Adapter,
+	lifecycleID, from, to, reason, actor string,
+) error {
+	lc, err := adapter.GetLifecycle(ctx, lifecycleID)
+	if err != nil {
+		return fmt.Errorf("fetch_lifecycle %s: %w", lifecycleID, err)
+	}
+	return transitionMandatory(ctx, adapter, database.TransitionRequest{
+		LifecycleID:       lifecycleID,
+		ExpectedFromState: from,
+		ExpectedVersion:   lc.StateVersion,
+		NewState:          to,
+		Reason:            reason,
+		ActorWorker:       actor,
+	})
+}
+
+
 // Returns (nil, false) on error and logs a warning.
 func fetchLifecycle(
 	ctx context.Context,

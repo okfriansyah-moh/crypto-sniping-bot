@@ -10,11 +10,11 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 6          |
+| **Completed**    | 7          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 1          |
-| **Last Updated** | 2026-04-25 |
+| **Not Started**  | 0          |
+| **Last Updated** | 2026-05-01 |
 
 ---
 
@@ -25,7 +25,7 @@
 | 0     | Core Infrastructure   | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean. |
 | 1     | Detection & Ingestion | completed   | 0           | All pipeline agents passed |
 | 2     | Pipeline Core         | completed   | 0           | All pipeline agents passed |
-| 3     | Position Management   | not-started | 0           |                                                                                                                                            |
+| 3     | Evaluation Correctness | completed  | 0           | Mandatory CAS, evaluation worker, state_machine, traceability, circuit_breaker, fee-bump, Telegram dispatcher+commands, migration 000008 |
 | 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
 | 5     | Learning Engine       | not-started | 0           |                                                                                                                                            |
 | 6     | Observability & Risk  | not-started | 0           |                                                                                                                                            |
@@ -43,7 +43,7 @@
 | 0     | pass          | pass (after fixes) | pass        | pass             | pass         | completed |
 | 1     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
 | 2     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
-| 3     | —             | —                  | —           | —                | —            | —         |
+| 3     | pass          | pass               | pass        | pass             | pass         | completed |
 | 4     | —             | —                  | —           | —                | —            | —         |
 | 5     | —             | —                  | —           | —                | —            | —         |
 | 6     | —             | —                  | —           | —                | —            | —         |
