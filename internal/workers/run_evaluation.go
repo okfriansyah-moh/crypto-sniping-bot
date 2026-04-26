@@ -80,11 +80,9 @@ func (w *EvaluationWorker) Process(ctx context.Context, evt *database.Event) (*d
 		}
 	}
 
-	// Fetch shadow trades for the evaluation window.
+	// Fetch shadow trades for the evaluation window (1h = 3600s).
 	now := time.Now().UTC()
-	windowEnd := now.Format(time.RFC3339Nano)
-	windowStart := now.Add(-time.Hour).Format(time.RFC3339Nano) // 1h rolling window
-	rawShadows, shadowErr := w.adapter.GetShadowTradesByWindow(ctx, windowStart, windowEnd)
+	rawShadows, shadowErr := w.adapter.GetShadowTradesByWindow(ctx, 3600)
 	if shadowErr != nil {
 		w.logger.Warn("evaluation_worker_get_shadows_failed",
 			"error", shadowErr,
@@ -95,7 +93,7 @@ func (w *EvaluationWorker) Process(ctx context.Context, evt *database.Event) (*d
 	// Convert to module-local type — keeps modules free of database imports.
 	shadowInputs := make([]evaluation.ShadowTradeInput, len(rawShadows))
 	for i, st := range rawShadows {
-		shadowInputs[i] = evaluation.ShadowTradeInput{PeakGainPct: st.PeakGainPct}
+		shadowInputs[i] = evaluation.ShadowTradeInput{PeakGainPct: st.ObservedReturnPct}
 	}
 
 	// Compute evaluation (pure function).

@@ -27,7 +27,7 @@
 | 2     | Pipeline Core         | completed   | 0           | All pipeline agents passed |
 | 3     | Evaluation Correctness | completed  | 0           | Mandatory CAS, evaluation worker, state_machine, traceability, circuit_breaker, fee-bump, Telegram dispatcher+commands, migration 000008 |
 | 4     | Probability Models    | completed   | 0           | Logistic probability model, bucket-based slippage, rolling-window latency profiles; new workers (probability, slippage, latency); validation worker now consumes model estimates with prior fallback; additive DQ/feature/edge detector helpers; tests + build/vet clean. |
-| 5     | Learning Engine       | not-started | 0           |                                                                                                                                            |
+| 5     | Learning Engine       | completed   | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass. |
 | 6     | Observability & Risk  | not-started | 0           |                                                                                                                                            |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
@@ -45,7 +45,7 @@
 | 2     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
 | 3     | pass          | pass               | pass        | pass             | pass         | completed |
 | 4     | pass          | pass               | pass        | pass             | pass         | completed |
-| 5     | —             | —                  | —           | —                | —            | —         |
+| 5     | pass          | pass               | pass        | pass             | pass         | completed |
 | 6     | —             | —                  | —           | —                | —            | —         |
 
 **Values:** `pass`, `fail (N retries)`, `skipped`, `rolled-back`

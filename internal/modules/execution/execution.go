@@ -116,13 +116,13 @@ func (m *Module) Process(
 		}, nil
 	}
 
-	// Fetch gas price.
+	// Fetch gas price (validates RPC connectivity; consumed by Phase 3 signTx).
 	gasPrice, err := m.client.GetGasPrice(ctx)
 	if err != nil {
 		return m.failResult(in, now, fmt.Sprintf("get_gas_price:%v", err))
 	}
 
-	// Build calldata for swapExactETHForTokens using deterministic, input-driven values.
+	// Validate required calldata inputs before attempting the guard.
 	if m.baseTokenAddr == "" {
 		return m.failResult(in, now, "build_calldata:missing_base_token_address")
 	}

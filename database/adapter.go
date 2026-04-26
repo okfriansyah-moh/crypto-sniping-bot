@@ -123,9 +123,9 @@ type Adapter interface {
 	// Returns ErrNotFound if no execution record exists for the lifecycle.
 	GetExecutionByLifecycle(ctx context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error)
 
-	// GetShadowTradesByWindow returns shadow trades created between start and end.
-	// Used by the evaluation engine to compute FalseNegative candidates.
-	GetShadowTradesByWindow(ctx context.Context, start, end string) ([]ShadowTrade, error)
+	// GetShadowTradesByWindow returns pending shadow trades whose rejected_at is
+	// older than (now - windowSeconds) and whose observation_complete is false.
+	GetShadowTradesByWindow(ctx context.Context, windowSeconds int) ([]ShadowTrade, error)
 
 	// InsertLearningRecord persists a LearningRecordDTO.
 	InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
@@ -152,6 +152,23 @@ type Adapter interface {
 	// GetLatestLatencyProfile returns the most recent latency profile for the
 	// given chain, or nil if no profile has been recorded.
 	GetLatestLatencyProfile(ctx context.Context, chain string) (*contracts.LatencyProfileDTO, error)
+
+	// ── Phase 5: Learning Engine ──────────────────────────────────────────────
+
+	// InsertShadowTrade persists a new shadow trade observation row.
+	// shadowID is SHA256(token_lifecycle_id||stage||rejected_at)[:16].
+	InsertShadowTrade(ctx context.Context, st ShadowTrade) error
+
+	// UpdateShadowTradeObservation marks a shadow trade's observation window
+	// as complete and records the final observed return and classification.
+	UpdateShadowTradeObservation(ctx context.Context, shadowID string, observedReturnPct float64, classification string) error
+
+	// GetLearningRecordsByWindow returns all LearningRecordDTOs for a given
+	// version within [start, end].
+	GetLearningRecordsByWindow(ctx context.Context, versionID string, start, end time.Time) ([]contracts.LearningRecordDTO, error)
+
+	// GetEvaluationsByVersion returns all EvaluationDTOs for a version, ordered by evaluated_at DESC.
+	GetEvaluationsByVersion(ctx context.Context, versionID string) ([]contracts.EvaluationDTO, error)
 
 	// ── Execution: Nonce Manager ─────────────────────────────────────────────
 
@@ -351,19 +368,16 @@ type ExposureSummary struct {
 	OpenPositions int32
 }
 
-// ShadowTrade is a rejected token that was observed to pump after rejection.
-// Used by the evaluation engine to compute FalseNegative candidates.
+// ShadowTrade is an observation row tracking the price trajectory of a rejected
+// token over a configurable window. Used to classify false negatives.
 type ShadowTrade struct {
-	ShadowTradeID  string
-	TokenAddress   string
-	Chain          string
-	TraceID        string
-	CorrelationID  string
-	VersionID      string
-	RejectReason   string
-	RejectedAt     string
-	PeakGainPct    float64
-	ObservedAt     string
-	IsFNCandidate  bool
-	CreatedAt      string
+	ShadowID            string  // SHA256(token_lifecycle_id||stage||rejected_at)[:16]
+	TokenAddress        string
+	Stage               string  // data_quality|edge|validated_edge|selection
+	RejectedAt          string  // ISO 8601
+	ObservationComplete bool
+	ObservedReturnPct   float64
+	Classification      string  // TN | FN
+	LearningRecordID    string  // FK to learning_records.record_id
+	VersionID           string
 }

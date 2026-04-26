@@ -70,8 +70,7 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	} else {
 		nonce, nonceErr := w.adapter.AllocateNonce(ctx, alloc.WalletAddress, alloc.Chain)
 		if nonceErr != nil {
-			w.logger.Warn("execution_worker_nonce_failed", "error", nonceErr)
-			nonce = 0
+			return nil, fmt.Errorf("execution_worker: allocate nonce: %w", nonceErr)
 		}
 
 		baseToken := chainBaseToken(w.cfg, alloc.Chain)

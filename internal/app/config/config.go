@@ -29,6 +29,7 @@ type Config struct {
 	StateMachine StateMachineConfig     `yaml:"state_machine"`
 	EventWeights EventPriorityWeights   `yaml:"event_weights"`
 	Models       ModelsConfig           `yaml:"models"`
+	Learning     LearningConfig         `yaml:"learning"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -218,6 +219,34 @@ type LatencyModelConfig struct {
 	MinSamples    int   `yaml:"min_samples"`
 	FallbackP50Ms int32 `yaml:"fallback_p50_ms"`
 	FallbackP95Ms int32 `yaml:"fallback_p95_ms"`
+}
+
+// LearningConfig holds Phase 5 learning engine parameters.
+type LearningConfig struct {
+	// EvalWindowMinutes is how often the evaluator runs (default: 60).
+	EvalWindowMinutes int `yaml:"eval_window_minutes"`
+	// EvalWindowSeconds is the lookback window for evaluation (default: 86400 = 24h).
+	EvalWindowSeconds int `yaml:"eval_window_seconds"`
+	// MinSampleSize is the minimum number of records required before updating (default: 30).
+	MinSampleSize int `yaml:"min_sample_size"`
+	// MaxDeltaPct is the maximum fractional change per parameter per cycle (default: 0.10).
+	MaxDeltaPct float64 `yaml:"max_delta_pct"`
+	// Families is the ordered list of parameter families for round-robin updates.
+	Families []string `yaml:"families"`
+	// ShadowWindowMinutes is the observation window before A/B promotion (default: 60).
+	ShadowWindowMinutes int `yaml:"shadow_window_minutes"`
+	// RollbackThresholdPct is the expectancy drop that triggers rollback (default: 0.10).
+	RollbackThresholdPct float64 `yaml:"rollback_threshold_pct"`
+	// PostPromotionWatchMinutes is the post-promotion monitoring window (default: 120).
+	PostPromotionWatchMinutes int `yaml:"post_promotion_watch_minutes"`
+	// ShadowPollIntervalSeconds is how often the shadow observer runs (default: 60).
+	ShadowPollIntervalSeconds int `yaml:"shadow_poll_interval_seconds"`
+	// ObservationWindowSeconds is how long to track a rejected token's return (default: 3600).
+	ObservationWindowSeconds int `yaml:"observation_window_seconds"`
+	// FnGainThresholdPct is the minimum return for a rejected trade to be classified FN (default: 0.10).
+	FnGainThresholdPct float64 `yaml:"fn_gain_threshold_pct"`
+	// RollbackCheckIntervalSeconds is how often the rollback watchdog runs (default: 300).
+	RollbackCheckIntervalSeconds int `yaml:"rollback_check_interval_seconds"`
 }
 
 // Load reads configuration from one or more YAML config files.

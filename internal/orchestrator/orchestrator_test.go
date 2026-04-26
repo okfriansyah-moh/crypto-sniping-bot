@@ -350,3 +350,19 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 	r.Register("stage-a", noopHandler{}, "event.a")
 	r.Register("stage-a", noopHandler{}, "event.a") // must panic
 }
+
+func (m *mockAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
+return nil
+}
+func (m *mockAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
+return nil
+}
+func (m *mockAdapter) GetShadowTradesByWindow(_ context.Context, _ int) ([]database.ShadowTrade, error) {
+return nil, nil
+}
+func (m *mockAdapter) GetLearningRecordsByWindow(_ context.Context, _ string, _, _ time.Time) ([]contracts.LearningRecordDTO, error) {
+return nil, nil
+}
+func (m *mockAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
+return nil, nil
+}

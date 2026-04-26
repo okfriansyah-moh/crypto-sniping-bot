@@ -397,39 +397,3 @@ return nil, fmt.Errorf("get execution by lifecycle: %w", err)
 }
 return dto, nil
 }
-
-// GetShadowTradesByWindow returns shadow trades created between start and end (ISO 8601 strings).
-func (d *DB) GetShadowTradesByWindow(ctx context.Context, start, end string) ([]database.ShadowTrade, error) {
-const q = `
-SELECT shadow_trade_id, token_address, chain,
-       trace_id, correlation_id, version_id,
-       reject_reason, rejected_at, peak_gain_pct, observed_at, is_fn_candidate,
-       created_at
-FROM shadow_trades
-WHERE created_at >= $1::timestamp AND created_at < $2::timestamp
-ORDER BY created_at ASC`
-
-rows, err := d.pool.QueryContext(ctx, q, start, end)
-if err != nil {
-return nil, fmt.Errorf("get shadow trades by window: %w", err)
-}
-defer rows.Close()
-
-var out []database.ShadowTrade
-for rows.Next() {
-var st database.ShadowTrade
-if err := rows.Scan(
-&st.ShadowTradeID, &st.TokenAddress, &st.Chain,
-&st.TraceID, &st.CorrelationID, &st.VersionID,
-&st.RejectReason, &st.RejectedAt, &st.PeakGainPct, &st.ObservedAt, &st.IsFNCandidate,
-&st.CreatedAt,
-); err != nil {
-return nil, fmt.Errorf("scan shadow trade: %w", err)
-}
-out = append(out, st)
-}
-if err := rows.Err(); err != nil {
-return nil, fmt.Errorf("shadow trades rows: %w", err)
-}
-return out, nil
-}
