@@ -36,7 +36,8 @@ func New(cfg *config.EdgeConfig) *Module {
 // Detects NEW_LAUNCH_EDGE pattern per docs/implementation_roadmap.md §3.3.
 // Phase 2: single edge type, fixed window; Phase 3 adds adaptive thresholds.
 func (m *Module) Process(_ context.Context, in contracts.FeatureDTO) (contracts.EdgeDTO, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	nowTime := time.Now().UTC()
+	now := nowTime.Format(time.RFC3339Nano)
 
 	edgeType := ""
 	edgeStrength := 0.0
@@ -64,7 +65,7 @@ func (m *Module) Process(_ context.Context, in contracts.FeatureDTO) (contracts.
 	)
 
 	// ExpiresAt: now + TTL.
-	expiresAt := time.Now().UTC().Add(
+	expiresAt := nowTime.Add(
 		time.Duration(m.cfg.TTLSeconds) * time.Second,
 	).Format(time.RFC3339Nano)
 
