@@ -7,6 +7,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -74,6 +75,7 @@ type Handler struct {
 	resumeFn       func(ctx context.Context) error
 	versionFn      func(ctx context.Context) (string, error)
 	allowedUserIDs map[string]struct{} // nil means unconfigured
+	logger         *slog.Logger
 }
 
 // HandlerOptions carries the injectable functions for the command handler.
@@ -91,10 +93,17 @@ type HandlerOptions struct {
 	// rejected; read-only commands are allowed but emit a security warning.
 	// Set this in production to restrict access to known operator IDs.
 	AllowedUserIDs []string
+
+	// Logger is used to emit security warnings. Falls back to slog.Default().
+	Logger *slog.Logger
 }
 
 // NewHandler creates a Handler with the provided function implementations.
 func NewHandler(opts HandlerOptions) *Handler {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Handler{
 		statusFn:       opts.StatusFn,
 		pnlFn:          opts.PnlFn,
@@ -103,6 +112,7 @@ func NewHandler(opts HandlerOptions) *Handler {
 		resumeFn:       opts.ResumeFn,
 		versionFn:      opts.VersionFn,
 		allowedUserIDs: allowedSet(opts.AllowedUserIDs),
+		logger:         logger,
 	}
 }
 
@@ -139,6 +149,14 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 	} else if req.Type.isDestructive() {
 		// Unconfigured allowlist: fail-closed for destructive commands.
 		return nil, fmt.Errorf("commands: destructive command %q rejected: AllowedUserIDs not configured", req.Type)
+	} else {
+		// Unconfigured allowlist: allow read-only commands but emit a security warning.
+		// Production deployments MUST configure AllowedUserIDs to restrict access.
+		h.logger.Warn("telegram_command_unauthenticated",
+			"command", req.Type,
+			"issuer_id", req.IssuerID,
+			"note", "AllowedUserIDs not configured; set allowed_user_ids in config to restrict access",
+		)
 	}
 
 	switch req.Type {

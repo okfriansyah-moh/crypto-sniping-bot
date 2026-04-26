@@ -11,7 +11,8 @@ type WalletConfig struct {
 	// Address is the wallet's Ethereum address (checksummed hex).
 	Address string
 	// PrivateKey is the hex-encoded private key (no 0x prefix). Never logged.
-	PrivateKey string
+	// json:"-" prevents accidental serialization to JSON (e.g. debug snapshots).
+	PrivateKey string `json:"-"`
 	// ShardIndex is the 0-based index of this shard.
 	ShardIndex int
 }
