@@ -81,7 +81,6 @@ func (m *Module) Process(
 	routerAddress string,
 ) (contracts.ExecutionResultDTO, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	start := time.Now()
 
 	if in.Rejected {
 		eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-skip:%s", in.EventID))
@@ -106,100 +105,28 @@ func (m *Module) Process(
 		}, nil
 	}
 
-	// Fetch gas price.
+	// Fetch gas price (validates RPC connectivity; consumed by Phase 3 signTx).
 	gasPrice, err := m.client.GetGasPrice(ctx)
 	if err != nil {
 		return m.failResult(in, now, fmt.Sprintf("get_gas_price:%v", err))
 	}
 
-	// Build calldata for swapExactETHForTokens using deterministic, input-driven values.
+	// Validate required calldata inputs before attempting the guard.
 	if m.baseTokenAddr == "" {
 		return m.failResult(in, now, "build_calldata:missing_base_token_address")
 	}
 	if in.AllocatedAt == "" {
 		return m.failResult(in, now, "build_calldata:missing_allocated_at")
 	}
-	allocatedAt, parseErr := time.Parse(time.RFC3339Nano, in.AllocatedAt)
-	if parseErr != nil {
-		allocatedAt, parseErr = time.Parse(time.RFC3339, in.AllocatedAt)
-		if parseErr != nil {
-			return m.failResult(in, now, "build_calldata:invalid_allocated_at")
-		}
-	}
-	amountOutMin := big.NewInt(0) // Phase 2: no slippage guard; Phase 3 adds it.
-	path := []geth_common.Address{
-		geth_common.HexToAddress(m.baseTokenAddr), // sourced from config/chains.yaml
-		geth_common.HexToAddress(in.TokenAddress),
-	}
-	deadline := big.NewInt(allocatedAt.Add(3 * time.Minute).Unix())
-	to := geth_common.HexToAddress(in.WalletAddress)
 
-	calldata, err := buildSwapCalldata(amountOutMin, path, to, deadline)
-	if err != nil {
-		return m.failResult(in, now, fmt.Sprintf("build_calldata:%v", err))
-	}
-
-	// Convert USD size to wei (simplified: treat USD as ETH for Phase 2 test).
-	valueWei := usdToWei(in.SizeUsd)
-
-	// Build and sign the transaction.
-	rawTx, txHash, err := m.signTx(nonce, routerAddress, valueWei, gasPrice, 300_000, calldata)
-	if err != nil {
-		return m.failResult(in, now, fmt.Sprintf("sign_tx:%v", err))
-	}
-
-	// Submit to mempool.
-	submittedHash, err := m.client.SendRawTransaction(ctx, rawTx)
-	if err != nil {
-		return m.failResult(in, now, fmt.Sprintf("send_tx:%v", err))
-	}
-	if submittedHash != "" {
-		txHash = submittedHash
-	}
-
-	// Poll for receipt (up to 30s, 3s interval — Phase 2 simple polling).
-	receipt, err := m.pollReceipt(ctx, txHash)
-	if err != nil {
-		return m.failResult(in, now, fmt.Sprintf("poll_receipt:%v", err))
-	}
-
-	latencyMs := int32(time.Since(start).Milliseconds())
-	eventID := contracts.ContentIDFromString(fmt.Sprintf("exec:%s:%s", in.EventID, txHash))
-
-	status := "confirmed"
-	success := true
-	if receipt == nil {
-		// Receipt not observed within the polling deadline is not a confirmed revert.
-		// Treat as pending so callers can retry or reconcile later.
-		status = "pending"
-		success = false
-	} else if receipt.Status == 0 {
-		status = "reverted"
-		success = false
-	}
-
-	return contracts.ExecutionResultDTO{
-		EventID:       eventID,
-		TraceID:       in.TraceID,
-		CorrelationID: in.CorrelationID,
-		CausationID:   in.EventID,
-		VersionID:     in.VersionID,
-
-		TokenLifecycleID: in.TokenLifecycleID,
-		ExecutionID:      in.ExecutionID,
-		AllocationID:     in.EventID,
-
-		Status:        status,
-		Success:       success,
-		TxHash:        txHash,
-		Attempts:      1,
-		MempoolRoute:  "public",
-		NonceUsed:     nonce,
-		WalletAddress: in.WalletAddress,
-		WalletShard:   in.WalletShard,
-		LatencyMs:     latencyMs,
-		CompletedAt:   now,
-	}, nil
+	// SECURITY GATE — Phase 2: hard-block all on-chain execution.
+	// amountOutMin=0 exposes every swap to sandwich attacks. Phase 3 removes
+	// this gate once a real-time price feed derives amountOutMin from
+	// AllocationDTO.MaxSlippageBps. The caller (ExecutionWorker) routes to
+	// simulatedExecResult when evmClient==nil, so this gate only fires when a
+	// live EVM client is explicitly injected.
+	_ = gasPrice // validated above; Phase 3 passes it to signTx
+	return m.failResult(in, now, "slippage_guard:phase2_live_execution_blocked_upgrade_to_phase3")
 }
 
 // signTx builds, signs, and returns the raw hex tx + predicted tx hash.

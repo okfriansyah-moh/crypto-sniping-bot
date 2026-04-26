@@ -219,159 +219,91 @@ func TestProcess_GasPriceError_ReturnsFailResult(t *testing.T) {
 	}
 }
 
-// ── Process: send tx failure ──────────────────────────────────────────────────
+// ── Process: Phase 2 live execution safety gate ───────────────────────────────
+//
+// Phase 2 hard-blocks all on-chain execution because amountOutMin=0 makes
+// every swap trivially sandwich-attackable. These tests verify the gate fires
+// for every non-rejected allocation that reaches the live execution path.
+// Phase 3 removes this gate and restores send/receipt/confirmed/reverted tests.
 
-func TestProcess_SendTxError_ReturnsFailResult(t *testing.T) {
-	// Arrange
-	client := &mockEVMClient{
-		gasPrice: big.NewInt(20_000_000_000),
-		sendErr:  errors.New("nonce too low"),
-	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
-
-	// Act
-	result, err := mod.Process(context.Background(), allocationFixture(), 42, "0xrouter")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Status != "failed" {
-		t.Errorf("expected status=failed, got %q", result.Status)
-	}
-	if !strings.Contains(result.ErrorCode, "send_tx") {
-		t.Errorf("ErrorCode should contain 'send_tx', got %q", result.ErrorCode)
-	}
-}
-
-// ── Process: receipt error ────────────────────────────────────────────────────
-
-func TestProcess_ReceiptError_ReturnsFailResult(t *testing.T) {
-	// Arrange
-	client := &mockEVMClient{
-		gasPrice:   big.NewInt(20_000_000_000),
-		txHash:     "0xcafe",
-		receiptErr: errors.New("receipt fetch failed"),
-	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
-
-	// Act
-	result, err := mod.Process(context.Background(), allocationFixture(), 0, "0xrouter")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Status != "failed" {
-		t.Errorf("expected status=failed on receipt error, got %q", result.Status)
-	}
-}
-
-// ── Process: confirmed tx ─────────────────────────────────────────────────────
-
-func TestProcess_ConfirmedTx_ReturnsSuccess(t *testing.T) {
-	// Arrange
-	client := successfulMock()
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+func TestProcess_LiveExecution_BlockedBySlippageGuard(t *testing.T) {
+	// Arrange: provide a real client and private key so the worker routes to
+	// the live (non-simulated) execution path.
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 
 	// Act
 	result, err := mod.Process(context.Background(), in, 0, "0xrouter")
 
-	// Assert
+	// Assert: Phase 2 guard must fire — no transaction is broadcast.
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "confirmed" {
-		t.Errorf("expected status=confirmed, got %q", result.Status)
+	if result.Status != "failed" {
+		t.Errorf("expected status=failed from slippage guard, got %q", result.Status)
 	}
-	if !result.Success {
-		t.Error("expected Success=true for confirmed tx")
+	if result.Success {
+		t.Error("Success must be false when slippage guard blocks execution")
 	}
-	if result.TxHash == "" {
-		t.Error("TxHash must be set")
+	if !strings.Contains(result.ErrorCode, "slippage_guard") {
+		t.Errorf("ErrorCode should contain 'slippage_guard', got %q", result.ErrorCode)
 	}
+	// Trace fields must still propagate even on guard failure.
 	if result.EventID == "" {
 		t.Error("EventID must be set")
 	}
 	if result.CausationID != in.EventID {
 		t.Errorf("CausationID should be input EventID; got %q", result.CausationID)
 	}
-	if result.TraceID != in.TraceID {
-		t.Errorf("TraceID not propagated: got %q", result.TraceID)
+}
+
+func TestProcess_SlippageGuard_TraceFieldsPropagated(t *testing.T) {
+	// Verify that trace / correlation IDs are carried through the guard path.
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	in := allocationFixture()
+	in.TraceID = "my-trace"
+	in.CorrelationID = "my-corr"
+	in.VersionID = "v42"
+
+	result, _ := mod.Process(context.Background(), in, 0, "0xrouter")
+
+	if result.TraceID != "my-trace" {
+		t.Errorf("TraceID not propagated: %q", result.TraceID)
 	}
-	if result.Attempts != 1 {
-		t.Errorf("expected Attempts=1, got %d", result.Attempts)
+	if result.CorrelationID != "my-corr" {
+		t.Errorf("CorrelationID not propagated: %q", result.CorrelationID)
 	}
-	if result.MempoolRoute != "public" {
-		t.Errorf("expected MempoolRoute=public, got %q", result.MempoolRoute)
-	}
-	if result.NonceUsed != 0 {
-		t.Errorf("expected NonceUsed=0, got %d", result.NonceUsed)
+	if result.VersionID != "v42" {
+		t.Errorf("VersionID not propagated: %q", result.VersionID)
 	}
 }
 
-// ── Process: reverted tx ──────────────────────────────────────────────────────
+func TestProcess_SlippageGuard_DifferentAllocations_Deterministic(t *testing.T) {
+	// Two identical live-path calls should produce the same EventID (content-addressed).
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	in := allocationFixture()
 
-func TestProcess_RevertedTx_ReturnsReverted(t *testing.T) {
-	// Arrange
-	client := &mockEVMClient{
-		gasPrice: big.NewInt(20_000_000_000),
-		txHash:   "0xreverted",
-		receipt:  revertedReceipt(),
-	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+	r1, _ := mod.Process(context.Background(), in, 0, "0xrouter")
+	r2, _ := mod.Process(context.Background(), in, 0, "0xrouter")
 
-	// Act
-	result, err := mod.Process(context.Background(), allocationFixture(), 0, "0xrouter")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Status != "reverted" {
-		t.Errorf("expected status=reverted, got %q", result.Status)
-	}
-	if result.Success {
-		t.Error("expected Success=false for reverted tx")
+	if r1.EventID != r2.EventID {
+		t.Errorf("non-deterministic EventID: %q vs %q", r1.EventID, r2.EventID)
 	}
 }
 
 // ── Process: context cancellation ────────────────────────────────────────────
 
 func TestProcess_ContextCancelled_ReturnsError(t *testing.T) {
-	// Arrange: receipt is nil so pollReceipt will loop; context is pre-cancelled.
-	client := &mockEVMClient{
-		gasPrice: big.NewInt(20_000_000_000),
-		txHash:   "0xcafe",
-		receipt:  nil, // not yet mined
-	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+	// Even with a cancelled context the slippage guard fires before any network call.
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // pre-cancel
+	cancel()
 
-	// Act
 	result, err := mod.Process(ctx, allocationFixture(), 0, "0xrouter")
 
-	// Assert: either an error OR a failed result
+	// Guard fires synchronously — either a failed result or context error is acceptable.
 	if err == nil && result.Status != "failed" {
-		t.Errorf("expected error or failed status for cancelled context, got status=%q", result.Status)
-	}
-}
-
-// ── Nonce propagation ─────────────────────────────────────────────────────────
-
-func TestProcess_NonceIsRecordedInResult(t *testing.T) {
-	// Arrange
-	const nonce = uint64(99)
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
-
-	// Act
-	result, _ := mod.Process(context.Background(), allocationFixture(), nonce, "0xrouter")
-
-	// Assert
-	if result.NonceUsed != nonce {
-		t.Errorf("expected NonceUsed=%d, got %d", nonce, result.NonceUsed)
+		t.Errorf("expected error or failed status, got status=%q", result.Status)
 	}
 }
 
