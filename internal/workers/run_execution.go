@@ -65,7 +65,8 @@ func NewExecutionWorker(
 
 	rpcEndpoint := "default"
 	if cfg != nil && len(cfg.Execution.PrivateEndpoints) > 0 {
-		rpcEndpoint = cfg.Execution.PrivateEndpoints[0]
+		// Sanitize before storing: private endpoint URLs may contain embedded API keys.
+		rpcEndpoint = sanitizeURL(cfg.Execution.PrivateEndpoints[0])
 	}
 
 	return &ExecutionWorker{

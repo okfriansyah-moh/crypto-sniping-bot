@@ -156,7 +156,10 @@ type ExecutionConfig struct {
 	DefaultMaxSlippageBps  int32   `yaml:"default_max_slippage_bps"`
 	// Phase 4: private RPC routing
 	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
-	PrivateEndpoints         []string `yaml:"private_endpoints"`
+	// PrivateEndpoints may contain API keys embedded in URLs (e.g. Alchemy, Infura).
+	// json:"-" prevents them from being serialized into Config.Snapshot() and stored
+	// in the strategy_versions.config_snapshot column.
+	PrivateEndpoints         []string `yaml:"private_endpoints"         json:"-"`
 	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
 	// Gas: configurable gas limit for swap transactions.
 	// Override per-chain if different token contracts require more gas.
@@ -395,6 +398,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Database.User == "" {
 		missing = append(missing, "database.user")
+	}
+
+	switch c.Database.SSLMode {
+	case "", "disable", "require", "verify-ca", "verify-full":
+		// valid values
+	default:
+		return fmt.Errorf("config: invalid database.ssl_mode: %q (allowed: disable, require, verify-ca, verify-full)", c.Database.SSLMode)
 	}
 
 	if len(missing) > 0 {
