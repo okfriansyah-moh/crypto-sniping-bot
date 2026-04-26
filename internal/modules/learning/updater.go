@@ -59,8 +59,7 @@ func (u *Updater) Propose(
 	// Decode current config snapshot.
 	current := make(paramMap)
 	if err := json.Unmarshal(activeSnapshot, &current); err != nil {
-		// If snapshot is not a flat map, fall back to empty.
-		current = make(paramMap)
+		return nil, "", fmt.Errorf("updater: decode config snapshot: %w", err)
 	}
 
 	// Apply a gradient signal based on expectancy and FP rate.

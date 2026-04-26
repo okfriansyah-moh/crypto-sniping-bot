@@ -168,9 +168,6 @@ func (m *mockAdapter) InsertEvaluation(_ context.Context, _ contracts.Evaluation
 func (m *mockAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
 	return nil, database.ErrNotFound
 }
-func (m *mockAdapter) GetShadowTradesByWindow(_ context.Context, _, _ string) ([]database.ShadowTrade, error) {
-	return nil, nil
-}
 func (m *mockAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
 }

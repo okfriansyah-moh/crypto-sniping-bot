@@ -58,7 +58,9 @@ func (s *ShadowRecorder) RecordRejection(
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	recordID := contracts.ContentIDFromString(tokenLifecycleID + "shadow")
-	shadowID := contracts.ContentIDFromString(tokenLifecycleID + stage + now)
+	// shadowID is content-addressable from stable inputs so the same rejection
+	// event always produces the same ID — enabling idempotent ON CONFLICT DO NOTHING.
+	shadowID := contracts.ContentIDFromString(tokenLifecycleID + stage + causationEventID)
 	eventID := contracts.ContentIDFromString("lr-shadow:" + causationEventID)
 	traceID := contracts.ContentIDFromString("shadow-trace:" + tokenLifecycleID)
 

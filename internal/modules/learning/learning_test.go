@@ -981,26 +981,19 @@ func TestUpdater_ProposeVersion_ZeroMinSample_DefaultsTo30(t *testing.T) {
 	}
 }
 
-func TestUpdater_Propose_InvalidJSON_FallsBackToEmpty(t *testing.T) {
+func TestUpdater_Propose_InvalidJSON_ReturnsError(t *testing.T) {
 	cfg := &config.LearningConfig{
 		MinSampleSize: 3,
 		MaxDeltaPct:   0.10,
 		Families:      []string{"thresholds"},
 	}
 	updater := learning.NewUpdater(cfg)
-	// Invalid JSON triggers the fallback to empty paramMap.
+	// Invalid JSON must return an error — silent fallback hides bad snapshots.
 	snapshot := []byte(`not valid json`)
 	eval := contracts.EvaluationDTO{SampleSize: 10, Expectancy: 0.10}
-	params, family, err := updater.Propose(context.Background(), snapshot, eval)
-	if err != nil {
-		t.Fatalf("Propose with invalid JSON snapshot failed: %v", err)
-	}
-	if family != "thresholds" {
-		t.Errorf("expected family=thresholds, got %q", family)
-	}
-	// With empty fallback map, no threshold keys are present → no modifications.
-	if len(params) != 0 {
-		t.Errorf("expected empty params map for invalid JSON fallback, got %v", params)
+	_, _, err := updater.Propose(context.Background(), snapshot, eval)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON snapshot, got nil")
 	}
 }
 

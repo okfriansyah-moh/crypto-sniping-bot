@@ -73,24 +73,24 @@ type LoggingConfig struct {
 
 // EdgeConfig holds Phase 2 edge detection parameters.
 type EdgeConfig struct {
-	MinVelocityScore    float64 `yaml:"min_velocity_score"`
-	MinLiquidityScore   float64 `yaml:"min_liquidity_score"`
-	MaxAgeSeconds       int64   `yaml:"max_age_seconds"`
-	BaseWindowMs        int32   `yaml:"base_window_ms"`
+	MinVelocityScore     float64 `yaml:"min_velocity_score"`
+	MinLiquidityScore    float64 `yaml:"min_liquidity_score"`
+	MaxAgeSeconds        int64   `yaml:"max_age_seconds"`
+	BaseWindowMs         int32   `yaml:"base_window_ms"`
 	WindowMomentumFactor float64 `yaml:"window_momentum_factor"`
-	TTLSeconds          int     `yaml:"ttl_seconds"`
+	TTLSeconds           int     `yaml:"ttl_seconds"`
 }
 
 // ValidationConfig holds Phase 2 EV gate parameters (fixed priors).
 type ValidationConfig struct {
-	PriorProbability   float64 `yaml:"prior_probability"`
-	PriorGainBps       int32   `yaml:"prior_gain_bps"`
-	PriorLossBps       int32   `yaml:"prior_loss_bps"`
-	PriorSlippageBps   int32   `yaml:"prior_slippage_bps"`
-	EvThresholdBps     int32   `yaml:"ev_threshold_bps"`
-	FixedCostsBps      int32   `yaml:"fixed_costs_bps"`
-	BuildSubmitP95Ms   int32   `yaml:"build_submit_p95_ms"`
-	TTLSeconds         int     `yaml:"ttl_seconds"`
+	PriorProbability float64 `yaml:"prior_probability"`
+	PriorGainBps     int32   `yaml:"prior_gain_bps"`
+	PriorLossBps     int32   `yaml:"prior_loss_bps"`
+	PriorSlippageBps int32   `yaml:"prior_slippage_bps"`
+	EvThresholdBps   int32   `yaml:"ev_threshold_bps"`
+	FixedCostsBps    int32   `yaml:"fixed_costs_bps"`
+	BuildSubmitP95Ms int32   `yaml:"build_submit_p95_ms"`
+	TTLSeconds       int     `yaml:"ttl_seconds"`
 }
 
 // SelectionConfig holds Phase 2 selection parameters.
@@ -127,17 +127,17 @@ type PositionConfig struct {
 // and private RPC routing (Phase 4).
 type ExecutionConfig struct {
 	// Phase 3: retry and fee-bump parameters
-	MaxRetry                 int     `yaml:"max_retry"`
-	MaxReplacements          int     `yaml:"max_replacements"`
-	RetryBackoffMs           []int   `yaml:"retry_backoff_ms"`
-	ReplacementThresholdMs   int     `yaml:"replacement_threshold_ms"`
-	DropTimeoutMs            int     `yaml:"drop_timeout_ms"`
-	FeeBumpMultiplier        float64 `yaml:"fee_bump_multiplier"`
-	PollIntervalMs           int     `yaml:"poll_interval_ms"`
-	ConcurrencyLimit         int     `yaml:"concurrency_limit"`
-	ConcurrencyMin           int     `yaml:"concurrency_min"`
-	ConcurrencyMax           int     `yaml:"concurrency_max"`
-	DefaultMaxSlippageBps    int32   `yaml:"default_max_slippage_bps"`
+	MaxRetry               int     `yaml:"max_retry"`
+	MaxReplacements        int     `yaml:"max_replacements"`
+	RetryBackoffMs         []int   `yaml:"retry_backoff_ms"`
+	ReplacementThresholdMs int     `yaml:"replacement_threshold_ms"`
+	DropTimeoutMs          int     `yaml:"drop_timeout_ms"`
+	FeeBumpMultiplier      float64 `yaml:"fee_bump_multiplier"`
+	PollIntervalMs         int     `yaml:"poll_interval_ms"`
+	ConcurrencyLimit       int     `yaml:"concurrency_limit"`
+	ConcurrencyMin         int     `yaml:"concurrency_min"`
+	ConcurrencyMax         int     `yaml:"concurrency_max"`
+	DefaultMaxSlippageBps  int32   `yaml:"default_max_slippage_bps"`
 	// Phase 4: private RPC routing
 	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
 	PrivateEndpoints         []string `yaml:"private_endpoints"`

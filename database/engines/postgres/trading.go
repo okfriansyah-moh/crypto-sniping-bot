@@ -362,7 +362,7 @@ ON CONFLICT (event_id) DO NOTHING`
 // GetExecutionByLifecycle returns the ExecutionResultDTO for a lifecycle ID.
 // Returns ErrNotFound if no execution record exists for the lifecycle.
 func (d *DB) GetExecutionByLifecycle(ctx context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error) {
-const q = `
+	const q = `
 SELECT event_id, trace_id, correlation_id, COALESCE(causation_id,''), version_id,
        token_lifecycle_id, execution_id, allocation_id,
        status, success, tx_hash, block_number, attempts, replaced, replacement_count,
@@ -376,24 +376,24 @@ WHERE token_lifecycle_id = $1
 ORDER BY completed_at DESC
 LIMIT 1`
 
-row := d.pool.QueryRowContext(ctx, q, lifecycleID)
-dto := &contracts.ExecutionResultDTO{}
-err := row.Scan(
-&dto.EventID, &dto.TraceID, &dto.CorrelationID, &dto.CausationID, &dto.VersionID,
-&dto.TokenLifecycleID, &dto.ExecutionID, &dto.AllocationID,
-&dto.Status, &dto.Success, &dto.TxHash, &dto.BlockNumber,
-&dto.Attempts, &dto.Replaced, &dto.ReplacementCount,
-&dto.MempoolRoute, &dto.NonceUsed, &dto.WalletAddress, &dto.WalletShard,
-&dto.FinalGasUsed, &dto.FinalMaxFeeWei, &dto.FinalPriorityFeeWei,
-&dto.RealizedEntryPrice, &dto.SlippageRealizedBps, &dto.LatencyMs, &dto.ErrorCode,
-&dto.MEVProtected, &dto.ExecutionPath, &dto.SlippageGuardBps, &dto.RejectionReason, &dto.Simulated,
-&dto.ExpiresAt, &dto.Priority, &dto.CompletedAt,
-)
-if err != nil {
-if errors.Is(err, sql.ErrNoRows) {
-return nil, database.ErrNotFound
-}
-return nil, fmt.Errorf("get execution by lifecycle: %w", err)
-}
-return dto, nil
+	row := d.pool.QueryRowContext(ctx, q, lifecycleID)
+	dto := &contracts.ExecutionResultDTO{}
+	err := row.Scan(
+		&dto.EventID, &dto.TraceID, &dto.CorrelationID, &dto.CausationID, &dto.VersionID,
+		&dto.TokenLifecycleID, &dto.ExecutionID, &dto.AllocationID,
+		&dto.Status, &dto.Success, &dto.TxHash, &dto.BlockNumber,
+		&dto.Attempts, &dto.Replaced, &dto.ReplacementCount,
+		&dto.MempoolRoute, &dto.NonceUsed, &dto.WalletAddress, &dto.WalletShard,
+		&dto.FinalGasUsed, &dto.FinalMaxFeeWei, &dto.FinalPriorityFeeWei,
+		&dto.RealizedEntryPrice, &dto.SlippageRealizedBps, &dto.LatencyMs, &dto.ErrorCode,
+		&dto.MEVProtected, &dto.ExecutionPath, &dto.SlippageGuardBps, &dto.RejectionReason, &dto.Simulated,
+		&dto.ExpiresAt, &dto.Priority, &dto.CompletedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, database.ErrNotFound
+		}
+		return nil, fmt.Errorf("get execution by lifecycle: %w", err)
+	}
+	return dto, nil
 }

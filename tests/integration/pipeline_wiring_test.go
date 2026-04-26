@@ -244,9 +244,6 @@ func (m *memAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationD
 func (m *memAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
 	return nil, database.ErrNotFound
 }
-func (m *memAdapter) GetShadowTradesByWindow(_ context.Context, _, _ string) ([]database.ShadowTrade, error) {
-	return nil, nil
-}
 func (m *memAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
 }

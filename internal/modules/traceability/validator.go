@@ -9,9 +9,10 @@ import (
 	"reflect"
 )
 
-// TraceFields are the four required fields on every non-root event.
+// TraceFields are the three base required fields on every event.
 // CausationID may be empty only for Layer 0 root events (market_data_event
 // emitted by the ingestion worker before any causation exists).
+// Use ValidateTraceWithCausation for non-root events where CausationID is required.
 var TraceFields = []string{"TraceID", "CorrelationID", "VersionID"}
 
 // ValidateTrace checks that the four trace fields are present on any DTO that

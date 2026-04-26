@@ -292,17 +292,17 @@ type Config struct {
 // Event is the event bus row representation.
 // See docs/db_adapter_spec.md § 2.
 type Event struct {
-	EventID       string  // SHA256(payload_signature)[:16]
-	EventType     string  // e.g., "market_data_event"
-	Payload       []byte  // canonical JSON of the DTO
+	EventID       string // SHA256(payload_signature)[:16]
+	EventType     string // e.g., "market_data_event"
+	Payload       []byte // canonical JSON of the DTO
 	TraceID       string
 	CorrelationID string
 	CausationID   *string // nil only for Layer 0 root events
 	VersionID     string
-	CreatedAt     string  // ISO 8601
+	CreatedAt     string // ISO 8601
 	Processed     bool
-	Priority      int     // higher = processed first; default 0
-	ExpiresAt     string  // ISO 8601 UTC; "" = no expiry
+	Priority      int    // higher = processed first; default 0
+	ExpiresAt     string // ISO 8601 UTC; "" = no expiry
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
@@ -371,13 +371,13 @@ type ExposureSummary struct {
 // ShadowTrade is an observation row tracking the price trajectory of a rejected
 // token over a configurable window. Used to classify false negatives.
 type ShadowTrade struct {
-	ShadowID            string  // SHA256(token_lifecycle_id||stage||rejected_at)[:16]
+	ShadowID            string // SHA256(token_lifecycle_id||stage||rejected_at)[:16]
 	TokenAddress        string
-	Stage               string  // data_quality|edge|validated_edge|selection
-	RejectedAt          string  // ISO 8601
+	Stage               string // data_quality|edge|validated_edge|selection
+	RejectedAt          string // ISO 8601
 	ObservationComplete bool
 	ObservedReturnPct   float64
-	Classification      string  // TN | FN
-	LearningRecordID    string  // FK to learning_records.record_id
+	Classification      string // TN | FN
+	LearningRecordID    string // FK to learning_records.record_id
 	VersionID           string
 }
