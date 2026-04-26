@@ -64,20 +64,13 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		w.logger.Warn("dq_worker_persist_failed", "event_id", dqDTO.EventID, "error", err)
 	}
 
-	// Lifecycle transition: DETECTED → DQ_PASSED or REJECTED.
+	// Lifecycle transition: DETECTED → DQ_PASSED or REJECTED (mandatory Phase 3 CAS).
 	nextState := "DQ_PASSED"
 	if dqDTO.Decision == "REJECT" {
 		nextState = "REJECTED"
 	}
-	if lc, ok := fetchLifecycle(ctx, w.adapter, lifecycleID, w.logger); ok {
-		transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-			LifecycleID:       lifecycleID,
-			ExpectedFromState: "DETECTED",
-			ExpectedVersion:   lc.StateVersion,
-			NewState:          nextState,
-			Reason:            dqDTO.Decision,
-			ActorWorker:       "dq_worker",
-		}, w.logger)
+	if err := doMandatoryTransition(ctx, w.adapter, lifecycleID, "DETECTED", nextState, dqDTO.Decision, "dq_worker"); err != nil {
+		return nil, fmt.Errorf("dq_worker: transition: %w", err)
 	}
 
 	// Do not emit downstream event for rejections.

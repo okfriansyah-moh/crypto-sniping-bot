@@ -119,8 +119,56 @@ type Adapter interface {
 	// InsertEvaluation persists an EvaluationDTO.
 	InsertEvaluation(ctx context.Context, dto contracts.EvaluationDTO) error
 
+	// GetExecutionByLifecycle returns the ExecutionResultDTO for a lifecycle ID.
+	// Returns ErrNotFound if no execution record exists for the lifecycle.
+	GetExecutionByLifecycle(ctx context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error)
+
+	// GetShadowTradesByWindow returns pending shadow trades whose rejected_at is
+	// older than (now - windowSeconds) and whose observation_complete is false.
+	GetShadowTradesByWindow(ctx context.Context, windowSeconds int) ([]ShadowTrade, error)
+
 	// InsertLearningRecord persists a LearningRecordDTO.
 	InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
+
+	// ── Phase 4: Signal Quality Models ───────────────────────────────────────
+
+	// InsertProbabilityEstimate persists a ProbabilityEstimateDTO. Idempotent.
+	InsertProbabilityEstimate(ctx context.Context, dto contracts.ProbabilityEstimateDTO) error
+
+	// InsertSlippageEstimate persists a SlippageEstimateDTO. Idempotent.
+	InsertSlippageEstimate(ctx context.Context, dto contracts.SlippageEstimateDTO) error
+
+	// InsertLatencyProfile persists a LatencyProfileDTO. Idempotent.
+	InsertLatencyProfile(ctx context.Context, dto contracts.LatencyProfileDTO) error
+
+	// GetProbabilityEstimateByTrace returns the most recent probability estimate
+	// for the given trace ID, or nil if not present.
+	GetProbabilityEstimateByTrace(ctx context.Context, traceID string) (*contracts.ProbabilityEstimateDTO, error)
+
+	// GetSlippageEstimateByTrace returns the most recent slippage estimate
+	// for the given trace ID, or nil if not present.
+	GetSlippageEstimateByTrace(ctx context.Context, traceID string) (*contracts.SlippageEstimateDTO, error)
+
+	// GetLatestLatencyProfile returns the most recent latency profile for the
+	// given chain, or nil if no profile has been recorded.
+	GetLatestLatencyProfile(ctx context.Context, chain string) (*contracts.LatencyProfileDTO, error)
+
+	// ── Phase 5: Learning Engine ──────────────────────────────────────────────
+
+	// InsertShadowTrade persists a new shadow trade observation row.
+	// shadowID is SHA256(token_lifecycle_id||stage||rejected_at)[:16].
+	InsertShadowTrade(ctx context.Context, st ShadowTrade) error
+
+	// UpdateShadowTradeObservation marks a shadow trade's observation window
+	// as complete and records the final observed return and classification.
+	UpdateShadowTradeObservation(ctx context.Context, shadowID string, observedReturnPct float64, classification string) error
+
+	// GetLearningRecordsByWindow returns all LearningRecordDTOs for a given
+	// version within [start, end].
+	GetLearningRecordsByWindow(ctx context.Context, versionID string, start, end time.Time) ([]contracts.LearningRecordDTO, error)
+
+	// GetEvaluationsByVersion returns all EvaluationDTOs for a version, ordered by evaluated_at DESC.
+	GetEvaluationsByVersion(ctx context.Context, versionID string) ([]contracts.EvaluationDTO, error)
 
 	// ── Execution: Nonce Manager ─────────────────────────────────────────────
 
@@ -253,6 +301,8 @@ type Event struct {
 	VersionID     string
 	CreatedAt     string // ISO 8601
 	Processed     bool
+	Priority      int    // higher = processed first; default 0
+	ExpiresAt     string // ISO 8601 UTC; "" = no expiry
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
@@ -316,4 +366,18 @@ type ExposureSummary struct {
 	PerToken      map[string]float64 // tokenAddress → usd
 	PerCohort     map[string]float64 // cohortID     → usd
 	OpenPositions int32
+}
+
+// ShadowTrade is an observation row tracking the price trajectory of a rejected
+// token over a configurable window. Used to classify false negatives.
+type ShadowTrade struct {
+	ShadowID            string // SHA256(token_lifecycle_id||stage||rejected_at)[:16]
+	TokenAddress        string
+	Stage               string // data_quality|edge|validated_edge|selection
+	RejectedAt          string // ISO 8601
+	ObservationComplete bool
+	ObservedReturnPct   float64
+	Classification      string // TN | FN
+	LearningRecordID    string // FK to learning_records.record_id
+	VersionID           string
 }

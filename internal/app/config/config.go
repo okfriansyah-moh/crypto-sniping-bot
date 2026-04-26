@@ -14,16 +14,22 @@ import (
 // All thresholds and tunable parameters must come from YAML — no hardcoded values.
 // See docs/implementation_roadmap.md § 0.5.
 type Config struct {
-	Pipeline   PipelineConfig         `yaml:"pipeline"`
-	Database   DatabaseConfig         `yaml:"database"`
-	Worker     WorkerConfig           `yaml:"worker"`
-	Logging    LoggingConfig          `yaml:"logging"`
-	Chains     map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
-	Edge       EdgeConfig             `yaml:"edge"`
-	Validation ValidationConfig       `yaml:"validation"`
-	Selection  SelectionConfig        `yaml:"selection"`
-	Capital    CapitalConfig          `yaml:"capital"`
-	Position   PositionConfig         `yaml:"position"`
+	Pipeline     PipelineConfig         `yaml:"pipeline"`
+	Database     DatabaseConfig         `yaml:"database"`
+	Worker       WorkerConfig           `yaml:"worker"`
+	Logging      LoggingConfig          `yaml:"logging"`
+	Chains       map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
+	Edge         EdgeConfig             `yaml:"edge"`
+	Validation   ValidationConfig       `yaml:"validation"`
+	Selection    SelectionConfig        `yaml:"selection"`
+	Capital      CapitalConfig          `yaml:"capital"`
+	Position     PositionConfig         `yaml:"position"`
+	Execution    ExecutionConfig        `yaml:"execution"` // Phase 3+4 combined
+	Evaluation   EvaluationConfig       `yaml:"evaluation"`
+	StateMachine StateMachineConfig     `yaml:"state_machine"`
+	EventWeights EventPriorityWeights   `yaml:"event_weights"`
+	Models       ModelsConfig           `yaml:"models"`
+	Learning     LearningConfig         `yaml:"learning"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -67,24 +73,24 @@ type LoggingConfig struct {
 
 // EdgeConfig holds Phase 2 edge detection parameters.
 type EdgeConfig struct {
-	MinVelocityScore    float64 `yaml:"min_velocity_score"`
-	MinLiquidityScore   float64 `yaml:"min_liquidity_score"`
-	MaxAgeSeconds       int64   `yaml:"max_age_seconds"`
-	BaseWindowMs        int32   `yaml:"base_window_ms"`
+	MinVelocityScore     float64 `yaml:"min_velocity_score"`
+	MinLiquidityScore    float64 `yaml:"min_liquidity_score"`
+	MaxAgeSeconds        int64   `yaml:"max_age_seconds"`
+	BaseWindowMs         int32   `yaml:"base_window_ms"`
 	WindowMomentumFactor float64 `yaml:"window_momentum_factor"`
-	TTLSeconds          int     `yaml:"ttl_seconds"`
+	TTLSeconds           int     `yaml:"ttl_seconds"`
 }
 
 // ValidationConfig holds Phase 2 EV gate parameters (fixed priors).
 type ValidationConfig struct {
-	PriorProbability   float64 `yaml:"prior_probability"`
-	PriorGainBps       int32   `yaml:"prior_gain_bps"`
-	PriorLossBps       int32   `yaml:"prior_loss_bps"`
-	PriorSlippageBps   int32   `yaml:"prior_slippage_bps"`
-	EvThresholdBps     int32   `yaml:"ev_threshold_bps"`
-	FixedCostsBps      int32   `yaml:"fixed_costs_bps"`
-	BuildSubmitP95Ms   int32   `yaml:"build_submit_p95_ms"`
-	TTLSeconds         int     `yaml:"ttl_seconds"`
+	PriorProbability float64 `yaml:"prior_probability"`
+	PriorGainBps     int32   `yaml:"prior_gain_bps"`
+	PriorLossBps     int32   `yaml:"prior_loss_bps"`
+	PriorSlippageBps int32   `yaml:"prior_slippage_bps"`
+	EvThresholdBps   int32   `yaml:"ev_threshold_bps"`
+	FixedCostsBps    int32   `yaml:"fixed_costs_bps"`
+	BuildSubmitP95Ms int32   `yaml:"build_submit_p95_ms"`
+	TTLSeconds       int     `yaml:"ttl_seconds"`
 }
 
 // SelectionConfig holds Phase 2 selection parameters.
@@ -115,6 +121,132 @@ type PositionConfig struct {
 	SlBps               int32 `yaml:"sl_bps"`
 	MaxHoldSeconds      int32 `yaml:"max_hold_seconds"`
 	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
+}
+
+// ExecutionConfig holds Phase 3+4 execution parameters: retry/replacement (Phase 3)
+// and private RPC routing (Phase 4).
+type ExecutionConfig struct {
+	// Phase 3: retry and fee-bump parameters
+	MaxRetry               int     `yaml:"max_retry"`
+	MaxReplacements        int     `yaml:"max_replacements"`
+	RetryBackoffMs         []int   `yaml:"retry_backoff_ms"`
+	ReplacementThresholdMs int     `yaml:"replacement_threshold_ms"`
+	DropTimeoutMs          int     `yaml:"drop_timeout_ms"`
+	FeeBumpMultiplier      float64 `yaml:"fee_bump_multiplier"`
+	PollIntervalMs         int     `yaml:"poll_interval_ms"`
+	ConcurrencyLimit       int     `yaml:"concurrency_limit"`
+	ConcurrencyMin         int     `yaml:"concurrency_min"`
+	ConcurrencyMax         int     `yaml:"concurrency_max"`
+	DefaultMaxSlippageBps  int32   `yaml:"default_max_slippage_bps"`
+	// Phase 4: private RPC routing
+	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
+	PrivateEndpoints         []string `yaml:"private_endpoints"`
+	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
+}
+
+// EvaluationConfig holds Phase 3 evaluation engine parameters.
+type EvaluationConfig struct {
+	FPLossThresholdPct float64 `yaml:"fp_loss_threshold_pct"`
+	FNGainThresholdPct float64 `yaml:"fn_gain_threshold_pct"`
+	WindowSeconds      int     `yaml:"window_seconds"`
+}
+
+// StateMachineConfig holds Phase 3 state machine enforcement parameters.
+type StateMachineConfig struct {
+	QuarantineThreshold int `yaml:"quarantine_threshold"`
+}
+
+// EventPriorityWeights maps event types to base priority values.
+// Used by ComputePriority in resource_control package.
+type EventPriorityWeights struct {
+	PositionEventExit    int32 `yaml:"position_event_exit"`
+	ExecutionReplacement int32 `yaml:"execution_replacement"`
+	PositionEventOpen    int32 `yaml:"position_event_open"`
+	AllocationEvent      int32 `yaml:"allocation_event"`
+	ValidatedEdgeEvent   int32 `yaml:"validated_edge_event"`
+	EdgeEvent            int32 `yaml:"edge_event"`
+	FeatureEvent         int32 `yaml:"feature_event"`
+	DataQualityEvent     int32 `yaml:"data_quality_event"`
+	MarketDataEvent      int32 `yaml:"market_data_event"`
+	AdjustmentEvent      int32 `yaml:"adjustment_event"`
+}
+
+// ModelsConfig holds Phase 4 model parameters (probability, slippage, latency).
+// All values are loaded from config/pipeline.yaml; safe defaults are applied
+// when keys are absent so existing Phase 2/3 configs remain valid.
+type ModelsConfig struct {
+	Probability                ProbabilityCoefficients `yaml:"probability"`
+	Slippage                   SlippageModelConfig     `yaml:"slippage"`
+	Latency                    LatencyModelConfig      `yaml:"latency"`
+	LatencyProfileIntervalSecs int                     `yaml:"latency_profile_interval_seconds"`
+	ModelJoinTimeoutMs         int                     `yaml:"model_join_timeout_ms"`
+}
+
+// ProbabilityCoefficients are the fixed weights for the Phase 4 logistic model.
+type ProbabilityCoefficients struct {
+	Bias                float64 `yaml:"bias"`
+	WLiquidityScore     float64 `yaml:"w_liquidity_score"`
+	WTxVelocityScore    float64 `yaml:"w_tx_velocity_score"`
+	WHolderDistribution float64 `yaml:"w_holder_distribution"`
+	WWalletEntropy      float64 `yaml:"w_wallet_entropy"`
+	WContractSafety     float64 `yaml:"w_contract_safety"`
+	WTokenAge           float64 `yaml:"w_token_age"`
+	WVolumeMomentum     float64 `yaml:"w_volume_momentum"`
+	WPriceMomentum      float64 `yaml:"w_price_momentum"`
+	ModelVersionID      string  `yaml:"model_version_id"`
+	BrierCalibration    float64 `yaml:"brier_calibration"`
+}
+
+// SlippageModelConfig holds the slippage bucket grid + fallbacks.
+type SlippageModelConfig struct {
+	Buckets        []SlippageBucketConfig `yaml:"buckets"`
+	FallbackP50Bps int32                  `yaml:"fallback_p50_bps"`
+	FallbackP95Bps int32                  `yaml:"fallback_p95_bps"`
+	ModelVersionID string                 `yaml:"model_version_id"`
+}
+
+// SlippageBucketConfig is a single (liquidity, size) calibration entry.
+type SlippageBucketConfig struct {
+	LiquidityMaxUsd float64 `yaml:"liquidity_max_usd"`
+	SizeMaxUsd      float64 `yaml:"size_max_usd"`
+	P50Bps          int32   `yaml:"p50_bps"`
+	P95Bps          int32   `yaml:"p95_bps"`
+}
+
+// LatencyModelConfig holds rolling-window settings + fallbacks.
+type LatencyModelConfig struct {
+	WindowSeconds int32 `yaml:"window_seconds"`
+	MinSamples    int   `yaml:"min_samples"`
+	FallbackP50Ms int32 `yaml:"fallback_p50_ms"`
+	FallbackP95Ms int32 `yaml:"fallback_p95_ms"`
+}
+
+// LearningConfig holds Phase 5 learning engine parameters.
+type LearningConfig struct {
+	// EvalWindowMinutes is how often the evaluator runs (default: 60).
+	EvalWindowMinutes int `yaml:"eval_window_minutes"`
+	// EvalWindowSeconds is the lookback window for evaluation (default: 86400 = 24h).
+	EvalWindowSeconds int `yaml:"eval_window_seconds"`
+	// MinSampleSize is the minimum number of records required before updating (default: 30).
+	MinSampleSize int `yaml:"min_sample_size"`
+	// MaxDeltaPct is the maximum fractional change per parameter per cycle (default: 0.10).
+	MaxDeltaPct float64 `yaml:"max_delta_pct"`
+	// Families is the ordered list of parameter families for round-robin updates.
+	Families []string `yaml:"families"`
+	// ShadowWindowMinutes is the observation window before A/B promotion (default: 60).
+	ShadowWindowMinutes int `yaml:"shadow_window_minutes"`
+	// RollbackThresholdPct is the expectancy drop that triggers rollback (default: 0.10).
+	RollbackThresholdPct float64 `yaml:"rollback_threshold_pct"`
+	// PostPromotionWatchMinutes is the post-promotion monitoring window (default: 120).
+	PostPromotionWatchMinutes int `yaml:"post_promotion_watch_minutes"`
+	// ShadowPollIntervalSeconds is how often the shadow observer runs (default: 60).
+	ShadowPollIntervalSeconds int `yaml:"shadow_poll_interval_seconds"`
+	// ObservationWindowSeconds is how long to track a rejected token's return (default: 3600).
+	ObservationWindowSeconds int `yaml:"observation_window_seconds"`
+	// FnGainThresholdPct is the minimum return for a rejected trade to be classified FN (default: 0.10).
+	FnGainThresholdPct float64 `yaml:"fn_gain_threshold_pct"`
+	// RollbackCheckIntervalSeconds is how often the rollback watchdog runs (default: 300).
+	RollbackCheckIntervalSeconds int `yaml:"rollback_check_interval_seconds"`
 }
 
 // Load reads configuration from one or more YAML config files.
@@ -199,6 +331,9 @@ func loadFile(path string, cfg *Config) error {
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	if cfg.Capital.WalletPrivateKey != "" {
+		return fmt.Errorf("config: wallet_private_key must not be set in config files; use SNIPER_WALLET_KEY env var")
 	}
 	return nil
 }

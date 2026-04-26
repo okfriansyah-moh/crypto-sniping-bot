@@ -38,7 +38,8 @@ if err := json.Unmarshal(evt.Payload, &dto); err != nil {
 return nil, fmt.Errorf("validation_worker: unmarshal: %w", err)
 }
 
-vedge, err := w.mod.Process(ctx, dto)
+prob, slip, lat := w.fetchEstimates(ctx, evt.TraceID, evt.CorrelationID)
+vedge, err := w.mod.ProcessWithEstimates(ctx, dto, prob, slip, lat)
 if err != nil {
 return nil, fmt.Errorf("validation_worker: module: %w", err)
 }
@@ -47,20 +48,13 @@ if err := w.adapter.InsertValidatedEdge(ctx, vedge); err != nil {
 w.logger.Warn("validation_worker_persist_failed", "event_id", vedge.EventID, "error", err)
 }
 
-nextState := "VALIDATED"
-if vedge.Decision != "ACCEPT" {
-nextState = "REJECTED"
-}
-if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-LifecycleID:       dto.TokenLifecycleID,
-ExpectedFromState: "EDGE_DETECTED",
-ExpectedVersion:   lc.StateVersion,
-NewState:          nextState,
-Reason:            vedge.RejectReason,
-ActorWorker:       "validation_worker",
-}, w.logger)
-}
+	nextState := "VALIDATED"
+	if vedge.Decision != "ACCEPT" {
+		nextState = "REJECTED"
+	}
+	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "EDGE_DETECTED", nextState, vedge.RejectReason, "validation_worker"); err != nil {
+		return nil, fmt.Errorf("validation_worker: transition: %w", err)
+	}
 
 if vedge.Decision != "ACCEPT" {
 return nil, nil
@@ -70,4 +64,37 @@ return makeOutputEvent(
 vedge.EventID, vedge, "validated_edge_event",
 evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 )
+}
+
+// fetchEstimates returns the latest model estimates for this trace.  Any of the
+// returned values may be nil — in that case the validation module will fall
+// back to its configured priors.  All errors are logged and treated as nil.
+func (w *ValidationWorker) fetchEstimates(
+ctx context.Context,
+traceID, correlationID string,
+) (*contracts.ProbabilityEstimateDTO, *contracts.SlippageEstimateDTO, *contracts.LatencyProfileDTO) {
+var (
+prob *contracts.ProbabilityEstimateDTO
+slip *contracts.SlippageEstimateDTO
+lat  *contracts.LatencyProfileDTO
+)
+if p, err := w.adapter.GetProbabilityEstimateByTrace(ctx, traceID); err == nil {
+prob = p
+} else {
+w.logger.Debug("validation_prob_lookup_failed", "trace_id", traceID, "error", err)
+}
+if s, err := w.adapter.GetSlippageEstimateByTrace(ctx, traceID); err == nil {
+slip = s
+} else {
+w.logger.Debug("validation_slip_lookup_failed", "trace_id", traceID, "error", err)
+}
+chain := chainFromCorrelation(ctx, w.adapter, correlationID, w.logger)
+if chain != "" {
+if l, err := w.adapter.GetLatestLatencyProfile(ctx, chain); err == nil {
+lat = l
+} else {
+w.logger.Debug("validation_lat_lookup_failed", "chain", chain, "error", err)
+}
+}
+return prob, slip, lat
 }

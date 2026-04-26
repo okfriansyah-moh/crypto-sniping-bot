@@ -70,15 +70,8 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	if !selDTO.Selected {
 		nextState = "REJECTED"
 	}
-	if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-		transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-			LifecycleID:       dto.TokenLifecycleID,
-			ExpectedFromState: "VALIDATED",
-			ExpectedVersion:   lc.StateVersion,
-			NewState:          nextState,
-			Reason:            selDTO.RejectReason,
-			ActorWorker:       "selection_worker",
-		}, w.logger)
+	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "VALIDATED", nextState, selDTO.RejectReason, "selection_worker"); err != nil {
+		return nil, fmt.Errorf("selection_worker: transition: %w", err)
 	}
 
 	if !selDTO.Selected {

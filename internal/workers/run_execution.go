@@ -68,18 +68,9 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	} else if w.evmClient == nil || w.privKey == "" {
 		result = simulatedExecResult(alloc, now)
 	} else {
-		// SECURITY WARNING: Phase 2 uses amountOutMin=0 (no slippage protection).
-		// Every live swap is vulnerable to sandwich attacks until Phase 3 adds a
-		// real-time price feed and sets amountOutMin from the AllocationDTO.
-		w.logger.Warn("execution_zero_slippage_protection",
-			"token", alloc.TokenAddress,
-			"size_usd", alloc.SizeUsd,
-			"note", "amountOutMin=0: upgrade to Phase 3 before using real capital",
-		)
 		nonce, nonceErr := w.adapter.AllocateNonce(ctx, alloc.WalletAddress, alloc.Chain)
 		if nonceErr != nil {
-			w.logger.Warn("execution_worker_nonce_failed", "error", nonceErr)
-			nonce = 0
+			return nil, fmt.Errorf("execution_worker: allocate nonce: %w", nonceErr)
 		}
 
 		baseToken := chainBaseToken(w.cfg, alloc.Chain)
@@ -103,15 +94,8 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	if !result.Success {
 		nextState = "FAILED"
 	}
-	if lc, ok := fetchLifecycle(ctx, w.adapter, alloc.TokenLifecycleID, w.logger); ok {
-		transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-			LifecycleID:       alloc.TokenLifecycleID,
-			ExpectedFromState: "SELECTED",
-			ExpectedVersion:   lc.StateVersion,
-			NewState:          nextState,
-			Reason:            result.ErrorCode,
-			ActorWorker:       "execution_worker",
-		}, w.logger)
+	if err := doMandatoryTransition(ctx, w.adapter, alloc.TokenLifecycleID, "SELECTED", nextState, result.ErrorCode, "execution_worker"); err != nil {
+		return nil, fmt.Errorf("execution_worker: transition: %w", err)
 	}
 
 	return makeOutputEvent(

@@ -165,8 +165,29 @@ func (m *mockAdapter) InsertPositionState(_ context.Context, _ contracts.Positio
 func (m *mockAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationDTO) error {
 	return database.ErrNotImplemented
 }
+func (m *mockAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
+	return nil, database.ErrNotFound
+}
 func (m *mockAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertProbabilityEstimate(_ context.Context, _ contracts.ProbabilityEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertSlippageEstimate(_ context.Context, _ contracts.SlippageEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertLatencyProfile(_ context.Context, _ contracts.LatencyProfileDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
+	return nil, nil
 }
 func (m *mockAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error) {
 	return 0, database.ErrNotImplemented
@@ -325,4 +346,20 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 	r := orchestrator.NewRegistry()
 	r.Register("stage-a", noopHandler{}, "event.a")
 	r.Register("stage-a", noopHandler{}, "event.a") // must panic
+}
+
+func (m *mockAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
+return nil
+}
+func (m *mockAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
+return nil
+}
+func (m *mockAdapter) GetShadowTradesByWindow(_ context.Context, _ int) ([]database.ShadowTrade, error) {
+return nil, nil
+}
+func (m *mockAdapter) GetLearningRecordsByWindow(_ context.Context, _ string, _, _ time.Time) ([]contracts.LearningRecordDTO, error) {
+return nil, nil
+}
+func (m *mockAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
+return nil, nil
 }

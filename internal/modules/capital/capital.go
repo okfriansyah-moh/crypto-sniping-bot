@@ -33,7 +33,8 @@ return &Module{cfg: cfg}
 // Phase 2: fixed base allocation; Phase 7 adds Kelly-adjacent sizing.
 // ExecutionID is content-addressable: SHA256(tokenAddress + chain + correlationID).
 func (m *Module) Process(_ context.Context, in contracts.SelectionOutputDTO, chain string) (contracts.AllocationDTO, error) {
-now := time.Now().UTC().Format(time.RFC3339Nano)
+nowTime := time.Now().UTC()
+now := nowTime.Format(time.RFC3339Nano)
 
 if !in.Selected {
 // Emit rejected allocation to propagate downstream.
@@ -63,7 +64,7 @@ if sizeUsd > m.cfg.MaxSizeUsd {
 sizeUsd = m.cfg.MaxSizeUsd
 }
 
-expiresAt := time.Now().UTC().Add(
+expiresAt := nowTime.Add(
 time.Duration(m.cfg.TTLSeconds) * time.Second,
 ).Format(time.RFC3339Nano)
 

@@ -10,56 +10,146 @@ database:
   # Password is read from SNIPER_DB_PASSWORD env var.
   # ssl_mode controls PostgreSQL TLS. Use 'require' or 'verify-full' in production.
   # Override with SNIPER_DB_SSL_MODE env var.
-  ssl_mode: disable  # local dev only
+  ssl_mode: disable # local dev only
   pool:
     max_open_conns: 20
     max_idle_conns: 5
     conn_max_lifetime_seconds: 3600
 
 worker:
-  idle_backoff_ms: 100      # sleep when queue is empty
-  max_retry_count: 3        # retries before dead-lettering an event
-  panic_recovery: true      # recover from handler panics
+  idle_backoff_ms: 100 # sleep when queue is empty
+  max_retry_count: 3 # retries before dead-lettering an event
+  panic_recovery: true # recover from handler panics
 
 logging:
-  level: info               # debug | info | warn | error
-  format: json              # json | text
+  level: info # debug | info | warn | error
+  format: json # json | text
 
 # ── Phase 2: Pipeline Stage Configuration ─────────────────────────────────────
 
 edge:
-  min_velocity_score: 0.3        # minimum tx velocity score to detect edge
-  min_liquidity_score: 0.2       # minimum liquidity score to detect edge
-  max_age_seconds: 300           # token age ceiling for NEW_LAUNCH rule (5 min)
-  base_window_ms: 4000           # base opportunity window in milliseconds
-  window_momentum_factor: 0.5    # scales window by edge strength
-  ttl_seconds: 8                 # EdgeDTO TTL before expiry
+  min_velocity_score: 0.3 # minimum tx velocity score to detect edge
+  min_liquidity_score: 0.2 # minimum liquidity score to detect edge
+  max_age_seconds: 300 # token age ceiling for NEW_LAUNCH rule (5 min)
+  base_window_ms: 4000 # base opportunity window in milliseconds
+  window_momentum_factor: 0.5 # scales window by edge strength
+  ttl_seconds: 8 # EdgeDTO TTL before expiry
 
 validation:
-  prior_probability: 0.35        # fixed prior P(success) — Phase 2 simplification
-  prior_gain_bps: 3000           # expected gain on win (30%)
-  prior_loss_bps: 4000           # expected loss on loss (40%)
-  prior_slippage_bps: 200        # P95 slippage estimate
-  ev_threshold_bps: 100          # minimum EV to ACCEPT (1%)
-  fixed_costs_bps: 150           # gas + protocol fees
-  build_submit_p95_ms: 500       # estimated build+submit latency overhead
-  ttl_seconds: 5                 # ValidatedEdgeDTO TTL before expiry
+  prior_probability: 0.35 # fixed prior P(success) — Phase 2 simplification
+  prior_gain_bps: 3000 # expected gain on win (30%)
+  prior_loss_bps: 4000 # expected loss on loss (40%)
+  prior_slippage_bps: 200 # P95 slippage estimate
+  ev_threshold_bps: 100 # minimum EV to ACCEPT (1%)
+  fixed_costs_bps: 150 # gas + protocol fees
+  build_submit_p95_ms: 500 # estimated build+submit latency overhead
+  ttl_seconds: 5 # ValidatedEdgeDTO TTL before expiry
 
 selection:
-  max_open_positions: 1          # Phase 2: one concurrent position only
+  max_open_positions: 1 # Phase 2: one concurrent position only
 
 capital:
-  wallet_address: ""             # EIP-55 wallet address (set via env or config)
-  wallet_private_key: ""         # hex private key — override with env SNIPER_WALLET_KEY
-  fixed_entry_size_usd: 50.0     # fixed trade size in USD (Phase 2 simplification)
-  max_total_exposure_usd: 500.0  # hard cap on total open exposure
-  max_concurrent_positions: 1    # Phase 2: max 1 position at once
-  max_size_usd: 100.0            # single position USD ceiling
-  ttl_seconds: 3                 # AllocationDTO TTL before expiry
+  wallet_address: "" # EIP-55 wallet address (set via env or config)
+  wallet_private_key: "" # hex private key — override with env SNIPER_WALLET_KEY
+  fixed_entry_size_usd: 50.0 # fixed trade size in USD (Phase 2 simplification)
+  max_total_exposure_usd: 500.0 # hard cap on total open exposure
+  max_concurrent_positions: 1 # Phase 2: max 1 position at once
+  max_size_usd: 100.0 # single position USD ceiling
+  ttl_seconds: 3 # AllocationDTO TTL before expiry
 
 position:
-  tp1_bps: 2000                  # take-profit 1 threshold (20%)
-  tp2_bps: 5000                  # take-profit 2 threshold (50%)
-  sl_bps: 1500                   # stop-loss threshold (15%)
-  max_hold_seconds: 3600         # maximum hold time (1 hour)
-  poll_interval_seconds: 15      # how often to poll open position prices
+  tp1_bps: 2000 # take-profit 1 threshold (20%)
+  tp2_bps: 5000 # take-profit 2 threshold (50%)
+  sl_bps: 1500 # stop-loss threshold (15%)
+  max_hold_seconds: 3600 # maximum hold time (1 hour)
+  poll_interval_seconds: 15 # how often to poll open position prices
+
+# Phase 4 — Probability / Slippage / Latency models
+models:
+  latency_profile_interval_seconds: 60
+  model_join_timeout_ms: 0 # 0 = fall back to priors immediately if model events not yet available
+
+  probability:
+    model_version_id: "logistic-v1"
+    bias: -0.5
+    w_liquidity_score: 1.5
+    w_tx_velocity_score: 0.8
+    w_holder_distribution: 0.6
+    w_wallet_entropy: 0.4
+    w_contract_safety: 1.2
+    w_token_age: -0.5 # newer = riskier
+    w_volume_momentum: 0.7
+    w_price_momentum: 0.5
+    brier_calibration: 0.18 # baseline calibration score (lower = better)
+
+  slippage:
+    model_version_id: "buckets-v1"
+    fallback_p50_bps: 100
+    fallback_p95_bps: 250
+    buckets:
+      - {
+          liquidity_max_usd: 100000,
+          size_max_usd: 100,
+          p50_bps: 80,
+          p95_bps: 200,
+        }
+      - {
+          liquidity_max_usd: 100000,
+          size_max_usd: 1000,
+          p50_bps: 150,
+          p95_bps: 400,
+        }
+      - {
+          liquidity_max_usd: 1000000,
+          size_max_usd: 100,
+          p50_bps: 30,
+          p95_bps: 90,
+        }
+      - {
+          liquidity_max_usd: 1000000,
+          size_max_usd: 1000,
+          p50_bps: 60,
+          p95_bps: 180,
+        }
+      - {
+          liquidity_max_usd: 10000000,
+          size_max_usd: 1000,
+          p50_bps: 20,
+          p95_bps: 60,
+        }
+      - {
+          liquidity_max_usd: 10000000,
+          size_max_usd: 10000,
+          p50_bps: 50,
+          p95_bps: 150,
+        }
+
+  latency:
+    window_seconds: 600
+    min_samples: 30
+    fallback_p50_ms: 250
+    fallback_p95_ms: 800
+
+execution:
+  mode: "live" # "live" | "shadow" (Phase 5 placeholder)
+  private_route_threshold_usd: 0 # 0 disables private routing in Phase 4
+  private_endpoints: []
+
+# ── Phase 5: Learning Engine Configuration ────────────────────────────────────
+
+learning:
+  eval_window_minutes: 60 # how often the evaluator runs
+  eval_window_seconds: 86400 # lookback window for evaluation (24h)
+  min_sample_size: 30 # minimum records before updating
+  max_delta_pct: 0.10 # max fractional change per parameter per cycle
+  families:
+    - thresholds
+    - weights
+    - cohort_mults
+  shadow_window_minutes: 60 # observation window before A/B promotion
+  rollback_threshold_pct: 0.10 # expectancy drop that triggers rollback
+  post_promotion_watch_minutes: 120 # post-promotion monitoring window
+  shadow_poll_interval_seconds: 60 # how often the shadow observer runs
+  observation_window_seconds: 3600 # how long to track a rejected token's return
+  fn_gain_threshold_pct: 0.10 # minimum return to classify rejected trade as FN
+  rollback_check_interval_seconds: 300 # how often the rollback watchdog runs

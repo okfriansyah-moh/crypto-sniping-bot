@@ -67,14 +67,8 @@ func (w *PositionOpenWorker) Process(ctx context.Context, evt *database.Event) (
 	if pos.Status == "failed" {
 		nextState = "FAILED"
 	}
-	if lc, ok := fetchLifecycle(ctx, w.adapter, dto.TokenLifecycleID, w.logger); ok {
-		transitionBestEffort(ctx, w.adapter, database.TransitionRequest{
-			LifecycleID:       dto.TokenLifecycleID,
-			ExpectedFromState: "EXECUTED",
-			ExpectedVersion:   lc.StateVersion,
-			NewState:          nextState,
-			ActorWorker:       "position_open_worker",
-		}, w.logger)
+	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "EXECUTED", nextState, "", "position_open_worker"); err != nil {
+		return nil, fmt.Errorf("position_open_worker: transition: %w", err)
 	}
 
 	return makeOutputEvent(

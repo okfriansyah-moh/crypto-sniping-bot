@@ -1,3 +1,38 @@
+# Phase 3: Event bus priority weights (ORDER BY priority DESC, created_at ASC).
+# Exit-path events use PRIORITY_EXIT constant (≥900) — never dropped.
+event_weights:
+  position_event_exit: 1000
+  execution_replacement: 900
+  position_event_open: 500
+  allocation_event: 400
+  validated_edge_event: 300
+  edge_event: 200
+  feature_event: 150
+  data_quality_event: 120
+  market_data_event: 100
+  adjustment_event: 50
+
+# Phase 3: State machine enforcement parameters.
+state_machine:
+  quarantine_threshold: 3     # violations before QuarantineToken
+
+# Phase 3: Evaluation engine parameters.
+evaluation:
+  fp_loss_threshold_pct: -5.0   # PnlPct below this = false positive
+  fn_gain_threshold_pct: 20.0   # shadow trade gain above this = false negative
+  window_seconds: 3600          # rolling window for cohort Expectancy
+
+# Phase 3: Execution retry / replacement parameters (merged with execution.yaml).
+# These are additive keys — do not remove execution.yaml keys.
+execution:
+  max_retry: 3
+  max_replacements: 2
+  retry_backoff_ms: [100, 400, 1600]
+  replacement_threshold_ms: 10000
+  drop_timeout_ms: 60000
+  fee_bump_multiplier: 1.15
+  poll_interval_ms: 2000
+
 priority:
   # Operational mode thresholds (STRICT | BALANCED | EXPLORATION)
   # See docs/architecture.md § 7.

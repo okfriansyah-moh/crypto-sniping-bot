@@ -241,8 +241,29 @@ func (m *memAdapter) InsertPositionState(_ context.Context, _ contracts.Position
 func (m *memAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationDTO) error {
 	return database.ErrNotImplemented
 }
+func (m *memAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
+	return nil, database.ErrNotFound
+}
 func (m *memAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
+}
+func (m *memAdapter) InsertProbabilityEstimate(_ context.Context, _ contracts.ProbabilityEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *memAdapter) InsertSlippageEstimate(_ context.Context, _ contracts.SlippageEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *memAdapter) InsertLatencyProfile(_ context.Context, _ contracts.LatencyProfileDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *memAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
+	return nil, nil
+}
+func (m *memAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
+	return nil, nil
+}
+func (m *memAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
+	return nil, nil
 }
 func (m *memAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error) {
 	return 0, database.ErrNotImplemented
@@ -667,4 +688,20 @@ type errorHandler struct{}
 
 func (h *errorHandler) Process(_ context.Context, _ *database.Event) (*database.Event, error) {
 	return nil, errors.New("simulated handler failure")
+}
+
+func (m *memAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
+return nil
+}
+func (m *memAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
+return nil
+}
+func (m *memAdapter) GetShadowTradesByWindow(_ context.Context, _ int) ([]database.ShadowTrade, error) {
+return nil, nil
+}
+func (m *memAdapter) GetLearningRecordsByWindow(_ context.Context, _ string, _, _ time.Time) ([]contracts.LearningRecordDTO, error) {
+return nil, nil
+}
+func (m *memAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
+return nil, nil
 }

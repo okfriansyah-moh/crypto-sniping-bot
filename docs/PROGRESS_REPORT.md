@@ -10,25 +10,25 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 6          |
+| **Completed**    | 7          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 1          |
-| **Last Updated** | 2026-04-25 |
+| **Not Started**  | 0          |
+| **Last Updated** | 2026-04-26 |
 
 ---
 
 ## Phase Progress
 
-| Phase | Name                  | Status      | Retry Count | Notes                                                                                                                                      |
-| ----- | --------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0     | Core Infrastructure   | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean. |
-| 1     | Detection & Ingestion | completed   | 0           | All pipeline agents passed |
-| 2     | Pipeline Core         | completed   | 0           | All pipeline agents passed |
-| 3     | Position Management   | not-started | 0           |                                                                                                                                            |
-| 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
-| 5     | Learning Engine       | not-started | 0           |                                                                                                                                            |
-| 6     | Observability & Risk  | not-started | 0           |                                                                                                                                            |
+| Phase | Name                   | Status      | Retry Count | Notes                                                                                                                                                                                                                                                                     |
+| ----- | ---------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Core Infrastructure    | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean.                                                                                                                                |
+| 1     | Detection & Ingestion  | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| 2     | Pipeline Core          | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| 3     | Evaluation Correctness | completed   | 0           | Mandatory CAS, evaluation worker, state_machine, traceability, circuit_breaker, fee-bump, Telegram dispatcher+commands, migration 000008                                                                                                                                  |
+| 4     | Probability Models     | completed   | 0           | Logistic probability model, bucket-based slippage, rolling-window latency profiles; new workers (probability, slippage, latency); validation worker now consumes model estimates with prior fallback; additive DQ/feature/edge detector helpers; tests + build/vet clean. |
+| 5     | Learning Engine        | completed   | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass.                                                                                                                           |
+| 6     | Observability & Risk   | not-started | 0           |                                                                                                                                                                                                                                                                           |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 
@@ -38,15 +38,15 @@
 
 ### Latest Run
 
-| Phase | phase-builder | dto-guardian       | integration | security-auditor | test-builder | Final     |
-| ----- | ------------- | ------------------ | ----------- | ---------------- | ------------ | --------- |
-| 0     | pass          | pass (after fixes) | pass        | pass             | pass         | completed |
-| 1     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
-| 2     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
-| 3     | —             | —                  | —           | —                | —            | —         |
-| 4     | —             | —                  | —           | —                | —            | —         |
-| 5     | —             | —                  | —           | —                | —            | —         |
-| 6     | —             | —                  | —           | —                | —            | —         |
+| Phase | phase-builder | dto-guardian       | integration | security-auditor           | test-builder | Final     |
+| ----- | ------------- | ------------------ | ----------- | -------------------------- | ------------ | --------- |
+| 0     | pass          | pass (after fixes) | pass        | pass                       | pass         | completed |
+| 1     | pass          | completed          | pass        | All pipeline agents passed | pass         | completed |
+| 2     | pass          | completed          | pass        | All pipeline agents passed | pass         | completed |
+| 3     | pass          | pass               | pass        | pass                       | pass         | completed |
+| 4     | pass          | pass               | pass        | pass                       | pass         | completed |
+| 5     | pass          | pass               | pass        | pass                       | pass         | completed |
+| 6     | —             | —                  | —           | —                          | —            | —         |
 
 **Values:** `pass`, `fail (N retries)`, `skipped`, `rolled-back`
 
@@ -57,18 +57,18 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 
 ## Quality Gate Results
 
-| Gate                   | Status | Details                                                              |
-| ---------------------- | ------ | -------------------------------------------------------------------- |
-| Import check           | pass   | `go build ./...` clean                                               |
-| Lint check             | pass   | `go vet ./...` clean                                                 |
-| Test check             | pass   | `go test ./contracts/... ./database/... ./internal/orchestrator/...` |
-| SQL check              | pass   | All SQL uses parameterized queries and portable syntax               |
-| Cross-module check     | pass   | No cross-module imports; only `contracts/` types                     |
-| Print check            | pass   | No unstructured console output                                       |
-| DTO validation         | pass   | All 17 DTOs verified; no forbidden types; no methods                 |
-| Orchestrator integrity | pass   | Only orchestrator calls adapter; modules are pure                    |
-| Protected files        | pass   | `contracts/` additive-only; `database/` Phase 0 only                 |
-| Deterministic ordering | pass   | Content-addressable IDs; sorted collections                          |
+| Gate                   | Status | Details                                                               |
+| ---------------------- | ------ | --------------------------------------------------------------------- |
+| Import check           | pass   | `go build ./...` clean                                                |
+| Lint check             | pass   | `go vet ./...` clean                                                  |
+| Test check             | pass   | `go test ./contracts/... ./database/... ./internal/orchestrator/...`  |
+| SQL check              | pass   | All SQL uses parameterized queries and portable syntax                |
+| Cross-module check     | pass   | No cross-module imports; only `contracts/` types                      |
+| Print check            | pass   | No unstructured console output                                        |
+| DTO validation         | pass   | All 17 DTOs verified; no forbidden types; no methods                  |
+| Orchestrator integrity | pass   | Only orchestrator calls adapter; modules are pure                     |
+| Protected files        | pass   | `contracts/` additive-only; `database/` Phase 0 only                  |
+| Deterministic ordering | pass   | Content-addressable IDs; sorted collections; single time.Now() per fn |
 
 ---
 
@@ -100,8 +100,9 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 
 ## Session History
 
-| Date       | Mode            | Phases | Duration      | Token Usage | Outcome   |
-| ---------- | --------------- | ------ | ------------- | ----------- | --------- |
-| 2026-04-25 | manual (mode-2) | 0      | multi-session | —           | completed |
-| 2026-04-25 | mode-2            | 1      | —            | —           | completed |
-| 2026-04-25 | mode-2            | 2      | —            | —           | completed |
+| Date       | Mode              | Phases | Duration      | Token Usage | Outcome               |
+| ---------- | ----------------- | ------ | ------------- | ----------- | --------------------- |
+| 2026-04-25 | manual (mode-2)   | 0      | multi-session | —           | completed             |
+| 2026-04-25 | mode-2            | 1      | —             | —           | completed             |
+| 2026-04-25 | mode-2            | 2      | —             | —           | completed             |
+| 2026-04-26 | integration-agent | 3      | —             | —           | integration-validated |
