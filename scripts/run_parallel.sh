@@ -383,25 +383,30 @@ update_phase_status() {
     local _phase="$1"; shift
     local _status_file="${PROJECT_ROOT}/.parallel-dev/phase-status.json"
     python3 - "$_phase" "$_status_file" "$@" <<'PYEOF'
-import sys, json, os, time
+import sys, json, os, time, fcntl
 phase, path = sys.argv[1], sys.argv[2]
 kvs = sys.argv[3:]
 data = {}
 os.makedirs(os.path.dirname(path), exist_ok=True)
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except: data = {}
-if "phases" not in data: data["phases"] = {}
-if phase not in data["phases"]: data["phases"][phase] = {"phase": phase}
-entry = data["phases"][phase]
-it = iter(kvs)
-for k in it:
-    v = next(it)
-    entry[k] = None if v == "null" else int(v) if v.lstrip("-").isdigit() else v
-entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-tmp = path + ".tmp"
-with open(tmp, "w") as f: json.dump(data, f, indent=2)
-os.replace(tmp, path)
+lock_path = path + ".lock"
+# Serialize concurrent writes from parallel phases using an exclusive flock.
+with open(lock_path, "w") as lock_f:
+    fcntl.flock(lock_f, fcntl.LOCK_EX)
+    if os.path.exists(path):
+        try: data = json.load(open(path))
+        except: data = {}
+    if "phases" not in data: data["phases"] = {}
+    if phase not in data["phases"]: data["phases"][phase] = {"phase": phase}
+    entry = data["phases"][phase]
+    it = iter(kvs)
+    for k in it:
+        v = next(it)
+        entry[k] = None if v == "null" else int(v) if v.lstrip("-").isdigit() else v
+    entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # Use a per-process tmp name to avoid collisions when phases run in parallel.
+    tmp = path + f".{os.getpid()}.tmp"
+    with open(tmp, "w") as f: json.dump(data, f, indent=2)
+    os.replace(tmp, path)
 PYEOF
 }
 
