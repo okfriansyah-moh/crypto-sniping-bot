@@ -57,6 +57,7 @@ type TxReceipt struct {
 // Module is the execution engine.
 type Module struct {
 	cfg           *config.CapitalConfig
+	execCfg       *config.ExecutionConfig // holds gas_limit, eth_price_usd, poll timeouts
 	client        EVMClient
 	privKey       *ecdsa.PrivateKey
 	chainID       *big.Int
@@ -67,13 +68,16 @@ type Module struct {
 // privKeyHex is the hex-encoded private key (no 0x prefix).
 // baseTokenAddr is the chain-specific base token address (e.g. WETH on ETH mainnet);
 // sourced from config/chains.yaml base_tokens[0].address for the active chain.
-func New(cfg *config.CapitalConfig, client EVMClient, privKeyHex string, chainID int64, baseTokenAddr string) (*Module, error) {
+// execCfg may be nil; if so, safe defaults are used (gas_limit=300000, eth_price_usd=3500,
+// poll_interval=3s, tx_timeout=30s).
+func New(cfg *config.CapitalConfig, execCfg *config.ExecutionConfig, client EVMClient, privKeyHex string, chainID int64, baseTokenAddr string) (*Module, error) {
 	privKey, err := geth_crypto.HexToECDSA(strings.TrimPrefix(privKeyHex, "0x"))
 	if err != nil {
 		return nil, fmt.Errorf("execution: invalid private key: %w", err)
 	}
 	return &Module{
 		cfg:           cfg,
+		execCfg:       execCfg,
 		client:        client,
 		privKey:       privKey,
 		chainID:       big.NewInt(chainID),
@@ -142,8 +146,12 @@ func (m *Module) Process(
 		}
 	}
 
-	// Convert USD size to wei (simplified: treat USD as ETH for Phase 2 test).
-	valueWei := usdToWei(in.SizeUsd)
+	// Convert USD size to wei using the config-driven ETH price approximation.
+	ethPriceUsd := float64(3500)
+	if m.execCfg != nil && m.execCfg.EthPriceUsd > 0 {
+		ethPriceUsd = m.execCfg.EthPriceUsd
+	}
+	valueWei := usdToWei(in.SizeUsd, ethPriceUsd)
 
 	// Slippage guard: get expected output from router and apply MaxSlippageBps.
 	// Fail-closed: if the quote fails or returns zero, the tx is not submitted.
@@ -202,7 +210,12 @@ func (m *Module) Process(
 	}
 
 	// Build and sign the transaction.
-	rawTx, txHash, err := m.signTx(nonce, routerAddress, valueWei, gasPrice, 300_000, calldata)
+	// Use config gas_limit when provided; fall back to a safe conservative default.
+	gasLimit := uint64(300_000)
+	if m.execCfg != nil && m.execCfg.GasLimit > 0 {
+		gasLimit = m.execCfg.GasLimit
+	}
+	rawTx, txHash, err := m.signTx(nonce, routerAddress, valueWei, gasPrice, gasLimit, calldata)
 	if err != nil {
 		return m.failResult(in, now, fmt.Sprintf("sign_tx:%v", err))
 	}
@@ -216,7 +229,8 @@ func (m *Module) Process(
 		txHash = submittedHash
 	}
 
-	// Poll for receipt (up to 30s, 3s interval — Phase 2 simple polling).
+	// Poll for receipt using config-driven timeout and interval.
+	// Defaults: 30s timeout, 3s poll interval (matches legacy Phase 2 behaviour).
 	receipt, err := m.pollReceipt(ctx, txHash)
 	if err != nil {
 		return m.failResult(in, now, fmt.Sprintf("poll_receipt:%v", err))
@@ -304,8 +318,29 @@ func (m *Module) signTx(
 }
 
 // pollReceipt polls for a transaction receipt with a simple loop.
+// Uses config-driven timeout and poll interval when available.
 func (m *Module) pollReceipt(ctx context.Context, txHash string) (*TxReceipt, error) {
-	deadline := time.Now().Add(30 * time.Second)
+	timeoutSec := 30
+	pollIntervalSec := 3
+	if m.execCfg != nil {
+		if m.execCfg.TxPollIntervalSeconds > 0 {
+			pollIntervalSec = m.execCfg.TxPollIntervalSeconds
+		}
+		if m.execCfg.TxTimeoutSeconds > 0 {
+			// TxTimeoutSeconds is the canonical timeout from config/execution.yaml.
+			timeoutSec = m.execCfg.TxTimeoutSeconds
+		} else if m.execCfg.DropTimeoutMs > 0 {
+			// DropTimeoutMs is the legacy field; TxTimeoutSeconds takes precedence.
+			timeoutSec = m.execCfg.DropTimeoutMs / 1000
+			if timeoutSec <= 0 {
+				timeoutSec = 30
+			}
+		}
+	}
+	timeout := time.Duration(timeoutSec) * time.Second
+	pollInterval := time.Duration(pollIntervalSec) * time.Second
+
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		receipt, err := m.client.GetTransactionReceipt(ctx, txHash)
 		if err != nil {
@@ -317,7 +352,7 @@ func (m *Module) pollReceipt(ctx context.Context, txHash string) (*TxReceipt, er
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(3 * time.Second):
+		case <-time.After(pollInterval):
 		}
 	}
 	return nil, nil // not mined within deadline
@@ -398,11 +433,23 @@ func padLeft32(b []byte) []byte {
 	return out
 }
 
-// usdToWei converts a USD amount to wei using a 1 ETH = 2500 USD approximation.
-// Phase 2 simplification: replaced by real price feed in Phase 3.
-func usdToWei(usd float64) *big.Int {
-	const ethPriceUsd = 2500.0
-	ethAmount := usd / ethPriceUsd
-	weiF := ethAmount * 1e18
-	return new(big.Int).SetInt64(int64(weiF))
+// usdToWei converts a USD amount to wei using the provided ETH/USD price.
+// Pass the value from ExecutionConfig.EthPriceUsd (config/execution.yaml eth_price_usd).
+// Uses big.Rat arithmetic to avoid float64 precision loss and int64 overflow.
+func usdToWei(usd float64, ethPriceUsd float64) *big.Int {
+	if ethPriceUsd <= 0 {
+		ethPriceUsd = 3500.0 // safe fallback; should never be zero after config validation
+	}
+	usdRat := new(big.Rat).SetFloat64(usd)
+	if usdRat == nil {
+		return big.NewInt(0)
+	}
+	ethPriceRat := new(big.Rat).SetFloat64(ethPriceUsd)
+	if ethPriceRat == nil || ethPriceRat.Sign() <= 0 {
+		ethPriceRat = new(big.Rat).SetFloat64(3500.0)
+	}
+	weiScale := big.NewRat(1_000_000_000_000_000_000, 1)
+	weiRat := new(big.Rat).Mul(new(big.Rat).Quo(usdRat, ethPriceRat), weiScale)
+	// Truncate toward zero to preserve the prior behavior without int64 overflow.
+	return new(big.Int).Quo(weiRat.Num(), weiRat.Denom())
 }

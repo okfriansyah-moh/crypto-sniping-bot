@@ -146,6 +146,19 @@ type ExecutionConfig struct {
 	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
 	PrivateEndpoints         []string `yaml:"private_endpoints"`
 	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
+	// Gas: configurable gas limit for swap transactions.
+	// Override per-chain if different token contracts require more gas.
+	GasLimit uint64 `yaml:"gas_limit"`
+	// TxPollIntervalSeconds is how often to poll for a transaction receipt.
+	TxPollIntervalSeconds int `yaml:"tx_poll_interval_seconds"`
+	// TxTimeoutSeconds is the maximum time to wait for a transaction to be confirmed.
+	// Maps to tx_timeout_seconds in config/execution.yaml.
+	// Takes precedence over DropTimeoutMs when set.
+	TxTimeoutSeconds int `yaml:"tx_timeout_seconds"`
+	// EthPriceUsd is a static ETH/USD approximation used to convert USD
+	// allocation amounts to wei. Update this when ETH price moves significantly.
+	// A future phase will replace this with a real-time price feed.
+	EthPriceUsd float64 `yaml:"eth_price_usd"`
 }
 
 // EvaluationConfig holds Phase 3 evaluation engine parameters.
@@ -328,6 +341,10 @@ func Load(paths ...string) (*Config, error) {
 		budgetsPath := filepath.Join(cwd, "config", "budgets.yaml")
 		if _, statErr := os.Stat(budgetsPath); statErr == nil {
 			paths = append(paths, budgetsPath)
+		}
+		executionPath := filepath.Join(cwd, "config", "execution.yaml")
+		if _, statErr := os.Stat(executionPath); statErr == nil {
+			paths = append(paths, executionPath)
 		}
 	}
 

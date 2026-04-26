@@ -115,7 +115,7 @@ func TestNew_ValidPrivKey_Succeeds(t *testing.T) {
 	client := successfulMock()
 
 	// Act
-	mod, err := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+	mod, err := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Assert
 	if err != nil {
@@ -131,7 +131,7 @@ func TestNew_InvalidPrivKey_ReturnsError(t *testing.T) {
 	client := successfulMock()
 
 	// Act
-	mod, err := New(testCapitalCfg(), client, "not-a-valid-hex-key", 1, testBaseTokenAddr)
+	mod, err := New(testCapitalCfg(), nil, client, "not-a-valid-hex-key", 1, testBaseTokenAddr)
 
 	// Assert
 	if err == nil {
@@ -147,7 +147,7 @@ func TestNew_InvalidPrivKey_ReturnsError(t *testing.T) {
 
 func TestNew_EmptyPrivKey_ReturnsError(t *testing.T) {
 	// Arrange / Act
-	_, err := New(testCapitalCfg(), successfulMock(), "", 1, testBaseTokenAddr)
+	_, err := New(testCapitalCfg(), nil, successfulMock(), "", 1, testBaseTokenAddr)
 
 	// Assert
 	if err == nil {
@@ -159,7 +159,7 @@ func TestNew_EmptyPrivKey_ReturnsError(t *testing.T) {
 
 func TestProcess_RejectedAllocation_SkipsExecution(t *testing.T) {
 	// Arrange
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.Rejected = true
 	in.RejectReason = "max_open_positions_reached:1"
@@ -193,7 +193,7 @@ func TestProcess_RejectedAllocation_SkipsExecution(t *testing.T) {
 
 func TestProcess_RejectedAllocation_Deterministic(t *testing.T) {
 	// Arrange
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.Rejected = true
 	in.RejectReason = "edge_not_validated"
@@ -213,7 +213,7 @@ func TestProcess_RejectedAllocation_Deterministic(t *testing.T) {
 func TestProcess_GasPriceError_ReturnsFailResult(t *testing.T) {
 	// Arrange
 	client := &mockEVMClient{gasPriceErr: errors.New("rpc timeout")}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Act
 	result, err := mod.Process(context.Background(), allocationFixture(), 0, "0xrouter")
@@ -243,7 +243,7 @@ func TestProcess_GasPriceError_ReturnsFailResult(t *testing.T) {
 func TestProcess_LiveExecution_BlockedBySlippageGuard(t *testing.T) {
 	// Arrange: mock returns a tiny output (0.5% of input) simulating 99.5% slippage.
 	// With MaxSlippageBps=200, the slippage guard must fire and block the trade.
-	amountIn := usdToWei(10.0)
+	amountIn := usdToWei(10.0, 3500.0)
 	tinyOut := new(big.Int).Div(amountIn, big.NewInt(200)) // 0.5% of input → ~9950 bps slippage
 	client := &mockEVMClient{
 		gasPrice:   big.NewInt(20_000_000_000),
@@ -251,7 +251,7 @@ func TestProcess_LiveExecution_BlockedBySlippageGuard(t *testing.T) {
 		txHash:     "0xdeadbeef",
 		receipt:    confirmedReceipt(),
 	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture() // MaxSlippageBps=200
 
 	// Act
@@ -281,7 +281,7 @@ func TestProcess_LiveExecution_BlockedBySlippageGuard(t *testing.T) {
 
 func TestProcess_SlippageGuard_TraceFieldsPropagated(t *testing.T) {
 	// Verify that trace / correlation IDs are carried through the guard path.
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.TraceID = "my-trace"
 	in.CorrelationID = "my-corr"
@@ -302,7 +302,7 @@ func TestProcess_SlippageGuard_TraceFieldsPropagated(t *testing.T) {
 
 func TestProcess_SlippageGuard_DifferentAllocations_Deterministic(t *testing.T) {
 	// Two identical live-path calls should produce the same EventID (content-addressed).
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 
 	r1, _ := mod.Process(context.Background(), in, 0, "0xrouter")
@@ -317,7 +317,7 @@ func TestProcess_SlippageGuard_DifferentAllocations_Deterministic(t *testing.T) 
 
 func TestProcess_ContextCancelled_ReturnsError(t *testing.T) {
 	// Even with a cancelled context the slippage guard fires before any network call.
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -333,7 +333,7 @@ func TestProcess_ContextCancelled_ReturnsError(t *testing.T) {
 
 func TestProcess_TraceFieldsPropagated(t *testing.T) {
 	// Arrange
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
+	mod, _ := New(testCapitalCfg(), nil, successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.TraceID = "my-trace"
 	in.CorrelationID = "my-corr"
@@ -358,8 +358,8 @@ func TestProcess_TraceFieldsPropagated(t *testing.T) {
 
 func TestUsdToWei_Deterministic(t *testing.T) {
 	// Arrange / Act
-	w1 := usdToWei(10.0)
-	w2 := usdToWei(10.0)
+	w1 := usdToWei(10.0, 3500.0)
+	w2 := usdToWei(10.0, 3500.0)
 
 	// Assert
 	if w1.Cmp(w2) != 0 {
@@ -372,7 +372,7 @@ func TestUsdToWei_Deterministic(t *testing.T) {
 
 func TestUsdToWei_ZeroUsd_ReturnsZero(t *testing.T) {
 	// Arrange / Act
-	w := usdToWei(0.0)
+	w := usdToWei(0.0, 3500.0)
 
 	// Assert
 	if w.Sign() != 0 {
@@ -460,7 +460,7 @@ amountsErr: errors.New("rpc error: method not found"),
 txHash:     "0xdeadbeef",
 receipt:    confirmedReceipt(),
 }
-mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+mod, _ := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 in := allocationFixture()
 
 // Act
@@ -483,14 +483,14 @@ if !strings.Contains(result.ErrorCode, "get_amounts_out") {
 
 func TestProcess_GetAmountsOut_ZeroOutput_RejectsTransaction(t *testing.T) {
 // Arrange — quote returns zero expected output
-amountIn := usdToWei(10.0)
+amountIn := usdToWei(10.0, 3500.0)
 client := &mockEVMClient{
 gasPrice:   big.NewInt(20_000_000_000),
 amountsOut: []*big.Int{amountIn, big.NewInt(0)},
 txHash:     "0xdeadbeef",
 receipt:    confirmedReceipt(),
 }
-mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+mod, _ := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 in := allocationFixture()
 
 // Act
@@ -511,7 +511,7 @@ in := allocationFixture()
 func TestProcess_SlippageGuard_PopulatedInResult(t *testing.T) {
 // Arrange — valid quote, slippage bps set to 200
 client := successfulMock()
-mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+mod, _ := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 in := allocationFixture()
 in.MaxSlippageBps = 200
 
@@ -530,7 +530,7 @@ t.Errorf("expected SlippageGuardBps=200, got=%d", result.SlippageGuardBps)
 func TestProcess_SlippageGuard_FallbackToDefault_WhenInvalid(t *testing.T) {
 // Arrange — invalid slippage (0) should fall back to defaultSlippageBps
 client := successfulMock()
-mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+mod, _ := New(testCapitalCfg(), nil, client, testPrivKey, 1, testBaseTokenAddr)
 in := allocationFixture()
 in.MaxSlippageBps = 0
 

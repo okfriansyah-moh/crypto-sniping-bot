@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/app/logging"
 	"crypto-sniping-bot/internal/app/web"
+	"crypto-sniping-bot/internal/modules/execution"
 	"crypto-sniping-bot/internal/orchestrator"
 	"crypto-sniping-bot/internal/workers"
 )
@@ -63,8 +65,13 @@ func runServer() {
 	orch.RegisterStage("validation_worker", workers.NewValidationWorker(db, cfg, logger), "edge_event")
 	orch.RegisterStage("selection_worker", workers.NewSelectionWorker(db, cfg, logger), "validated_edge_event")
 	orch.RegisterStage("capital_worker", workers.NewCapitalWorker(db, cfg, logger), "selection_event")
+	// Build wallet shards for execution. Reads SNIPER_WALLET_N_ADDRESS / SNIPER_WALLET_N_KEY
+	// env vars (N = 0,1,2,...,wallet_shard_count-1). Falls back to the single wallet from
+	// config/pipeline.yaml capital.wallet_address / capital.wallet_private_key when no
+	// multi-wallet env vars are present.
+	walletShards := buildWalletShards(cfg)
 	orch.RegisterStage("execution_worker",
-		workers.NewExecutionWorker(db, cfg, nil, cfg.Capital.WalletPrivateKey, 1, "", logger),
+		workers.NewExecutionWorker(db, cfg, nil, cfg.Capital.WalletPrivateKey, 1, "", walletShards, logger),
 		"allocation_event",
 	)
 	orch.RegisterStage("position_open_worker", workers.NewPositionOpenWorker(db, cfg, logger), "execution_result_event")
@@ -121,4 +128,39 @@ func runServer() {
 	}
 
 	logger.Info("server_shutdown")
+}
+
+// buildWalletShards constructs the wallet shard slice for the execution worker.
+// It reads SNIPER_WALLET_N_ADDRESS and SNIPER_WALLET_N_KEY env vars for N in
+// [0, wallet_shard_count). If none are set it falls back to the single wallet
+// from config (wallet_address / wallet_private_key).
+func buildWalletShards(cfg *config.Config) []execution.WalletConfig {
+	shardCount := cfg.Execution.ConcurrencyLimit // re-use wallet_shard_count alias
+	if shardCount <= 0 {
+		shardCount = 1
+	}
+
+	var shards []execution.WalletConfig
+	for i := 0; i < shardCount; i++ {
+		addr := os.Getenv("SNIPER_WALLET_" + strconv.Itoa(i) + "_ADDRESS")
+		key := os.Getenv("SNIPER_WALLET_" + strconv.Itoa(i) + "_KEY")
+		if addr == "" || key == "" {
+			break // stop at first missing shard; env vars are optional
+		}
+		shards = append(shards, execution.WalletConfig{
+			Address:    addr,
+			PrivateKey: key,
+			ShardIndex: i,
+		})
+	}
+
+	// Fall back to single wallet from config when no env vars are provided.
+	if len(shards) == 0 && cfg.Capital.WalletAddress != "" {
+		shards = []execution.WalletConfig{{
+			Address:    cfg.Capital.WalletAddress,
+			PrivateKey: cfg.Capital.WalletPrivateKey,
+		}}
+	}
+
+	return shards
 }

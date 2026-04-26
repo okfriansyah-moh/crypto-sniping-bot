@@ -19,17 +19,21 @@ import (
 // Phase 2 simplification: if no EVMClient is provided (nil), the worker
 // emits a Simulated execution result and skips actual on-chain submission.
 type ExecutionWorker struct {
-	adapter   database.Adapter
-	evmClient execution.EVMClient
-	privKey   string
-	chainID   int64
-	router    string
-	cfg       *config.Config
-	logger    *slog.Logger
+	adapter        database.Adapter
+	evmClient      execution.EVMClient
+	privKey        string
+	chainID        int64
+	router         string
+	cfg            *config.Config
+	logger         *slog.Logger
+	circuitBreaker *execution.CircuitBreaker
+	rpcEndpoint    string                   // canonical endpoint label for circuit-breaker tracking
+	walletShards   []execution.WalletConfig // multi-wallet shards; nil means single-wallet mode
 }
 
 // NewExecutionWorker returns a new ExecutionWorker.
 // evmClient may be nil for testing / paper-trade mode.
+// walletShards is the multi-wallet shard list; pass nil or empty to use single-wallet mode.
 func NewExecutionWorker(
 	adapter database.Adapter,
 	cfg *config.Config,
@@ -37,19 +41,41 @@ func NewExecutionWorker(
 	privKey string,
 	chainID int64,
 	routerAddress string,
+	walletShards []execution.WalletConfig,
 	logger *slog.Logger,
 ) *ExecutionWorker {
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	// Initialise circuit breaker from config. Defaults are conservative:
+	// open after 3 consecutive RPC errors, recover after 30s cooldown.
+	cbFailureThreshold := 3
+	cbCooldown := 30 * time.Second
+	if cfg != nil && cfg.Execution.MaxRetry > 0 {
+		cbFailureThreshold = cfg.Execution.MaxRetry
+	}
+	if cfg != nil && cfg.Execution.DropTimeoutMs > 0 {
+		cbCooldown = time.Duration(cfg.Execution.DropTimeoutMs) * time.Millisecond
+	}
+	cb := execution.NewCircuitBreaker(cbFailureThreshold, cbCooldown)
+
+	rpcEndpoint := "default"
+	if cfg != nil && len(cfg.Execution.PrivateEndpoints) > 0 {
+		rpcEndpoint = cfg.Execution.PrivateEndpoints[0]
+	}
+
 	return &ExecutionWorker{
-		adapter:   adapter,
-		evmClient: evmClient,
-		privKey:   privKey,
-		chainID:   chainID,
-		router:    routerAddress,
-		cfg:       cfg,
-		logger:    logger,
+		adapter:        adapter,
+		evmClient:      evmClient,
+		privKey:        privKey,
+		chainID:        chainID,
+		router:         routerAddress,
+		cfg:            cfg,
+		logger:         logger,
+		circuitBreaker: cb,
+		rpcEndpoint:    rpcEndpoint,
+		walletShards:   walletShards,
 	}
 }
 
@@ -97,13 +123,47 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	} else if w.evmClient == nil || w.privKey == "" {
 		result = simulatedExecResult(alloc, now)
 	} else {
+		// Circuit-breaker pre-check: refuse to attempt execution if the RPC
+		// endpoint has recorded too many consecutive failures.
+		if !w.circuitBreaker.Allow(w.rpcEndpoint) {
+			w.logger.Error("execution_worker_circuit_open",
+				"endpoint", w.rpcEndpoint,
+				"token_lifecycle_id", alloc.TokenLifecycleID,
+			)
+			// Back off before returning so the worker does not thrash the DB/RPC
+			// in a tight retry loop while the circuit remains open.
+			const circuitOpenBackoff = 500 * time.Millisecond
+			timer := time.NewTimer(circuitOpenBackoff)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+			return nil, fmt.Errorf("execution_worker: circuit open for endpoint %q: %w",
+				w.rpcEndpoint, fmt.Errorf("rpc_endpoint_unavailable"))
+		}
+
+		// Wallet sharding: select the wallet deterministically by token address.
+		// Falls back to the single privKey if no shards are configured.
+		privKey := w.privKey
+		if len(w.walletShards) > 0 {
+			shard, pickErr := execution.PickWallet(alloc.TokenAddress, w.walletShards)
+			if pickErr != nil {
+				return nil, fmt.Errorf("execution_worker: pick wallet: %w", pickErr)
+			}
+			privKey = shard.PrivateKey
+			alloc.WalletAddress = shard.Address
+			alloc.WalletShard = int32(shard.ShardIndex)
+		}
+
 		nonce, nonceErr := w.adapter.AllocateNonce(ctx, alloc.WalletAddress, alloc.Chain)
 		if nonceErr != nil {
 			return nil, fmt.Errorf("execution_worker: allocate nonce: %w", nonceErr)
 		}
 
 		baseToken := chainBaseToken(w.cfg, alloc.Chain)
-		mod, err := execution.New(&w.cfg.Capital, w.evmClient, w.privKey, w.chainID, baseToken)
+		mod, err := execution.New(&w.cfg.Capital, &w.cfg.Execution, w.evmClient, privKey, w.chainID, baseToken)
 		if err != nil {
 			return nil, fmt.Errorf("execution_worker: init module: %w", err)
 		}
@@ -111,8 +171,12 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		var modErr error
 		result, modErr = mod.Process(ctx, alloc, nonce, w.router)
 		if modErr != nil {
+			// Record RPC failure so the circuit breaker can open when threshold is exceeded.
+			w.circuitBreaker.RecordFailure(w.rpcEndpoint)
 			return nil, fmt.Errorf("execution_worker: module: %w", modErr)
 		}
+		// Successful execution: record success to keep or close circuit.
+		w.circuitBreaker.RecordSuccess(w.rpcEndpoint)
 	}
 
 	// Override MEV routing fields on the result (Phase 6).
