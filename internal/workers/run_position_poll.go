@@ -1,15 +1,15 @@
 package workers
 
 import (
-"context"
-"encoding/json"
-"fmt"
-"log/slog"
-"time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
 
-"crypto-sniping-bot/database"
-"crypto-sniping-bot/internal/app/config"
-"crypto-sniping-bot/internal/modules/position"
+	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/internal/app/config"
+	"crypto-sniping-bot/internal/modules/position"
 )
 
 // RunPositionPoll runs a timer-based position polling loop.
@@ -24,119 +24,125 @@ import (
 //
 // priceClient may be nil — positions will not be polled (safe fallback for testing).
 func RunPositionPoll(
-ctx context.Context,
-adapter database.Adapter,
-cfg *config.Config,
-priceClient position.PriceClient,
-logger *slog.Logger,
+	ctx context.Context,
+	adapter database.Adapter,
+	cfg *config.Config,
+	priceClient position.PriceClient,
+	logger *slog.Logger,
 ) error {
-if logger == nil {
-logger = slog.Default()
-}
-mod := position.New(&cfg.Position)
+	if logger == nil {
+		logger = slog.Default()
+	}
+	mod := position.New(&cfg.Position)
 
-pollInterval := time.Duration(cfg.Position.PollIntervalSeconds) * time.Second
-if pollInterval <= 0 {
-pollInterval = 5 * time.Second
-}
+	pollInterval := time.Duration(cfg.Position.PollIntervalSeconds) * time.Second
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
 
-logger.Info("position_poll_started", "interval_seconds", cfg.Position.PollIntervalSeconds)
+	logger.Info("position_poll_started", "interval_seconds", cfg.Position.PollIntervalSeconds)
 
-for {
-select {
-case <-ctx.Done():
-return ctx.Err()
-case <-time.After(pollInterval):
-}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 
-if err := pollOnce(ctx, adapter, mod, priceClient, cfg, logger); err != nil {
-logger.Error("position_poll_cycle_failed", "error", err)
-}
-}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+
+		if err := pollOnce(ctx, adapter, mod, priceClient, logger); err != nil {
+			logger.Error("position_poll_cycle_failed", "error", err)
+		}
+	}
 }
 
 func pollOnce(
-ctx context.Context,
-adapter database.Adapter,
-mod *position.Module,
-priceClient position.PriceClient,
-cfg *config.Config,
-logger *slog.Logger,
+	ctx context.Context,
+	adapter database.Adapter,
+	mod *position.Module,
+	priceClient position.PriceClient,
+	logger *slog.Logger,
 ) error {
-openPositions, err := adapter.GetOpenPositions(ctx)
-if err != nil {
-return fmt.Errorf("poll_once: get_open_positions: %w", err)
-}
-if len(openPositions) == 0 {
-return nil
-}
+	openPositions, err := adapter.GetOpenPositions(ctx)
+	if err != nil {
+		return fmt.Errorf("poll_once: get_open_positions: %w", err)
+	}
+	if len(openPositions) == 0 {
+		return nil
+	}
 
-chain := firstChain(cfg)
+	// evaluatedAt is captured once for the entire poll cycle so all positions
+	// evaluated in the same cycle share a consistent timestamp.  This keeps
+	// PollExit deterministic: same price + same evaluatedAt → identical output.
+	evaluatedAt := time.Now()
 
-for _, pos := range openPositions {
-posLog := logger.With("position_id", pos.PositionID, "token", pos.TokenAddress)
+	for _, pos := range openPositions {
+		posLog := logger.With("position_id", pos.PositionID, "token", pos.TokenAddress)
 
-currentPrice := ""
-if priceClient != nil {
-price, priceErr := priceClient.GetTokenPrice(ctx, pos.TokenAddress, chain)
-if priceErr != nil {
-posLog.Warn("position_poll_price_failed", "error", priceErr)
-continue
-}
-currentPrice = price
-}
-if currentPrice == "" {
-continue
-}
+		currentPrice := ""
+		if priceClient != nil {
+			// Use the chain stored on the position for per-market isolation (arch §2.4).
+			price, priceErr := priceClient.GetTokenPrice(ctx, pos.TokenAddress, pos.Chain)
+			if priceErr != nil {
+				posLog.Warn("position_poll_price_failed", "error", priceErr)
+				continue
+			}
+			currentPrice = price
+		}
+		if currentPrice == "" {
+			continue
+		}
 
-updated, exitErr := mod.PollExit(ctx, pos, currentPrice)
-if exitErr != nil {
-posLog.Warn("position_poll_exit_eval_failed", "error", exitErr)
-continue
-}
+		updated, exitErr := mod.PollExit(ctx, pos, currentPrice, evaluatedAt)
+		if exitErr != nil {
+			posLog.Warn("position_poll_exit_eval_failed", "error", exitErr)
+			continue
+		}
 
-if err := adapter.InsertPositionState(ctx, updated); err != nil {
-posLog.Warn("position_poll_persist_failed", "error", err)
-continue
-}
+		if err := adapter.InsertPositionState(ctx, updated); err != nil {
+			posLog.Warn("position_poll_persist_failed", "error", err)
+			continue
+		}
 
-if updated.Status == "exited" {
-posLog.Info("position_exited",
-"reason", updated.ExitReason,
-"pnl_pct", updated.PnlPct,
-"pnl_usd", updated.PnlUsd,
-)
+		if updated.Status == "exited" {
+			posLog.Info("position_exited",
+				"reason", updated.ExitReason,
+				"pnl_pct", updated.PnlPct,
+				"pnl_usd", updated.PnlUsd,
+			)
 
-if lc, ok := fetchLifecycle(ctx, adapter, updated.TokenLifecycleID, logger); ok {
-transitionBestEffort(ctx, adapter, database.TransitionRequest{
-LifecycleID:       updated.TokenLifecycleID,
-ExpectedFromState: "POSITION_OPEN",
-ExpectedVersion:   lc.StateVersion,
-NewState:          "POSITION_CLOSED",
-Reason:            updated.ExitReason,
-ActorWorker:       "position_poll",
-}, logger)
-}
+			if lc, ok := fetchLifecycle(ctx, adapter, updated.TokenLifecycleID, logger); ok {
+				transitionBestEffort(ctx, adapter, database.TransitionRequest{
+					LifecycleID:       updated.TokenLifecycleID,
+					ExpectedFromState: "POSITION_OPEN",
+					ExpectedVersion:   lc.StateVersion,
+					NewState:          "POSITION_CLOSED",
+					Reason:            updated.ExitReason,
+					ActorWorker:       "position_poll",
+				}, logger)
+			}
 
-payload, marshalErr := json.Marshal(updated)
-if marshalErr != nil {
-posLog.Warn("position_poll_marshal_failed", "error", marshalErr)
-continue
-}
-cid := pos.EventID
-exitEvt := database.Event{
-EventID:       updated.EventID,
-EventType:     "position_state_event",
-Payload:       payload,
-TraceID:       updated.TraceID,
-CorrelationID: updated.CorrelationID,
-CausationID:   &cid,
-VersionID:     updated.VersionID,
-}
-if err := adapter.InsertEvent(ctx, exitEvt); err != nil {
-posLog.Warn("position_poll_emit_failed", "error", err)
-}
-}
-}
-return nil
+			payload, marshalErr := json.Marshal(updated)
+			if marshalErr != nil {
+				posLog.Warn("position_poll_marshal_failed", "error", marshalErr)
+				continue
+			}
+			cid := pos.EventID
+			exitEvt := database.Event{
+				EventID:       updated.EventID,
+				EventType:     "position_state_event",
+				Payload:       payload,
+				TraceID:       updated.TraceID,
+				CorrelationID: updated.CorrelationID,
+				CausationID:   &cid,
+				VersionID:     updated.VersionID,
+			}
+			if err := adapter.InsertEvent(ctx, exitEvt); err != nil {
+				posLog.Warn("position_poll_emit_failed", "error", err)
+			}
+		}
+	}
+	return nil
 }

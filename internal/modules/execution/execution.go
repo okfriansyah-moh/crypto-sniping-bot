@@ -46,24 +46,28 @@ type TxReceipt struct {
 
 // Module is the execution engine.
 type Module struct {
-	cfg    *config.CapitalConfig
-	client EVMClient
-	privKey *ecdsa.PrivateKey
-	chainID *big.Int
+	cfg           *config.CapitalConfig
+	client        EVMClient
+	privKey       *ecdsa.PrivateKey
+	chainID       *big.Int
+	baseTokenAddr string // chain-specific base token address (e.g. WETH on ETH mainnet)
 }
 
 // New creates a new execution Module.
 // privKeyHex is the hex-encoded private key (no 0x prefix).
-func New(cfg *config.CapitalConfig, client EVMClient, privKeyHex string, chainID int64) (*Module, error) {
+// baseTokenAddr is the chain-specific base token address (e.g. WETH on ETH mainnet);
+// sourced from config/chains.yaml base_tokens[0].address for the active chain.
+func New(cfg *config.CapitalConfig, client EVMClient, privKeyHex string, chainID int64, baseTokenAddr string) (*Module, error) {
 	privKey, err := geth_crypto.HexToECDSA(strings.TrimPrefix(privKeyHex, "0x"))
 	if err != nil {
 		return nil, fmt.Errorf("execution: invalid private key: %w", err)
 	}
 	return &Module{
-		cfg:     cfg,
-		client:  client,
-		privKey: privKey,
-		chainID: big.NewInt(chainID),
+		cfg:           cfg,
+		client:        client,
+		privKey:       privKey,
+		chainID:       big.NewInt(chainID),
+		baseTokenAddr: strings.TrimSpace(baseTokenAddr),
 	}, nil
 }
 
@@ -92,13 +96,13 @@ func (m *Module) Process(
 			ExecutionID:      in.ExecutionID,
 			AllocationID:     in.EventID,
 
-			Status:      "rejected",
-			Success:     false,
-			Attempts:    0,
-			MempoolRoute: "public",
-			WalletAddress: in.WalletAddress,
+			Status:          "rejected",
+			Success:         false,
+			Attempts:        0,
+			MempoolRoute:    "public",
+			WalletAddress:   in.WalletAddress,
 			RejectionReason: in.RejectReason,
-			CompletedAt: now,
+			CompletedAt:     now,
 		}, nil
 	}
 
@@ -108,13 +112,26 @@ func (m *Module) Process(
 		return m.failResult(in, now, fmt.Sprintf("get_gas_price:%v", err))
 	}
 
-	// Build calldata for swapExactETHForTokens.
+	// Build calldata for swapExactETHForTokens using deterministic, input-driven values.
+	if m.baseTokenAddr == "" {
+		return m.failResult(in, now, "build_calldata:missing_base_token_address")
+	}
+	if in.AllocatedAt == "" {
+		return m.failResult(in, now, "build_calldata:missing_allocated_at")
+	}
+	allocatedAt, parseErr := time.Parse(time.RFC3339Nano, in.AllocatedAt)
+	if parseErr != nil {
+		allocatedAt, parseErr = time.Parse(time.RFC3339, in.AllocatedAt)
+		if parseErr != nil {
+			return m.failResult(in, now, "build_calldata:invalid_allocated_at")
+		}
+	}
 	amountOutMin := big.NewInt(0) // Phase 2: no slippage guard; Phase 3 adds it.
 	path := []geth_common.Address{
-		geth_common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), // WETH mainnet
+		geth_common.HexToAddress(m.baseTokenAddr), // sourced from config/chains.yaml
 		geth_common.HexToAddress(in.TokenAddress),
 	}
-	deadline := big.NewInt(time.Now().Add(3 * time.Minute).Unix())
+	deadline := big.NewInt(allocatedAt.Add(3 * time.Minute).Unix())
 	to := geth_common.HexToAddress(in.WalletAddress)
 
 	calldata, err := buildSwapCalldata(amountOutMin, path, to, deadline)
@@ -151,7 +168,12 @@ func (m *Module) Process(
 
 	status := "confirmed"
 	success := true
-	if receipt == nil || receipt.Status == 0 {
+	if receipt == nil {
+		// Receipt not observed within the polling deadline is not a confirmed revert.
+		// Treat as pending so callers can retry or reconcile later.
+		status = "pending"
+		success = false
+	} else if receipt.Status == 0 {
 		status = "reverted"
 		success = false
 	}
@@ -167,16 +189,16 @@ func (m *Module) Process(
 		ExecutionID:      in.ExecutionID,
 		AllocationID:     in.EventID,
 
-		Status:       status,
-		Success:      success,
-		TxHash:       txHash,
-		Attempts:     1,
-		MempoolRoute: "public",
-		NonceUsed:    nonce,
+		Status:        status,
+		Success:       success,
+		TxHash:        txHash,
+		Attempts:      1,
+		MempoolRoute:  "public",
+		NonceUsed:     nonce,
 		WalletAddress: in.WalletAddress,
-		WalletShard:  in.WalletShard,
-		LatencyMs:    latencyMs,
-		CompletedAt:  now,
+		WalletShard:   in.WalletShard,
+		LatencyMs:     latencyMs,
+		CompletedAt:   now,
 	}, nil
 }
 
@@ -249,13 +271,13 @@ func (m *Module) failResult(in contracts.AllocationDTO, now, errorCode string) (
 		ExecutionID:      in.ExecutionID,
 		AllocationID:     in.EventID,
 
-		Status:       "failed",
-		Success:      false,
-		Attempts:     1,
-		MempoolRoute: "public",
+		Status:        "failed",
+		Success:       false,
+		Attempts:      1,
+		MempoolRoute:  "public",
 		WalletAddress: in.WalletAddress,
-		ErrorCode:    errorCode,
-		CompletedAt:  now,
+		ErrorCode:     errorCode,
+		CompletedAt:   now,
 	}, nil
 }
 

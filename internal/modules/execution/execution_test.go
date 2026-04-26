@@ -48,6 +48,9 @@ func (m *mockEVMClient) GetTransactionReceipt(_ context.Context, _ string) (*TxR
 // testPrivKey is a well-known non-zero private key — never holds real funds.
 const testPrivKey = "0000000000000000000000000000000000000000000000000000000000000001"
 
+// testBaseTokenAddr is a dummy WETH-like address used in tests.
+const testBaseTokenAddr = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+
 func testCapitalCfg() *config.CapitalConfig {
 	return &config.CapitalConfig{
 		FixedEntrySizeUsd: 10.0,
@@ -87,6 +90,7 @@ func allocationFixture() contracts.AllocationDTO {
 		WalletAddress:    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
 		MaxSlippageBps:   200,
 		Rejected:         false,
+		AllocatedAt:      "2026-04-26T00:00:00Z",
 	}
 }
 
@@ -97,7 +101,7 @@ func TestNew_ValidPrivKey_Succeeds(t *testing.T) {
 	client := successfulMock()
 
 	// Act
-	mod, err := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, err := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Assert
 	if err != nil {
@@ -113,7 +117,7 @@ func TestNew_InvalidPrivKey_ReturnsError(t *testing.T) {
 	client := successfulMock()
 
 	// Act
-	mod, err := New(testCapitalCfg(), client, "not-a-valid-hex-key", 1)
+	mod, err := New(testCapitalCfg(), client, "not-a-valid-hex-key", 1, testBaseTokenAddr)
 
 	// Assert
 	if err == nil {
@@ -129,7 +133,7 @@ func TestNew_InvalidPrivKey_ReturnsError(t *testing.T) {
 
 func TestNew_EmptyPrivKey_ReturnsError(t *testing.T) {
 	// Arrange / Act
-	_, err := New(testCapitalCfg(), successfulMock(), "", 1)
+	_, err := New(testCapitalCfg(), successfulMock(), "", 1, testBaseTokenAddr)
 
 	// Assert
 	if err == nil {
@@ -141,7 +145,7 @@ func TestNew_EmptyPrivKey_ReturnsError(t *testing.T) {
 
 func TestProcess_RejectedAllocation_SkipsExecution(t *testing.T) {
 	// Arrange
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.Rejected = true
 	in.RejectReason = "max_open_positions_reached:1"
@@ -175,7 +179,7 @@ func TestProcess_RejectedAllocation_SkipsExecution(t *testing.T) {
 
 func TestProcess_RejectedAllocation_Deterministic(t *testing.T) {
 	// Arrange
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.Rejected = true
 	in.RejectReason = "edge_not_validated"
@@ -195,7 +199,7 @@ func TestProcess_RejectedAllocation_Deterministic(t *testing.T) {
 func TestProcess_GasPriceError_ReturnsFailResult(t *testing.T) {
 	// Arrange
 	client := &mockEVMClient{gasPriceErr: errors.New("rpc timeout")}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Act
 	result, err := mod.Process(context.Background(), allocationFixture(), 0, "0xrouter")
@@ -223,7 +227,7 @@ func TestProcess_SendTxError_ReturnsFailResult(t *testing.T) {
 		gasPrice: big.NewInt(20_000_000_000),
 		sendErr:  errors.New("nonce too low"),
 	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Act
 	result, err := mod.Process(context.Background(), allocationFixture(), 42, "0xrouter")
@@ -249,7 +253,7 @@ func TestProcess_ReceiptError_ReturnsFailResult(t *testing.T) {
 		txHash:     "0xcafe",
 		receiptErr: errors.New("receipt fetch failed"),
 	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Act
 	result, err := mod.Process(context.Background(), allocationFixture(), 0, "0xrouter")
@@ -268,7 +272,7 @@ func TestProcess_ReceiptError_ReturnsFailResult(t *testing.T) {
 func TestProcess_ConfirmedTx_ReturnsSuccess(t *testing.T) {
 	// Arrange
 	client := successfulMock()
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 
 	// Act
@@ -316,7 +320,7 @@ func TestProcess_RevertedTx_ReturnsReverted(t *testing.T) {
 		txHash:   "0xreverted",
 		receipt:  revertedReceipt(),
 	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 
 	// Act
 	result, err := mod.Process(context.Background(), allocationFixture(), 0, "0xrouter")
@@ -342,7 +346,7 @@ func TestProcess_ContextCancelled_ReturnsError(t *testing.T) {
 		txHash:   "0xcafe",
 		receipt:  nil, // not yet mined
 	}
-	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel
 
@@ -360,7 +364,7 @@ func TestProcess_ContextCancelled_ReturnsError(t *testing.T) {
 func TestProcess_NonceIsRecordedInResult(t *testing.T) {
 	// Arrange
 	const nonce = uint64(99)
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 
 	// Act
 	result, _ := mod.Process(context.Background(), allocationFixture(), nonce, "0xrouter")
@@ -375,7 +379,7 @@ func TestProcess_NonceIsRecordedInResult(t *testing.T) {
 
 func TestProcess_TraceFieldsPropagated(t *testing.T) {
 	// Arrange
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1)
+	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
 	in := allocationFixture()
 	in.TraceID = "my-trace"
 	in.CorrelationID = "my-corr"

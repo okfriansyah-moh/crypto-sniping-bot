@@ -93,10 +93,10 @@ func (m *Module) OpenPosition(
 		TokenAddress:     tokenAddress,
 		Chain:            chain,
 
-		Status:         "open",
-		EntryPrice:     in.RealizedEntryPrice,
-		EntrySizeUsd:   0, // populated by worker from AllocationDTO
-		CurrentPrice:   in.RealizedEntryPrice,
+		Status:       "open",
+		EntryPrice:   in.RealizedEntryPrice,
+		EntrySizeUsd: 0, // populated by worker from AllocationDTO
+		CurrentPrice: in.RealizedEntryPrice,
 
 		Tp1Bps:         m.cfg.Tp1Bps,
 		Tp2Bps:         m.cfg.Tp2Bps,
@@ -109,13 +109,17 @@ func (m *Module) OpenPosition(
 }
 
 // PollExit checks whether the position should be exited and emits an updated snapshot.
+// evaluatedAt is the explicit evaluation timestamp passed by the polling worker;
+// using it instead of time.Now() ensures snapshot EventIDs are content-addressable
+// and that deterministic replay produces bit-for-bit identical outputs.
 // Returns the updated PositionStateDTO with ExitReason set if exit is triggered.
 func (m *Module) PollExit(
 	_ context.Context,
 	pos contracts.PositionStateDTO,
 	currentPriceStr string,
+	evaluatedAt time.Time,
 ) (contracts.PositionStateDTO, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := evaluatedAt.UTC().Format(time.RFC3339Nano)
 
 	// Update snapshot price.
 	updated := pos
@@ -159,7 +163,7 @@ func (m *Module) PollExit(
 	if pos.OpenedAt != "" {
 		openedAt, parseErr := time.Parse(time.RFC3339Nano, pos.OpenedAt)
 		if parseErr == nil {
-			age := time.Since(openedAt)
+			age := evaluatedAt.Sub(openedAt)
 			if age >= time.Duration(pos.MaxHoldSeconds)*time.Second {
 				return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TIME", now), nil
 			}
@@ -194,14 +198,14 @@ func (m *Module) buildExit(
 		TokenAddress:     pos.TokenAddress,
 		Chain:            pos.Chain,
 
-		Status:         "exited",
-		EntryPrice:     pos.EntryPrice,
-		EntrySizeUsd:   pos.EntrySizeUsd,
-		CurrentPrice:   currentPriceStr,
-		ExitPrice:      currentPriceStr,
-		ExitReason:     reason,
-		PnlUsd:         math.Round(pnlUsd*100) / 100,
-		PnlPct:         math.Round(pnlPct*10000) / 10000,
+		Status:       "exited",
+		EntryPrice:   pos.EntryPrice,
+		EntrySizeUsd: pos.EntrySizeUsd,
+		CurrentPrice: currentPriceStr,
+		ExitPrice:    currentPriceStr,
+		ExitReason:   reason,
+		PnlUsd:       math.Round(pnlUsd*100) / 100,
+		PnlPct:       math.Round(pnlPct*10000) / 10000,
 
 		Tp1Bps:         pos.Tp1Bps,
 		Tp2Bps:         pos.Tp2Bps,

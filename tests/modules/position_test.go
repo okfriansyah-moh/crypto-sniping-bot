@@ -21,15 +21,15 @@ func positionCfg() *config.PositionConfig {
 
 func executionResultFixture(success bool) contracts.ExecutionResultDTO {
 	return contracts.ExecutionResultDTO{
-		EventID:          "exec-001",
-		TraceID:          "trace-001",
-		CorrelationID:    "corr-001",
-		VersionID:        "v1",
-		TokenLifecycleID: "lc-001",
-		ExecutionID:      "exec-id-001",
-		Status:           map[bool]string{true: "confirmed", false: "reverted"}[success],
-		Success:          success,
-		WalletAddress:    "0xwallet",
+		EventID:            "exec-001",
+		TraceID:            "trace-001",
+		CorrelationID:      "corr-001",
+		VersionID:          "v1",
+		TokenLifecycleID:   "lc-001",
+		ExecutionID:        "exec-id-001",
+		Status:             map[bool]string{true: "confirmed", false: "reverted"}[success],
+		Success:            success,
+		WalletAddress:      "0xwallet",
 		RealizedEntryPrice: "0.001",
 	}
 }
@@ -88,7 +88,7 @@ func TestPollExit_TakeProfit1(t *testing.T) {
 	mod := position.New(positionCfg())
 	pos := openPositionFixture()
 	// Entry = 1.0, TP1 = 5% → trigger at 1.05
-	updated, err := mod.PollExit(context.Background(), pos, "1.06")
+	updated, err := mod.PollExit(context.Background(), pos, "1.06", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestPollExit_StopLoss(t *testing.T) {
 	mod := position.New(positionCfg())
 	pos := openPositionFixture()
 	// Entry = 1.0, SL = 3% → trigger at <= 0.97
-	updated, _ := mod.PollExit(context.Background(), pos, "0.96")
+	updated, _ := mod.PollExit(context.Background(), pos, "0.96", time.Now())
 	if updated.Status != "exited" {
 		t.Errorf("expected exited, got %q", updated.Status)
 	}
@@ -126,7 +126,7 @@ func TestPollExit_TimeExit(t *testing.T) {
 	pos.OpenedAt = time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339Nano)
 	pos.MaxHoldSeconds = 30 // 30s max hold
 
-	updated, _ := mod.PollExit(context.Background(), pos, "1.0")
+	updated, _ := mod.PollExit(context.Background(), pos, "1.0", time.Now())
 	if updated.Status != "exited" {
 		t.Errorf("expected time exit, got status=%q reason=%q", updated.Status, updated.ExitReason)
 	}
@@ -139,7 +139,7 @@ func TestPollExit_NoExitInRange(t *testing.T) {
 	mod := position.New(positionCfg())
 	pos := openPositionFixture()
 	// Price within TP/SL band
-	updated, _ := mod.PollExit(context.Background(), pos, "1.01")
+	updated, _ := mod.PollExit(context.Background(), pos, "1.01", time.Now())
 	if updated.Status == "exited" {
 		t.Errorf("should not exit in range, got status=%q reason=%q", updated.Status, updated.ExitReason)
 	}
@@ -149,20 +149,20 @@ func TestPollExit_NoExitInRange(t *testing.T) {
 }
 
 func TestPollExit_TakeProfit2(t *testing.T) {
-mod := position.New(positionCfg())
-pos := openPositionFixture()
-// Entry = 1.0, TP2 = 10% → trigger at >= 1.10; must NOT fire TP1 instead.
-updated, err := mod.PollExit(context.Background(), pos, "1.12")
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if updated.Status != "exited" {
-t.Errorf("expected exited, got %q", updated.Status)
-}
-if updated.ExitReason != "TP2" {
-t.Errorf("expected TP2 exit, got %q (TP2 must be checked before TP1)", updated.ExitReason)
-}
-if updated.PnlPct <= 0 {
-t.Errorf("expected positive PnL at TP2, got %v", updated.PnlPct)
-}
+	mod := position.New(positionCfg())
+	pos := openPositionFixture()
+	// Entry = 1.0, TP2 = 10% → trigger at >= 1.10; must NOT fire TP1 instead.
+	updated, err := mod.PollExit(context.Background(), pos, "1.12", time.Now())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Status != "exited" {
+		t.Errorf("expected exited, got %q", updated.Status)
+	}
+	if updated.ExitReason != "TP2" {
+		t.Errorf("expected TP2 exit, got %q (TP2 must be checked before TP1)", updated.ExitReason)
+	}
+	if updated.PnlPct <= 0 {
+		t.Errorf("expected positive PnL at TP2, got %v", updated.PnlPct)
+	}
 }
