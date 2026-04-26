@@ -48,9 +48,11 @@ func RunRiskController(ctx context.Context, adapter database.Adapter, cfg *confi
 			if err != nil {
 				if errors.Is(err, database.ErrStaleState) {
 					// CAS conflict: another writer updated the state concurrently.
-					// Reset version so next tick re-reads current state.
-					stateVersion = 0
-					logger.Warn("risk_controller_cas_conflict_reset")
+					// Do NOT reset stateVersion to 0 — once the persisted version is
+					// non-zero, zeroing the local cache causes repeated ErrStaleState
+					// failures on every tick until a successful read resynchronises.
+					// Keep the last known version and surface the need for resync.
+					logger.Warn("risk_controller_cas_conflict_resync_required", "state_version", stateVersion)
 				} else {
 					logger.Error("risk_controller_check_failed", "error", err)
 				}

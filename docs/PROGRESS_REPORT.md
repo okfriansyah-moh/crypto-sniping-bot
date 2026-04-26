@@ -9,8 +9,8 @@
 
 | Metric           | Value                             |
 | ---------------- | --------------------------------- |
-| **Total Phases** | 7                                 |
-| **Completed**    | 9                                 |
+| **Total Phases** | 8                                 |
+| **Completed**    | 8                                 |
 | **In Progress**  | 0                                 |
 | **Failed**       | 0                                 |
 | **Not Started**  | 0                                 |

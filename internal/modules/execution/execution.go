@@ -326,8 +326,11 @@ func (m *Module) pollReceipt(ctx context.Context, txHash string) (*TxReceipt, er
 		if m.execCfg.TxPollIntervalSeconds > 0 {
 			pollIntervalSec = m.execCfg.TxPollIntervalSeconds
 		}
-		if m.execCfg.DropTimeoutMs > 0 {
-			// DropTimeoutMs is the canonical transaction timeout in the config.
+		if m.execCfg.TxTimeoutSeconds > 0 {
+			// TxTimeoutSeconds is the canonical timeout from config/execution.yaml.
+			timeoutSec = m.execCfg.TxTimeoutSeconds
+		} else if m.execCfg.DropTimeoutMs > 0 {
+			// DropTimeoutMs is the legacy field; TxTimeoutSeconds takes precedence.
 			timeoutSec = m.execCfg.DropTimeoutMs / 1000
 			if timeoutSec <= 0 {
 				timeoutSec = 30
@@ -432,11 +435,21 @@ func padLeft32(b []byte) []byte {
 
 // usdToWei converts a USD amount to wei using the provided ETH/USD price.
 // Pass the value from ExecutionConfig.EthPriceUsd (config/execution.yaml eth_price_usd).
+// Uses big.Rat arithmetic to avoid float64 precision loss and int64 overflow.
 func usdToWei(usd float64, ethPriceUsd float64) *big.Int {
 	if ethPriceUsd <= 0 {
 		ethPriceUsd = 3500.0 // safe fallback; should never be zero after config validation
 	}
-	ethAmount := usd / ethPriceUsd
-	weiF := ethAmount * 1e18
-	return new(big.Int).SetInt64(int64(weiF))
+	usdRat := new(big.Rat).SetFloat64(usd)
+	if usdRat == nil {
+		return big.NewInt(0)
+	}
+	ethPriceRat := new(big.Rat).SetFloat64(ethPriceUsd)
+	if ethPriceRat == nil || ethPriceRat.Sign() <= 0 {
+		ethPriceRat = new(big.Rat).SetFloat64(3500.0)
+	}
+	weiScale := big.NewRat(1_000_000_000_000_000_000, 1)
+	weiRat := new(big.Rat).Mul(new(big.Rat).Quo(usdRat, ethPriceRat), weiScale)
+	// Truncate toward zero to preserve the prior behavior without int64 overflow.
+	return new(big.Int).Quo(weiRat.Num(), weiRat.Denom())
 }

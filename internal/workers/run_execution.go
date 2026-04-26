@@ -130,6 +130,16 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 				"endpoint", w.rpcEndpoint,
 				"token_lifecycle_id", alloc.TokenLifecycleID,
 			)
+			// Back off before returning so the worker does not thrash the DB/RPC
+			// in a tight retry loop while the circuit remains open.
+			const circuitOpenBackoff = 500 * time.Millisecond
+			timer := time.NewTimer(circuitOpenBackoff)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
 			return nil, fmt.Errorf("execution_worker: circuit open for endpoint %q: %w",
 				w.rpcEndpoint, fmt.Errorf("rpc_endpoint_unavailable"))
 		}
@@ -144,6 +154,7 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 			}
 			privKey = shard.PrivateKey
 			alloc.WalletAddress = shard.Address
+			alloc.WalletShard = int32(shard.ShardIndex)
 		}
 
 		nonce, nonceErr := w.adapter.AllocateNonce(ctx, alloc.WalletAddress, alloc.Chain)

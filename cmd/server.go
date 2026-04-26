@@ -150,6 +150,7 @@ func buildWalletShards(cfg *config.Config) []execution.WalletConfig {
 		shards = append(shards, execution.WalletConfig{
 			Address:    addr,
 			PrivateKey: key,
+			ShardIndex: i,
 		})
 	}
 
