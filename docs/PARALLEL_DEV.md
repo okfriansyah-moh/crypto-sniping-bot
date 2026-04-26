@@ -51,7 +51,7 @@ round-robin **rotation pool** for all other agents.
 
 | Mode                     | Heavy Model         | Used For                               |
 | ------------------------ | ------------------- | -------------------------------------- |
-| Mode 1 (Full Parallel)   | `claude-opus-4.6`   | Heaviest phase (most complex by score) |
+| Mode 1 (Full Parallel)   | `claude-opus-4.7`   | Heaviest phase (most complex by score) |
 | Mode 2 (Token-Optimized) | `claude-sonnet-4.6` | Single session (all phases)            |
 | Mode 3 (Hybrid)          | `claude-sonnet-4.6` | Heaviest group (by complexity score)   |
 
@@ -67,7 +67,7 @@ remediation, and integration remediation.
 **Environment overrides:**
 
 ```bash
-MODEL_HEAVY="claude-opus-4.6"         # Override Mode 1 heavy model
+MODEL_HEAVY="claude-opus-4.7"         # Override Mode 1 heavy model
 MODEL_HEAVY_LITE="claude-sonnet-4.6"   # Override Modes 2 & 3 heavy model
 ```
 
@@ -79,7 +79,7 @@ MODEL_HEAVY_LITE="claude-sonnet-4.6"   # Override Modes 2 & 3 heavy model
 
 Each phase runs in a **separate Git worktree** with a **dedicated Copilot CLI agent**.
 All phases execute simultaneously. The heaviest phase (highest complexity score) gets
-`claude-opus-4.6`; all others rotate through the pool.
+`claude-opus-4.7`; all others rotate through the pool.
 
 **How it works:**
 
@@ -604,7 +604,7 @@ MAX_RETRIES_MERGE=5
 MAX_RETRIES_GLOBAL_VALIDATION=5
 MAX_REMEDIATION_RETRIES=3          # quality gate remediation within pipeline
 MAX_PARALLEL_AGENTS=3              # resource control
-MODEL_HEAVY=claude-opus-4.6        # Mode 1 heavy model
+MODEL_HEAVY=claude-opus-4.7        # Mode 1 heavy model
 MODEL_HEAVY_LITE=claude-sonnet-4.6 # Modes 2 & 3 heavy model
 ```
 
@@ -769,7 +769,7 @@ Run `./scripts/run_parallel.sh status` at any time to see the live session state
   Agent Status:
     Phase/Group                    State            Model                        Exit   Updated
     ────────────────────────────── ──────────────── ──────────────────────────── ────── ────────────────────
-    phase-2 (ingestion-scene-spl.) complete         claude-opus-4.6              0      2026-03-24T10:30:00Z
+    phase-2 (ingestion-scene-spl.) complete         claude-opus-4.7              0      2026-03-24T10:30:00Z
     phase-3 (processing)           running          claude-sonnet-4.5            —      2026-03-24T10:15:00Z
     ──────────── Post-Phase Pipeline ────────────────────────────────────────────────────────
     post-merge-review              complete         claude-sonnet-4.6            0      2026-03-24T10:35:00Z
@@ -903,7 +903,7 @@ model routing information for visibility:
   "branches": ["track/phase-2", "track/phase-3", "track/phase-4"],
   "started_at": "2026-03-24T10:00:00Z",
   "status": "running",
-  "model_heavy": "claude-opus-4.6",
+  "model_heavy": "claude-opus-4.7",
   "model_rotation_pool": [
     "claude-sonnet-4.6",
     "claude-sonnet-4.5",
@@ -924,7 +924,7 @@ including which model the agent is using:
     "phase-2": {
       "phase": "phase-2",
       "state": "complete",
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.7",
       "started_at": "2026-03-24T10:00:00Z",
       "exit_code": 0,
       "updated_at": "2026-03-24T10:30:00Z"

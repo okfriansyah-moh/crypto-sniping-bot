@@ -81,14 +81,14 @@ PHASES_CONFIG="${PROJECT_ROOT}/config/phases.yaml"
 MODE=3
 
 # MODEL ROUTING STRATEGY:
-#   Mode 1 (Full Parallel) : claude-opus-4.6   — heaviest phase gets opus
+#   Mode 1 (Full Parallel) : claude-opus-4.7   — heaviest phase gets opus
 #   Mode 2 (Token-Optimized): claude-sonnet-4.6 — single session, sonnet only
 #   Mode 3 (Hybrid)         : claude-sonnet-4.6 — heaviest group gets sonnet
 #   Rotate models: sonnet-4.6 → sonnet-4.5 → gpt-5.3-codex → gpt-5.4 (round-robin)
 #                  Used for: all other phases, conflict-resolver, post-merge review,
 #                            docs sync, quality gate remediation, integration remediation
 #
-MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.6}"           # Mode 1 only
+MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}"           # Mode 1 only
 MODEL_HEAVY_LITE="${MODEL_HEAVY_LITE:-claude-sonnet-4.6}" # Modes 2 & 3
 MODEL_ROTATE_POOL=("claude-sonnet-4.6" "claude-sonnet-4.5" "gpt-5.3-codex" "gpt-5.4")
 ROTATION_INDEX=0
@@ -2351,7 +2351,7 @@ Options:
   --no-auto-merge Skip auto-merge/PR after agents complete (manual merge step)
 
 Environment Variables:
-  MODEL_HEAVY                   Override Mode 1 heavy model (default: claude-opus-4.6)
+  MODEL_HEAVY                   Override Mode 1 heavy model (default: claude-opus-4.7)
   MODEL_HEAVY_LITE              Override Modes 2 & 3 heavy model (default: claude-sonnet-4.6)
   MAX_PARALLEL_AGENTS           Override max concurrent agents (default: 3)
   MAX_RETRIES_PHASE_BUILDER     Override phase-builder retries (default: 5)

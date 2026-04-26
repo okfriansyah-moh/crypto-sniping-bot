@@ -131,7 +131,7 @@ Define which model handles the heaviest phase/group and what rotation pool handl
 ```markdown
 | Mode                     | Heavy Model         | Used For                               |
 | ------------------------ | ------------------- | -------------------------------------- |
-| Mode 1 (Full Parallel)   | `claude-opus-4.6`   | Heaviest phase (most complex by score) |
+| Mode 1 (Full Parallel)   | `claude-opus-4.7`   | Heaviest phase (most complex by score) |
 | Mode 2 (Token-Optimized) | `claude-sonnet-4.6` | Single session (all phases)            |
 | Mode 3 (Hybrid)          | `claude-sonnet-4.6` | Heaviest group (by complexity score)   |
 ```
@@ -156,7 +156,7 @@ remediation, and integration remediation.
 **Environment overrides:**
 
 ```bash
-MODEL_HEAVY="claude-opus-4.6"           # Override Mode 1 heavy model
+MODEL_HEAVY="claude-opus-4.7"           # Override Mode 1 heavy model
 MODEL_HEAVY_LITE="claude-sonnet-4.6"    # Override Modes 2 & 3 heavy model
 ```
 ````
@@ -432,7 +432,7 @@ MAX_RETRIES_MERGE=5
 MAX_RETRIES_GLOBAL_VALIDATION=5
 MAX_REMEDIATION_RETRIES=3
 MAX_PARALLEL_AGENTS=3
-MODEL_HEAVY=claude-opus-4.6
+MODEL_HEAVY=claude-opus-4.7
 MODEL_HEAVY_LITE=claude-sonnet-4.6
 ````
 
@@ -564,7 +564,7 @@ Started: <ISO timestamp>
 Agent Status:
 Phase/Group State Model Exit Updated
 ──────────────────── ────────── ──────────────────────── ────── ────────────────
-phase-N (<name>) complete claude-opus-4.6 0 <timestamp>
+phase-N (<name>) complete claude-opus-4.7 0 <timestamp>
 phase-M (<name>) running claude-sonnet-4.5 — <timestamp>
 ──── Post-Phase Pipeline ──────────────────────────────────────────────────
 post-merge-review complete claude-sonnet-4.6 0 <timestamp>
@@ -703,14 +703,14 @@ by independent AI agents.
 
 | Mode                     | Heavy Model         | Used For                               |
 | ------------------------ | ------------------- | -------------------------------------- |
-| Mode 1 (Full Parallel)   | `claude-opus-4.6`   | Heaviest phase (most complex by score) |
+| Mode 1 (Full Parallel)   | `claude-opus-4.7`   | Heaviest phase (most complex by score) |
 | Mode 2 (Token-Optimized) | `claude-sonnet-4.6` | Single session (all phases)            |
 | Mode 3 (Hybrid)          | `claude-sonnet-4.6` | Heaviest group (by complexity score)   |
 
 **Rotation pool:** `claude-sonnet-4.6 → claude-sonnet-4.5 → gpt-5.3-codex → gpt-5.4`
 
 ```bash
-MODEL_HEAVY="claude-opus-4.6"
+MODEL_HEAVY="claude-opus-4.7"
 MODEL_HEAVY_LITE="claude-sonnet-4.6"
 `````
 

@@ -415,5 +415,5 @@ skeleton list skills
 skeleton sync
 
 # Use a different model for agent validation
-COPILOT_MODEL=claude-opus-4.6 skeleton doctor
+COPILOT_MODEL=claude-opus-4.7 skeleton doctor
 ```
