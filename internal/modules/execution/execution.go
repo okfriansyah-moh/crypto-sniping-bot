@@ -171,6 +171,13 @@ func (m *Module) Process(
 	// Phase 6 slippage guard: if quoted output is substantially worse than input,
 	// estimate slippage bps = (valueWei - expectedOut) * 10000 / valueWei.
 	// Fire guard only when expectedOut < valueWei (comparable raw units from mock/quote).
+	//
+	// KNOWN LIMITATION (Phase 6): this comparison is only valid when expectedOut and
+	// valueWei are in the same unit (e.g., both 18-decimal tokens, or in simulation).
+	// For real ETH→ERC20 swaps the units differ (e.g., wei vs USDC 6-decimal), making
+	// this comparison meaningless and potentially incorrect.  The amountOutMin guard
+	// below provides the real on-chain slippage protection.  This pre-flight check will
+	// be replaced with a proper same-unit price-feed comparison in Phase 7.
 	if expectedOut.Cmp(valueWei) < 0 && valueWei.Sign() > 0 {
 		diff := new(big.Int).Sub(valueWei, expectedOut)
 		diff.Mul(diff, big.NewInt(10000))

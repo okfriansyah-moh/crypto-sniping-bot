@@ -98,8 +98,21 @@ func (s *semaphoreImpl) AdjustLimit(newLimit int) {
 			default:
 			}
 		}
+	} else if delta < 0 {
+		// Decreasing: proactively drain idle tokens so the new limit takes
+		// effect immediately rather than waiting for in-flight goroutines to
+		// call Release.  We drain as many idle tokens as are both available
+		// and in excess of the new limit.
+		excess := -delta
+		for i := 0; i < excess; i++ {
+			select {
+			case <-s.ch:
+			default:
+				// No more idle tokens to drain; remainder will drain on Release.
+				i = excess // break
+			}
+		}
 	}
-	// Decreasing: tokens drain as goroutines call Release.
 }
 
 // CurrentLimit returns the active concurrency limit.

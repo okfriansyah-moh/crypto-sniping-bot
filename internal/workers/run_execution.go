@@ -72,7 +72,9 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		if err := w.adapter.InsertExecutionResult(ctx, result); err != nil {
 			w.logger.Warn("execution_worker_persist_failed", "event_id", result.EventID, "error", err)
 		}
-		_ = doMandatoryTransition(ctx, w.adapter, alloc.TokenLifecycleID, "SELECTED", "REJECTED", "system_halted", "execution_worker")
+		if transErr := doMandatoryTransition(ctx, w.adapter, alloc.TokenLifecycleID, "SELECTED", "REJECTED", "system_halted", "execution_worker"); transErr != nil {
+			return nil, fmt.Errorf("execution_worker: halted transition: %w", transErr)
+		}
 		return makeOutputEvent(
 			result.EventID, result, "execution_result_event",
 			evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
@@ -114,7 +116,9 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 	}
 
 	// Override MEV routing fields on the result (Phase 6).
-	result.MempoolRoute = mevRoute
+	// MempoolRoute uses the canonical DTO namespace: "public" | "private_flashbots" | "private_beaverbuild".
+	// ExecutionPath holds the raw relay name (e.g., "flashbots", "beaverbuild", "eden") for routing/logging.
+	result.MempoolRoute = mevRouteToNamespace(mevRoute)
 	result.ExecutionPath = mevRoute
 	if mevRoute != "public" {
 		result.MEVProtected = true
@@ -202,5 +206,24 @@ func haltedExecResult(alloc contracts.AllocationDTO, now string) contracts.Execu
 		MempoolRoute:    "public",
 		WalletAddress:   alloc.WalletAddress,
 		CompletedAt:     now,
+	}
+}
+
+// mevRouteToNamespace maps raw relay names returned by PickRoute to the canonical
+// MempoolRoute namespace defined in ExecutionResultDTO:
+//
+//	"public"      → "public"
+//	"flashbots"   → "private_flashbots"
+//	"beaverbuild" → "private_beaverbuild"
+//	"eden"        → "private_flashbots"  (eden uses Flashbots-compatible relay semantics)
+//	<unknown>     → "public"
+func mevRouteToNamespace(relayName string) string {
+	switch relayName {
+	case "flashbots", "eden":
+		return "private_flashbots"
+	case "beaverbuild":
+		return "private_beaverbuild"
+	default:
+		return "public"
 	}
 }

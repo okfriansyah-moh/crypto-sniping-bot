@@ -255,8 +255,8 @@ type Adapter interface {
 	ArchiveEvents(ctx context.Context, olderThan time.Time, batchSize int) (archivedCount int, err error)
 
 	// ComputeDrawdown returns the realized drawdown fraction for the given window.
-	// drawdown = |sum(pnl_usd where pnl_usd < 0, closed_at >= now()-windowHours)|
-	//            / max(sum(size_usd of all positions in window), 1)
+	// drawdown = |sum(pnl_usd where pnl_usd < 0, exited_at >= now()-windowHours)|
+	//            / max(sum(entry_size_usd of all exited positions in window), 1)
 	// Returns 0 when no positions exist or total PnL is non-negative.
 	ComputeDrawdown(ctx context.Context, windowHours int) (drawdownFraction float64, err error)
 

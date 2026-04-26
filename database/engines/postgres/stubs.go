@@ -241,12 +241,15 @@ func (d *DB) ComputeDrawdown(ctx context.Context, windowHours int) (float64, err
 	if windowHours <= 0 {
 		windowHours = 24
 	}
+	// exited_at is stored as TEXT (RFC3339Nano); cast to TIMESTAMPTZ for comparison.
+	// Only consider positions that have actually exited (exited_at != '').
 	const q = `
 SELECT
     COALESCE(SUM(CASE WHEN pnl_usd < 0 THEN ABS(pnl_usd) ELSE 0 END), 0) AS total_loss_usd,
-    COALESCE(SUM(size_usd), 1) AS total_size_usd
+    COALESCE(SUM(entry_size_usd), 1) AS total_size_usd
 FROM positions
-WHERE closed_at >= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 hour')`
+WHERE exited_at != ''
+  AND exited_at::TIMESTAMPTZ >= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 hour')`
 
 	row := d.pool.QueryRowContext(ctx, q, windowHours)
 	var lossUsd, sizeUsd float64

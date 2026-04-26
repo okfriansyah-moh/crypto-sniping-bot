@@ -46,7 +46,9 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 			"event_id", evt.EventID,
 			"token_lifecycle_id", dto.TokenLifecycleID,
 		)
-		_ = doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "VALIDATED", "REJECTED", "system_halted", "selection_worker")
+		if transErr := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "VALIDATED", "REJECTED", "system_halted", "selection_worker"); transErr != nil {
+			return nil, fmt.Errorf("selection_worker: halted transition: %w", transErr)
+		}
 		return nil, nil
 	}
 

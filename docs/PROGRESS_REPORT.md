@@ -10,7 +10,7 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 8          |
+| **Completed**    | 9          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
 | **Not Started**  | 0          |
@@ -106,3 +106,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | 2026-04-25 | mode-2            | 1      | —             | —           | completed             |
 | 2026-04-25 | mode-2            | 2      | —             | —           | completed             |
 | 2026-04-26 | integration-agent | 3      | —             | —           | integration-validated |
+| 2026-04-26 | mode-2            | 6      | —            | —           | completed |

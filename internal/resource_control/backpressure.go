@@ -9,9 +9,13 @@ import (
 // exitEventTypes are event types that MUST never be dropped under any backpressure condition.
 // These are the exit-path events that guarantee position management and settlement.
 var exitEventTypes = map[string]bool{
-	"position_event_exit":   true,
-	"execution_replacement": true,
+	"position_event_exit":    true,
+	"execution_replacement":  true,
 	"execution_result_event": true,
+	// position_state_event is the actual event type emitted by both position_open
+	// and position_poll workers.  It MUST be protected so exit snapshots are never
+	// dropped under backpressure — loss of these events breaks evaluation and learning.
+	"position_state_event": true,
 }
 
 // BackpressurePolicy determines whether an event should be dropped under resource pressure.
