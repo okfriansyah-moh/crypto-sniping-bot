@@ -66,8 +66,8 @@ func (d *DB) MarkEventExpired(ctx context.Context, eventID string, reason string
 	}
 	// Emit expired_event into the bus for audit trail.
 	expiredPayload, _ := json.Marshal(map[string]string{
-		"event_id": eventID,
-		"reason":   reason,
+		"event_id":   eventID,
+		"reason":     reason,
 		"expired_at": now,
 	})
 	var cid *string
