@@ -151,7 +151,7 @@ func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.Ex
 		ExecutionID:      alloc.ExecutionID,
 		AllocationID:     alloc.EventID,
 
-		Status:        "simulated",
+		Status:        "confirmed",
 		Success:       true,
 		Simulated:     true,
 		MempoolRoute:  "public",

@@ -221,13 +221,18 @@ func (m *Module) Process(
 	status := "confirmed"
 	success := true
 	if receipt == nil {
-		// Receipt not observed within the polling deadline is not a confirmed revert.
-		// Treat as pending so callers can retry or reconcile later.
-		status = "pending"
+		// Receipt not observed within the polling deadline: tx dropped or evicted from mempool.
+		// Status=dropped per docs/dto_contracts.md § 6 enum registry.
+		status = "dropped"
 		success = false
 	} else if receipt.Status == 0 {
 		status = "reverted"
 		success = false
+	}
+
+	errorCode := ""
+	if status == "dropped" {
+		errorCode = "timeout"
 	}
 
 	return contracts.ExecutionResultDTO{
@@ -252,6 +257,7 @@ func (m *Module) Process(
 		LatencyMs:        latencyMs,
 		CompletedAt:      now,
 		SlippageGuardBps: slippageBps,
+		ErrorCode:        errorCode,
 	}, nil
 }
 
