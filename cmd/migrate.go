@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 
@@ -48,5 +47,5 @@ func runMigrate() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Migrations applied successfully.")
+	log.Info("migrations_applied_successfully")
 }

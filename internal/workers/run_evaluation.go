@@ -57,13 +57,8 @@ func (w *EvaluationWorker) Process(ctx context.Context, evt *database.Event) (*d
 	}
 
 	// Skip positions that have not exited yet.
+	// Return nil, nil — RunWorker (the orchestrator) will call MarkEventProcessed exactly once.
 	if posDTO.Status != "exited" {
-		if err := w.adapter.MarkEventProcessed(ctx, evt.EventID); err != nil {
-			w.logger.Warn("evaluation_worker_mark_processed_failed",
-				"event_id", evt.EventID,
-				"error", err,
-			)
-		}
 		return nil, nil
 	}
 

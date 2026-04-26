@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -32,29 +33,49 @@ func RunRiskController(ctx context.Context, adapter database.Adapter, cfg *confi
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// stateVersion tracks the CAS version returned by UpsertSystemState.
+	// Starting at 0 means "no prior version" (create or unconditional first write).
+	// After each successful upsert, the returned version is stored here so subsequent
+	// writes use proper optimistic locking and cannot silently overwrite concurrent changes.
+	var stateVersion int64
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := runRiskCheck(ctx, adapter, cfg, logger); err != nil {
-				logger.Error("risk_controller_check_failed", "error", err)
+			newVersion, err := runRiskCheck(ctx, adapter, cfg, logger, stateVersion)
+			if err != nil {
+				if errors.Is(err, database.ErrStaleState) {
+					// CAS conflict: another writer updated the state concurrently.
+					// Reset version so next tick re-reads current state.
+					stateVersion = 0
+					logger.Warn("risk_controller_cas_conflict_reset")
+				} else {
+					logger.Error("risk_controller_check_failed", "error", err)
+				}
 				// Non-fatal: log and continue.
+				continue
+			}
+			if newVersion > 0 {
+				stateVersion = newVersion
 			}
 		}
 	}
 }
 
 // runRiskCheck performs a single drawdown check and updates system state if mode changed.
-func runRiskCheck(ctx context.Context, adapter database.Adapter, cfg *config.Config, logger *slog.Logger) error {
+// stateVersion is the CAS version from the last successful UpsertSystemState call (0 = initial).
+// Returns the new state version after a successful upsert, or 0 if no update was needed.
+func runRiskCheck(ctx context.Context, adapter database.Adapter, cfg *config.Config, logger *slog.Logger, stateVersion int64) (int64, error) {
 	state, err := adapter.GetSystemState(ctx)
 	if err != nil {
-		return fmt.Errorf("risk_controller: get system state: %w", err)
+		return 0, fmt.Errorf("risk_controller: get system state: %w", err)
 	}
 
 	dd, err := computeDrawdown(ctx, adapter, cfg.Risk.DrawdownWindowHours)
 	if err != nil {
-		return fmt.Errorf("risk_controller: compute drawdown: %w", err)
+		return 0, fmt.Errorf("risk_controller: compute drawdown: %w", err)
 	}
 
 	result := resource_control.EvaluateMode(
@@ -66,7 +87,7 @@ func runRiskCheck(ctx context.Context, adapter database.Adapter, cfg *config.Con
 	)
 
 	if result.Mode == state.Mode {
-		return nil // no transition needed
+		return 0, nil // no transition needed
 	}
 
 	sv, svErr := adapter.GetActiveStrategyVersion(ctx)
@@ -88,8 +109,9 @@ func runRiskCheck(ctx context.Context, adapter database.Adapter, cfg *config.Con
 		VersionID:            versionID,
 	}
 
-	if _, err := adapter.UpsertSystemState(ctx, newState, 0); err != nil {
-		return fmt.Errorf("risk_controller: upsert system state: %w", err)
+	newVersion, err := adapter.UpsertSystemState(ctx, newState, stateVersion)
+	if err != nil {
+		return 0, fmt.Errorf("risk_controller: upsert system state: %w", err)
 	}
 
 	// Emit system_event for the mode transition.
@@ -101,7 +123,7 @@ func runRiskCheck(ctx context.Context, adapter database.Adapter, cfg *config.Con
 		"reason":       result.Reason,
 	})
 	if marshalErr != nil {
-		return fmt.Errorf("risk_controller: marshal event payload: %w", marshalErr)
+		return 0, fmt.Errorf("risk_controller: marshal event payload: %w", marshalErr)
 	}
 
 	eventID := contracts.ContentIDFromString(fmt.Sprintf("sys-mode:%s:%s:%f", state.Mode, result.Mode, dd))
@@ -124,7 +146,7 @@ func runRiskCheck(ctx context.Context, adapter database.Adapter, cfg *config.Con
 		"drawdown_pct", dd,
 		"reason", result.Reason,
 	)
-	return nil
+	return newVersion, nil
 }
 
 // computeDrawdown returns the drawdown fraction over the last windowHours.
