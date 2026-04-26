@@ -35,3 +35,44 @@ InitialMs  int     `yaml:"initial_ms"`
 MaxMs      int     `yaml:"max_ms"`
 Multiplier float64 `yaml:"multiplier"`
 }
+
+// SolanaRPCEndpoint is a single Solana RPC endpoint with priority and kind.
+type SolanaRPCEndpoint struct {
+URL      string `yaml:"url"`
+Priority int    `yaml:"priority"` // 1 = primary; higher = lower priority
+Kind     string `yaml:"kind"`     // ws | http
+Region   string `yaml:"region"`
+}
+
+// SolanaProgramConfig is a tracked Solana program (Raydium, Pump.fun, etc.).
+type SolanaProgramConfig struct {
+ProgramID string `yaml:"program_id"`
+Family    string `yaml:"family"` // raydium-v4 | pumpfun | raydium-clmm
+}
+
+// SolanaHealthConfig holds endpoint health-scoring parameters.
+type SolanaHealthConfig struct {
+ScoreRefreshIntervalMs         int     `yaml:"score_refresh_interval_ms"`
+LatencyNormalizerMs            int     `yaml:"latency_normalizer_ms"`
+LatencyFailoverThresholdMs     int     `yaml:"latency_failover_threshold_ms"`
+ErrorRateFailoverThreshold     float64 `yaml:"error_rate_failover_threshold"`
+ConsecutiveWSFailuresThreshold int     `yaml:"consecutive_ws_failures_threshold"`
+CircuitOpenCooldownMs          int     `yaml:"circuit_open_cooldown_ms"`
+}
+
+// SolanaConfig holds Solana-specific ingestion parameters.
+// Values come from config/chains.yaml — no hardcoded values.
+type SolanaConfig struct {
+ChainID                 string              `yaml:"chain_id"`
+RPCEndpoints            []SolanaRPCEndpoint `yaml:"rpc"`
+Programs                []SolanaProgramConfig `yaml:"programs"`
+ConfirmationCommitment  string              `yaml:"confirmation_commitment"`
+BlockhashRefreshMs      int                 `yaml:"blockhash_refresh_ms"`
+IngestionBackoff        IngestionBackoff    `yaml:"ingestion_backoff"`
+WSHeartbeatTimeoutMs    int                 `yaml:"ws_heartbeat_timeout_ms"`
+GapRecoveryMaxSlots     uint64              `yaml:"gap_recovery_max_slots"`
+PublishBufferSize       int                 `yaml:"publish_buffer_size"`
+PreferredRegion         string              `yaml:"preferred_region"`
+ProvidersRequired       int                 `yaml:"providers_required"`
+Health                  SolanaHealthConfig  `yaml:"health"`
+}

@@ -31,3 +31,14 @@ execution:
 
   # Idempotency
   duplicate_window_seconds: 300 # dedup window for execution_id checks
+
+  # Phase 7: Solana execution parameters.
+  solana:
+    slippage_cap_bps: 200
+    confirm_timeout_ms: 15000
+    receipt_poll_interval_ms: 400
+    max_send_attempts: 3
+    compute_unit_limit_buffer: 20000
+    priority_fee_lamports: 5000
+    wallet_key_paths:
+      - "${SOLANA_WALLET_KEY_1}"

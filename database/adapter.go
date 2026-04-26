@@ -274,6 +274,36 @@ type Adapter interface {
 
 	// GetRun fetches a pipeline run by ID.
 	GetRun(ctx context.Context, runID string) (*PipelineRun, error)
+
+	// ── Phase 7: Solana ──────────────────────────────────────────────────────
+
+	// UpsertSolanaEndpointState updates the circuit breaker state for a Solana
+	// RPC endpoint. Idempotent: ON CONFLICT DO UPDATE.
+	UpsertSolanaEndpointState(ctx context.Context, s SolanaEndpointState) error
+
+	// GetSolanaEndpointState retrieves the current circuit breaker state for an endpoint.
+	GetSolanaEndpointState(ctx context.Context, endpointURL string) (*SolanaEndpointState, error)
+
+	// InsertSolanaSignature records a submitted Solana transaction for idempotency
+	// and confirmation tracking. Idempotent: ON CONFLICT (execution_id) DO NOTHING.
+	InsertSolanaSignature(ctx context.Context, sig SolanaSignature) error
+
+	// UpdateSolanaSignatureStatus transitions a signature's status field.
+	UpdateSolanaSignatureStatus(ctx context.Context, executionID string, status string, slot int64, errMsg string) error
+
+	// UpsertSolanaEndpointHealth updates rolling health metrics for an endpoint.
+	UpsertSolanaEndpointHealth(ctx context.Context, h SolanaEndpointHealth) error
+
+	// ListSolanaEndpointsRanked returns all endpoint health rows ordered by
+	// error_rate ASC, p95_latency_ms ASC (best-first).
+	ListSolanaEndpointsRanked(ctx context.Context) ([]SolanaEndpointHealth, error)
+
+	// UpsertSolanaIngestionWatermark records the last processed slot for a market.
+	UpsertSolanaIngestionWatermark(ctx context.Context, market string, lastSlot uint64) error
+
+	// GetSolanaIngestionWatermark returns the last processed slot for a market.
+	// Returns 0 if no watermark exists yet.
+	GetSolanaIngestionWatermark(ctx context.Context, market string) (uint64, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────
@@ -386,4 +416,38 @@ type ShadowTrade struct {
 	Classification      string // TN | FN
 	LearningRecordID    string // FK to learning_records.record_id
 	VersionID           string
+}
+
+// ── Phase 7: Solana Domain Types ─────────────────────────────────────────────
+
+// SolanaEndpointState is the circuit breaker state for a single RPC endpoint.
+// States: closed (normal) → open (failing) → half_open (probing).
+type SolanaEndpointState struct {
+	EndpointURL         string
+	State               string // closed | open | half_open
+	ConsecutiveFailures int
+	LastFailureAt       *string // ISO 8601; nil if no failures
+	CircuitOpenedAt     *string // ISO 8601; nil if never opened
+	UpdatedAt           string  // ISO 8601
+}
+
+// SolanaSignature tracks a submitted Solana transaction for idempotency and
+// confirmation polling. One row per AllocationDTO.ExecutionID.
+type SolanaSignature struct {
+	ExecutionID string
+	Signature   string
+	Status      string  // pending | confirmed | failed | expired
+	Slot        int64   // confirmed slot; 0 if pending
+	ErrMsg      string  // non-empty if failed
+	CreatedAt   string  // ISO 8601
+}
+
+// SolanaEndpointHealth holds rolling health metrics for a Solana RPC endpoint.
+type SolanaEndpointHealth struct {
+	EndpointURL   string
+	P95LatencyMs  int32
+	ErrorRate     float64
+	SuccessCount  int64
+	FailureCount  int64
+	UpdatedAt     string // ISO 8601
 }

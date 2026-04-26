@@ -709,3 +709,30 @@ return nil, nil
 func (m *memAdapter) ComputeDrawdown(_ context.Context, _ int) (float64, error) {
 	return 0.0, nil
 }
+
+// ── Phase 7: Solana stubs ─────────────────────────────────────────────────────
+
+func (m *memAdapter) GetSolanaEndpointState(_ context.Context, _ string) (*database.SolanaEndpointState, error) {
+	return nil, nil
+}
+func (m *memAdapter) UpsertSolanaEndpointState(_ context.Context, _ database.SolanaEndpointState) error {
+	return nil
+}
+func (m *memAdapter) InsertSolanaSignature(_ context.Context, _ database.SolanaSignature) error {
+	return nil
+}
+func (m *memAdapter) UpdateSolanaSignatureStatus(_ context.Context, _, _ string, _ int64, _ string) error {
+	return nil
+}
+func (m *memAdapter) UpsertSolanaEndpointHealth(_ context.Context, _ database.SolanaEndpointHealth) error {
+	return nil
+}
+func (m *memAdapter) ListSolanaEndpointsRanked(_ context.Context) ([]database.SolanaEndpointHealth, error) {
+	return nil, nil
+}
+func (m *memAdapter) GetSolanaIngestionWatermark(_ context.Context, _ string) (uint64, error) {
+	return 0, nil
+}
+func (m *memAdapter) UpsertSolanaIngestionWatermark(_ context.Context, _ string, _ uint64) error {
+	return nil
+}
