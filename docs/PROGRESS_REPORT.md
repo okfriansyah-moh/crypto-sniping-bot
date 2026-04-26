@@ -10,11 +10,11 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 6          |
+| **Completed**    | 7          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 1          |
-| **Last Updated** | 2026-04-25 |
+| **Not Started**  | 0          |
+| **Last Updated** | 2026-04-30 |
 
 ---
 
@@ -27,7 +27,7 @@
 | 2     | Pipeline Core         | completed   | 0           | All pipeline agents passed |
 | 3     | Position Management   | not-started | 0           |                                                                                                                                            |
 | 4     | Probability Models    | not-started | 0           |                                                                                                                                            |
-| 5     | Learning Engine       | not-started | 0           |                                                                                                                                            |
+| 5     | Learning Engine       | completed   | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass. |
 | 6     | Observability & Risk  | not-started | 0           |                                                                                                                                            |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
@@ -45,7 +45,7 @@
 | 2     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
 | 3     | —             | —                  | —           | —                | —            | —         |
 | 4     | —             | —                  | —           | —                | —            | —         |
-| 5     | —             | —                  | —           | —                | —            | —         |
+| 5     | pass          | pass               | pass        | pass             | pass         | completed |
 | 6     | —             | —                  | —           | —                | —            | —         |
 
 **Values:** `pass`, `fail (N retries)`, `skipped`, `rolled-back`

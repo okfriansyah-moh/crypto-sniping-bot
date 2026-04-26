@@ -668,3 +668,19 @@ type errorHandler struct{}
 func (h *errorHandler) Process(_ context.Context, _ *database.Event) (*database.Event, error) {
 	return nil, errors.New("simulated handler failure")
 }
+
+func (m *memAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
+return nil
+}
+func (m *memAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
+return nil
+}
+func (m *memAdapter) GetShadowTradesByWindow(_ context.Context, _ int) ([]database.ShadowTrade, error) {
+return nil, nil
+}
+func (m *memAdapter) GetLearningRecordsByWindow(_ context.Context, _ string, _, _ time.Time) ([]contracts.LearningRecordDTO, error) {
+return nil, nil
+}
+func (m *memAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
+return nil, nil
+}

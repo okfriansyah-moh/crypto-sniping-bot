@@ -63,3 +63,22 @@ position:
   sl_bps: 1500                   # stop-loss threshold (15%)
   max_hold_seconds: 3600         # maximum hold time (1 hour)
   poll_interval_seconds: 15      # how often to poll open position prices
+
+# ── Phase 5: Learning Engine Configuration ────────────────────────────────────
+
+learning:
+  eval_window_minutes: 60              # how often the evaluator runs
+  eval_window_seconds: 86400           # lookback window for evaluation (24h)
+  min_sample_size: 30                  # minimum records before updating
+  max_delta_pct: 0.10                  # max fractional change per parameter per cycle
+  families:
+    - thresholds
+    - weights
+    - cohort_mults
+  shadow_window_minutes: 60            # observation window before A/B promotion
+  rollback_threshold_pct: 0.10         # expectancy drop that triggers rollback
+  post_promotion_watch_minutes: 120    # post-promotion monitoring window
+  shadow_poll_interval_seconds: 60     # how often the shadow observer runs
+  observation_window_seconds: 3600     # how long to track a rejected token's return
+  fn_gain_threshold_pct: 0.10          # minimum return to classify rejected trade as FN
+  rollback_check_interval_seconds: 300 # how often the rollback watchdog runs
