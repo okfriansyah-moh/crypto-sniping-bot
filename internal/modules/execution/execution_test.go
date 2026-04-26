@@ -25,6 +25,8 @@ type mockEVMClient struct {
 	sendErr     error
 	receipt     *TxReceipt
 	receiptErr  error
+	amountsOut  []*big.Int
+	amountsErr  error
 }
 
 func (m *mockEVMClient) GetGasPrice(_ context.Context) (*big.Int, error) {
@@ -41,6 +43,18 @@ func (m *mockEVMClient) SendRawTransaction(_ context.Context, _ string) (string,
 
 func (m *mockEVMClient) GetTransactionReceipt(_ context.Context, _ string) (*TxReceipt, error) {
 	return m.receipt, m.receiptErr
+}
+
+func (m *mockEVMClient) GetAmountsOut(_ context.Context, _ string, amountIn *big.Int, _ []string) ([]*big.Int, error) {
+	if m.amountsErr != nil {
+		return nil, m.amountsErr
+	}
+	if m.amountsOut != nil {
+		return m.amountsOut, nil
+	}
+	// Default: 1:1 ratio so existing tests are unaffected.
+	out := new(big.Int).Set(amountIn)
+	return []*big.Int{amountIn, out}, nil
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -494,4 +508,100 @@ func TestBuildSwapCalldata_HasCorrectSelectorAndLength(t *testing.T) {
 	if len(calldata) != expectedLen {
 		t.Errorf("expected calldata length %d, got %d", expectedLen, len(calldata))
 	}
+}
+
+// ── Slippage guard security tests ─────────────────────────────────────────────
+
+func TestProcess_GetAmountsOut_Failure_RejectsTransaction(t *testing.T) {
+// Arrange — quote RPC call fails
+client := &mockEVMClient{
+gasPrice:   big.NewInt(20_000_000_000),
+amountsErr: errors.New("rpc error: method not found"),
+txHash:     "0xdeadbeef",
+receipt:    confirmedReceipt(),
+}
+mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+in := allocationFixture()
+
+// Act
+	result, err := mod.Process(context.Background(), in, 0, "0xrouter")
+
+	// Assert — fail-closed: tx must not be submitted when quote fails
+if err != nil {
+t.Fatalf("unexpected error: %v", err)
+}
+if result.Success {
+t.Error("expected Success=false when GetAmountsOut fails")
+}
+if result.TxHash != "" {
+t.Error("expected no TxHash when GetAmountsOut fails")
+}
+if !strings.Contains(result.ErrorCode, "get_amounts_out") {
+	t.Errorf("expected ErrorCode to mention get_amounts_out, got: %q", result.ErrorCode)
+	}
+}
+
+func TestProcess_GetAmountsOut_ZeroOutput_RejectsTransaction(t *testing.T) {
+// Arrange — quote returns zero expected output
+amountIn := usdToWei(10.0)
+client := &mockEVMClient{
+gasPrice:   big.NewInt(20_000_000_000),
+amountsOut: []*big.Int{amountIn, big.NewInt(0)},
+txHash:     "0xdeadbeef",
+receipt:    confirmedReceipt(),
+}
+mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+in := allocationFixture()
+
+// Act
+	result, err := mod.Process(context.Background(), in, 0, "0xrouter")
+
+	// Assert
+	if err != nil {
+	t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Success {
+	t.Error("expected Success=false when expected output is zero")
+	}
+	if !strings.Contains(result.ErrorCode, "zero_expected_output") {
+		t.Errorf("expected ErrorCode zero_expected_output, got: %q", result.ErrorCode)
+	}
+}
+
+func TestProcess_SlippageGuard_PopulatedInResult(t *testing.T) {
+// Arrange — valid quote, slippage bps set to 200
+client := successfulMock()
+mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+in := allocationFixture()
+in.MaxSlippageBps = 200
+
+// Act
+	result, err := mod.Process(context.Background(), in, 0, "0xrouter")
+
+	// Assert
+	if err != nil {
+	t.Fatalf("unexpected error: %v", err)
+	}
+	if result.SlippageGuardBps != 200 {
+t.Errorf("expected SlippageGuardBps=200, got=%d", result.SlippageGuardBps)
+}
+}
+
+func TestProcess_SlippageGuard_FallbackToDefault_WhenInvalid(t *testing.T) {
+// Arrange — invalid slippage (0) should fall back to defaultSlippageBps
+client := successfulMock()
+mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+in := allocationFixture()
+in.MaxSlippageBps = 0
+
+// Act
+	result, err := mod.Process(context.Background(), in, 0, "0xrouter")
+
+	// Assert
+	if err != nil {
+	t.Fatalf("unexpected error: %v", err)
+	}
+	if result.SlippageGuardBps != defaultSlippageBps {
+t.Errorf("expected SlippageGuardBps=%d (default), got=%d", defaultSlippageBps, result.SlippageGuardBps)
+}
 }

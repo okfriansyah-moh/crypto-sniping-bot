@@ -80,6 +80,7 @@ func TestHandler_Kill_Destructive(t *testing.T) {
 		KillFn: func(ctx context.Context) error {
 			return nil
 		},
+		AllowedUserIDs: []string{"operator42"},
 	})
 	req := &telegram.CommandRequest{
 		Type:     telegram.CmdKill,
@@ -100,6 +101,7 @@ func TestHandler_Unconfigured(t *testing.T) {
 	req := &telegram.CommandRequest{
 		Type:     telegram.CmdPnl,
 		IssuedAt: time.Now(),
+		IssuerID: "user1",
 	}
 	result, err := h.Handle(context.Background(), req)
 	if err != nil {
@@ -108,4 +110,89 @@ func TestHandler_Unconfigured(t *testing.T) {
 	if result.Text == "" {
 		t.Fatal("expected non-empty fallback text")
 	}
+}
+
+// ── Authorization security tests ──────────────────────────────────────────────
+
+func TestHandler_EmptyIssuerID_Rejected(t *testing.T) {
+h := telegram.NewHandler(telegram.HandlerOptions{
+StatusFn: func(ctx context.Context) (string, error) { return "ok", nil },
+})
+req := &telegram.CommandRequest{
+Type:     telegram.CmdStatus,
+IssuedAt: time.Now(),
+IssuerID: "", // empty — must always be rejected
+}
+_, err := h.Handle(context.Background(), req)
+if err == nil {
+t.Fatal("expected error for empty IssuerID")
+}
+}
+
+func TestHandler_UnauthorizedIssuer_Rejected(t *testing.T) {
+h := telegram.NewHandler(telegram.HandlerOptions{
+StatusFn:       func(ctx context.Context) (string, error) { return "ok", nil },
+AllowedUserIDs: []string{"operator1"},
+})
+req := &telegram.CommandRequest{
+Type:     telegram.CmdStatus,
+IssuedAt: time.Now(),
+IssuerID: "attacker99",
+}
+_, err := h.Handle(context.Background(), req)
+if err == nil {
+t.Fatal("expected error for unauthorized issuer")
+}
+}
+
+func TestHandler_DestructiveCommand_NoAllowlist_Rejected(t *testing.T) {
+// Fail-closed: destructive commands must be rejected when AllowedUserIDs is empty.
+h := telegram.NewHandler(telegram.HandlerOptions{
+KillFn: func(ctx context.Context) error { return nil },
+// No AllowedUserIDs configured.
+})
+req := &telegram.CommandRequest{
+Type:     telegram.CmdKill,
+IssuedAt: time.Now(),
+IssuerID: "anyone",
+}
+_, err := h.Handle(context.Background(), req)
+if err == nil {
+t.Fatal("expected error: destructive commands must be rejected when allowlist is not configured")
+}
+}
+
+func TestHandler_ReadOnlyCommand_NoAllowlist_Allowed(t *testing.T) {
+// Read-only commands pass even when AllowedUserIDs is empty.
+h := telegram.NewHandler(telegram.HandlerOptions{
+StatusFn: func(ctx context.Context) (string, error) { return "ok", nil },
+})
+req := &telegram.CommandRequest{
+Type:     telegram.CmdStatus,
+IssuedAt: time.Now(),
+IssuerID: "user1",
+}
+_, err := h.Handle(context.Background(), req)
+if err != nil {
+t.Fatalf("unexpected error for read-only command without allowlist: %v", err)
+}
+}
+
+func TestHandler_AuthorizedIssuer_Allowed(t *testing.T) {
+h := telegram.NewHandler(telegram.HandlerOptions{
+KillFn:         func(ctx context.Context) error { return nil },
+AllowedUserIDs: []string{"operator1", "operator2"},
+})
+req := &telegram.CommandRequest{
+Type:     telegram.CmdKill,
+IssuedAt: time.Now(),
+IssuerID: "operator2",
+}
+result, err := h.Handle(context.Background(), req)
+if err != nil {
+t.Fatalf("unexpected error for authorized issuer: %v", err)
+}
+if !result.Destructive {
+t.Error("expected destructive flag on kill")
+}
 }

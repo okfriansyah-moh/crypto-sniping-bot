@@ -246,6 +246,9 @@ func loadFile(path string, cfg *Config) error {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	if cfg.Capital.WalletPrivateKey != "" {
+		return fmt.Errorf("config: wallet_private_key must not be set in config files; use SNIPER_WALLET_KEY env var")
+	}
 	return nil
 }
 

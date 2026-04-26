@@ -259,6 +259,38 @@ logging:
 	}
 }
 
+func TestLoad_WalletPrivateKeyInYAML_Fails(t *testing.T) {
+	// Arrange: YAML with wallet_private_key set — must be rejected hard-fail
+	yaml := `
+pipeline:
+  schema_version: "0.1.0"
+database:
+  engine: postgres
+  host: localhost
+  port: 5432
+  database: sniper
+  user: sniper
+  ssl_mode: disable
+capital:
+  wallet_private_key: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+logging:
+  level: info
+  format: json
+`
+	path := writeTempYAML(t, yaml)
+
+	// Act
+	_, err := config.Load(path)
+
+	// Assert — must fail with a meaningful error, not silently accept
+	if err == nil {
+		t.Fatal("expected error when wallet_private_key is set in YAML config file")
+	}
+	if !containsAny(err.Error(), "wallet_private_key", "SNIPER_WALLET_KEY") {
+		t.Errorf("error message should mention wallet_private_key and env var, got: %v", err)
+	}
+}
+
 func TestLoad_EnvOverride_AppliedAfterFile(t *testing.T) {
 	// Arrange
 	yaml := `

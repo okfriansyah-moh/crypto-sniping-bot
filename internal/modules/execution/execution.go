@@ -35,7 +35,17 @@ type EVMClient interface {
 	// GetTransactionReceipt polls for the receipt of a tx hash.
 	// Returns nil, nil if the tx is not yet mined.
 	GetTransactionReceipt(ctx context.Context, txHash string) (*TxReceipt, error)
+
+	// GetAmountsOut calls the router's getAmountsOut(amountIn, path) view function.
+	// Returns the expected output token amounts for each step of the path.
+	// The last element is the final output amount after all swaps.
+	// routerAddress is the DEX router contract (e.g. UniswapV2Router02).
+	GetAmountsOut(ctx context.Context, routerAddress string, amountIn *big.Int, path []string) ([]*big.Int, error)
 }
+
+// defaultSlippageBps is the fallback slippage tolerance used when AllocationDTO.MaxSlippageBps
+// is zero or invalid. 100 bps = 1% maximum slippage.
+const defaultSlippageBps int32 = 100
 
 // TxReceipt is the minimal receipt needed by the execution module.
 type TxReceipt struct {
@@ -126,11 +136,36 @@ func (m *Module) Process(
 			return m.failResult(in, now, "build_calldata:invalid_allocated_at")
 		}
 	}
-	amountOutMin := big.NewInt(0) // Phase 2: no slippage guard; Phase 3 adds it.
+
+	// Convert USD size to wei (simplified: treat USD as ETH for Phase 2 test).
+	valueWei := usdToWei(in.SizeUsd)
+
+	// Slippage guard: get expected output from router and apply MaxSlippageBps.
+	// Fail-closed: if the quote fails or returns zero, the tx is not submitted.
+	slippageBps := in.MaxSlippageBps
+	if slippageBps <= 0 || slippageBps >= 10000 {
+		slippageBps = defaultSlippageBps
+	}
 	path := []geth_common.Address{
-		geth_common.HexToAddress(m.baseTokenAddr), // sourced from config/chains.yaml
+		geth_common.HexToAddress(m.baseTokenAddr),
 		geth_common.HexToAddress(in.TokenAddress),
 	}
+	quotePath := []string{m.baseTokenAddr, in.TokenAddress}
+	amounts, quoteErr := m.client.GetAmountsOut(ctx, routerAddress, valueWei, quotePath)
+	if quoteErr != nil {
+		return m.failResult(in, now, fmt.Sprintf("get_amounts_out:%v", quoteErr))
+	}
+	if len(amounts) < 2 {
+		return m.failResult(in, now, "get_amounts_out:invalid_response_length")
+	}
+	expectedOut := amounts[len(amounts)-1]
+	if expectedOut == nil || expectedOut.Sign() <= 0 {
+		return m.failResult(in, now, "get_amounts_out:zero_expected_output")
+	}
+	// amountOutMin = expectedOut × (10000 − slippageBps) / 10000
+	amountOutMin := new(big.Int).Mul(expectedOut, big.NewInt(int64(10000-slippageBps)))
+	amountOutMin.Div(amountOutMin, big.NewInt(10000))
+
 	deadline := big.NewInt(allocatedAt.Add(3 * time.Minute).Unix())
 	to := geth_common.HexToAddress(in.WalletAddress)
 
@@ -138,9 +173,6 @@ func (m *Module) Process(
 	if err != nil {
 		return m.failResult(in, now, fmt.Sprintf("build_calldata:%v", err))
 	}
-
-	// Convert USD size to wei (simplified: treat USD as ETH for Phase 2 test).
-	valueWei := usdToWei(in.SizeUsd)
 
 	// Build and sign the transaction.
 	rawTx, txHash, err := m.signTx(nonce, routerAddress, valueWei, gasPrice, 300_000, calldata)
@@ -199,6 +231,7 @@ func (m *Module) Process(
 		WalletShard:   in.WalletShard,
 		LatencyMs:     latencyMs,
 		CompletedAt:   now,
+		SlippageGuardBps: slippageBps,
 	}, nil
 }
 

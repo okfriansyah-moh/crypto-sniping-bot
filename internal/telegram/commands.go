@@ -23,6 +23,11 @@ const (
 	CmdVersion   CommandType = "/version"
 )
 
+// isDestructive returns true for commands that modify system state.
+func (c CommandType) isDestructive() bool {
+	return c == CmdKill || c == CmdResume
+}
+
 // CommandRequest carries the parsed operator command.
 type CommandRequest struct {
 	Type      CommandType
@@ -62,12 +67,13 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 // It is intentionally interface-driven so the orchestrator or app layer
 // can inject real implementations without coupling to this package's internals.
 type Handler struct {
-	statusFn    func(ctx context.Context) (string, error)
-	pnlFn       func(ctx context.Context) (string, error)
-	positionsFn func(ctx context.Context) (string, error)
-	killFn      func(ctx context.Context) error
-	resumeFn    func(ctx context.Context) error
-	versionFn   func(ctx context.Context) (string, error)
+	statusFn       func(ctx context.Context) (string, error)
+	pnlFn          func(ctx context.Context) (string, error)
+	positionsFn    func(ctx context.Context) (string, error)
+	killFn         func(ctx context.Context) error
+	resumeFn       func(ctx context.Context) error
+	versionFn      func(ctx context.Context) (string, error)
+	allowedUserIDs map[string]struct{} // nil means unconfigured
 }
 
 // HandlerOptions carries the injectable functions for the command handler.
@@ -78,23 +84,63 @@ type HandlerOptions struct {
 	KillFn      func(ctx context.Context) error
 	ResumeFn    func(ctx context.Context) error
 	VersionFn   func(ctx context.Context) (string, error)
+
+	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
+	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
+	// When empty (unconfigured), destructive commands (/kill, /resume) are always
+	// rejected; read-only commands are allowed but emit a security warning.
+	// Set this in production to restrict access to known operator IDs.
+	AllowedUserIDs []string
 }
 
 // NewHandler creates a Handler with the provided function implementations.
 func NewHandler(opts HandlerOptions) *Handler {
 	return &Handler{
-		statusFn:    opts.StatusFn,
-		pnlFn:       opts.PnlFn,
-		positionsFn: opts.PositionsFn,
-		killFn:      opts.KillFn,
-		resumeFn:    opts.ResumeFn,
-		versionFn:   opts.VersionFn,
+		statusFn:       opts.StatusFn,
+		pnlFn:          opts.PnlFn,
+		positionsFn:    opts.PositionsFn,
+		killFn:         opts.KillFn,
+		resumeFn:       opts.ResumeFn,
+		versionFn:      opts.VersionFn,
+		allowedUserIDs: allowedSet(opts.AllowedUserIDs),
 	}
+}
+
+// allowedSet builds a fast-lookup set from a slice of user IDs.
+func allowedSet(ids []string) map[string]struct{} {
+	if len(ids) == 0 {
+		return nil
+	}
+	m := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			m[id] = struct{}{}
+		}
+	}
+	return m
 }
 
 // Handle dispatches the command and returns the reply text.
 // Destructive commands (/kill, /resume) are logged with the issuer ID.
+// Authorization rules:
+//   - Empty IssuerID is always rejected.
+//   - If AllowedUserIDs is configured, any unlisted issuer is rejected for ALL commands.
+//   - If AllowedUserIDs is unconfigured (empty), destructive commands are always rejected.
 func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResult, error) {
+	if req.IssuerID == "" {
+		return nil, fmt.Errorf("commands: missing issuer id")
+	}
+
+	if h.allowedUserIDs != nil {
+		// Allowlist configured: strict enforcement for all commands.
+		if _, ok := h.allowedUserIDs[req.IssuerID]; !ok {
+			return nil, fmt.Errorf("commands: unauthorized issuer: %q", req.IssuerID)
+		}
+	} else if req.Type.isDestructive() {
+		// Unconfigured allowlist: fail-closed for destructive commands.
+		return nil, fmt.Errorf("commands: destructive command %q rejected: AllowedUserIDs not configured", req.Type)
+	}
+
 	switch req.Type {
 	case CmdStatus:
 		if h.statusFn == nil {
