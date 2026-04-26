@@ -34,6 +34,7 @@
 #   Group A — SEQUENTIAL ONLY:  Phases 0-2 (infra, ingestion, first-trade)
 #   Group B — SAFE PARALLEL:    Phases 3-5 (evaluation, models, learning)
 #   Group C — CONTROL LAYER:    Phase 6 (observability, scaling) — after all B
+#   Group D — MARKET EXTENSION: Phase 7 (Solana market) — isolated, after Phase 6
 # ─────────────────────────────────────────────────────────────────────────────
 
 phases:
@@ -72,3 +73,8 @@ phases:
     complexity: 8
     group: "C"
     skills: "observability, operational-modes, telegram-dispatcher, traceability, event-bus, execution-engine, execution-quality-analyzer, drawdown-protection, exposure-monitor, rpc-management, dto, modularity, config-validation, code-quality, coding-standards, test-generation, test-driven-development, performance-optimization, security-audit"
+  7:
+    name: "solana-market"
+    complexity: 9
+    group: "D"
+    skills: "event-bus, rpc-management, dex-scanning, execution-engine, determinism, dto, modularity, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, observability"

@@ -13,6 +13,9 @@
 - **Modules are DB-free:** No module under `internal/modules/` may import `database/`, import a DB driver, or contain SQL strings
 - **Event-sourced:** The `events` table is the authoritative log. All DTO transitions append to it. State tables are derived projections.
 - **Traceability enforced at write time:** Every event write validates `trace_id`, `correlation_id`, `causation_id` (except Layer 0), `version_id` — orphan events are rejected.
+- **Multi-chain ready (additive):** The adapter is chain-agnostic at the DTO layer. The `Chain` field on every DTO (`eth | bsc | solana`) is a free-form string; chain-specific interpretation lives in the consuming module. Adding a new chain (Phase 7: Solana) introduces only **additive** adapter methods (e.g. `UpsertSolanaEndpointState`, `InsertSolanaSignature`) — never modifies the existing interface. Chain-restricted methods (e.g. `AllocateNonce`, `ReconcileNonce`) document the restriction in their contract; callers are responsible for gating on `chain`. `InsertExecutionResult` accepts `ExecutionResultDTO` for **all** chains; chain-specific fields (Solana signature, EVM tx hash) map to the same `TxHash` slot, and `Nonce` is unused (`0`) for Solana.
+- **Solana ingestion state model (additive):** Solana ingestion uses two persistent state slices not present in the EVM model: a **monotonic watermark** (`solana_ingestion_watermark.slot`) and an **optional signature ledger** (`solana_signatures`) for idempotent execution. The adapter exposes `UpsertIngestionWatermark(ctx, chain, slot)` (rejects regressions with `ErrWatermarkRegression`), `GetIngestionWatermark`, `InsertSolanaSignature` (`ON CONFLICT DO NOTHING`), `UpdateSolanaSignatureStatus`, plus endpoint health/circuit-breaker methods (`UpsertSolanaEndpointState`, `GetSolanaEndpointState`, `UpsertSolanaEndpointHealth`, `ListSolanaEndpointsRanked`). All are additive; no existing call site is altered. The nonce manager (`AllocateNonce`, `ReconcileNonce`) remains EVM-only — Solana callers MUST NOT invoke it. See `docs/architecture.md` § 3.11.10 and `docs/implementation_roadmap.md` § 7.1.6 / § 7.7 for the production-grade hardening invariants. Migration: `database/migrations/20260101000007_solana_tables.sql`.
+- **Production hardening contract (architecture § 4.10):** The adapter is the **single** authoritative boundary for the determinism + exactly-once + failure-safety guarantees. Specifically: (a) event reads are ordered by `logical_order_key` (never `created_at`); (b) `ClaimExecution` is the only path that reserves an `execution_id` — in-memory locks are advisory only; (c) `MoveToDLQ` is the only path that records terminal failure of an event; (d) `UpsertPositionFromExecution` enforces the single-position-per-execution invariant via a UNIQUE constraint on `source_execution_id`; (e) `SetSystemHalt` / `IsSystemHalted` are the only legitimate read/write of the global kill switch; (f) `PromoteStrategyVersion` is the only path that activates a new strategy version. Direct SQL bypassing these methods is FORBIDDEN. Migration: `database/migrations/20260101000012_production_hardening.sql`.
 
 ---
 
@@ -102,12 +105,21 @@ type Adapter interface {
     InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
 
     // ── Execution: Nonce Manager (§ 3.8.19) ─────────────────────
+    //
+    // EVM-ONLY. Nonce management is part of the EVM execution model.
+    // Solana (Phase 7) does NOT use nonces — it uses a recent-blockhash +
+    // signature-uniqueness ordering model. Solana workers MUST NOT call
+    // AllocateNonce or ReconcileNonce. Callers MUST gate on
+    //   chain ∈ {"eth", "bsc"}
+    // before invoking these methods. See docs/architecture.md § 3.11.6.
 
     // AllocateNonce atomically reserves the next nonce for a wallet.
     // Uses UPDATE ... RETURNING with row-level lock.
+    // EVM-ONLY — see note above.
     AllocateNonce(ctx context.Context, walletAddress string, chain string) (nonce uint64, err error)
 
     // ReconcileNonce updates local state from on-chain eth_getTransactionCount.
+    // EVM-ONLY — see note above.
     ReconcileNonce(ctx context.Context, walletAddress string, chain string, onchainNonce uint64) error
 
     // ── Positions ───────────────────────────────────────────────
@@ -120,6 +132,112 @@ type Adapter interface {
     CreateStrategyVersion(ctx context.Context, sv StrategyVersion) error
     GetActiveStrategyVersion(ctx context.Context) (*StrategyVersion, error)
     GetStrategyVersion(ctx context.Context, versionID string) (*StrategyVersion, error)
+
+    // ── Solana Adapter Methods (Phase 7 — additive, non-breaking) ─
+    //
+    // These methods support Solana ingestion + execution per
+    // docs/architecture.md § 3.11.10 (production-grade hardening).
+    // EVM callers MUST NOT invoke them; Solana callers MUST NOT
+    // invoke nonce methods (AllocateNonce / ReconcileNonce).
+    //
+    // Migration: 20260101000007_solana_tables.sql defines the
+    // backing tables solana_rpc_endpoint_state, solana_signatures,
+    // solana_ingestion_watermark, solana_endpoint_health.
+
+    // Endpoint circuit breaker state (CLOSED|OPEN|HALF_OPEN)
+    UpsertSolanaEndpointState(ctx context.Context, url, state string, failures int) error
+    GetSolanaEndpointState(ctx context.Context, url string) (state string, failures int, err error)
+
+    // Signature ledger — idempotent INSERT (ON CONFLICT DO NOTHING)
+    InsertSolanaSignature(ctx context.Context, sig, executionID, walletAddr string, slot uint64) error
+    UpdateSolanaSignatureStatus(ctx context.Context, sig, commitment, status string) error
+
+    // Ingestion watermark — MONOTONIC; rejects regression with ErrWatermarkRegression
+    UpsertIngestionWatermark(ctx context.Context, chain string, slot uint64) error
+    GetIngestionWatermark(ctx context.Context, chain string) (slot uint64, err error)
+
+    // Endpoint health for dynamic routing (§ 3.11.10 / roadmap § 7.7)
+    UpsertSolanaEndpointHealth(ctx context.Context, h SolanaEndpointHealth) error
+    ListSolanaEndpointsRanked(ctx context.Context) ([]SolanaEndpointHealth, error)
+
+    // ── Production Hardening (architecture § 4.10) ──────────────
+    //
+    // These methods enforce the determinism + exactly-once + failure
+    // safety contract. They are additive; existing call sites are
+    // unaffected. Every method on this block uses ON CONFLICT DO NOTHING
+    // semantics where applicable — "0 rows" is the SUCCESS path for
+    // idempotent retries, never an error.
+
+    // Event ordering (§ 4.10.A) — claim a batch of unprocessed events for
+    // a given consumer + chain in strict ascending logical_order_key,
+    // restricted to the worker's partition shard.
+    //   ORDER BY logical_order_key ASC  (NEVER created_at)
+    ClaimNextEvents(ctx context.Context, q EventClaimQuery) ([]contracts.EventEnvelope, error)
+
+    // EventClaimQuery {Chain, Consumer, WorkerID, NumWorkers, Limit, MinOrderingKey}
+
+    // DLQ (§ 4.10.C)
+    IncrementEventRetry(ctx context.Context, eventID, consumer string) (retryCount int, err error)
+    MoveToDLQ(ctx context.Context, e DLQEntry) error
+    RequeueFromDLQ(ctx context.Context, eventID string) error
+    ListDLQ(ctx context.Context, filter DLQFilter) ([]DLQEntry, error)
+
+    // Exactly-once execution lock (§ 4.10.D)
+    //   INSERT INTO executions (execution_id, ...) VALUES (...)
+    //   ON CONFLICT (execution_id) DO NOTHING RETURNING execution_id;
+    // Returns claimed=true if this caller is the first to claim the ID,
+    // false if another worker already claimed it (caller MUST NOT submit).
+    ClaimExecution(ctx context.Context, dto contracts.AllocationDTO) (claimed bool, err error)
+
+    // Position consistency (§ 4.10.E)
+    UpsertPositionFromExecution(ctx context.Context, p contracts.PositionStateDTO) (created bool, err error)
+    ListOpenPositionsForReconciliation(ctx context.Context) ([]contracts.PositionStateDTO, error)
+    AdjustPositionAmount(ctx context.Context, positionID string, onchainAmount string, reason string) error
+    ClosePositionForced(ctx context.Context, positionID string, reason string) error
+
+    // Latency feedback loop (§ 4.10.F)
+    InsertLatencyEvent(ctx context.Context, le LatencyEvent) error
+    GetLatencyProfile(ctx context.Context, chain, endpoint, opKind string, windowSec int) (contracts.LatencyProfileDTO, error)
+
+    // Config consistency (§ 4.10.G)
+    PromoteStrategyVersion(ctx context.Context, newVersionID string, drainTimeoutSec int) error
+    DrainAndCheckPipelineIdle(ctx context.Context, timeoutSec int) (idle bool, err error)
+
+    // Circuit breaker / kill switch (§ 4.10.H)
+    SetSystemHalt(ctx context.Context, halt bool, reason, operator string) error
+    IsSystemHalted(ctx context.Context) (halted bool, reason string, err error)
+
+    // Replay validation (§ 4.10.I)
+    ComputeStateHash(ctx context.Context) (hexDigest string, err error)
+
+    // ── Production Hardening — Stage 4 (§ 4.11) ─────────────────
+
+    // Partition leases (§ 4.11.B)
+    ClaimPartitions(ctx context.Context, chain, consumer, workerID string, n, ttlSec int) ([]int, error)
+    RenewPartitions(ctx context.Context, chain, consumer, workerID string) error
+    ReleasePartitions(ctx context.Context, chain, consumer, workerID string) error
+
+    // Crash-safe recovery (§ 4.11.C)
+    ListInFlightExecutions(ctx context.Context) ([]InFlightExecution, error)
+    FinalizeExecution(ctx context.Context, executionID string, receipt ExecutionReceipt) error
+    AbortReservedExecution(ctx context.Context, executionID, reason string) error
+    MarkExecutionLost(ctx context.Context, executionID, reason string) error
+
+    // Reorg handling (§ 4.11.D)
+    RecordReorg(ctx context.Context, chain string, oldBlock, newBlock int64, depth int) error
+    InvalidateBlockRange(ctx context.Context, chain string, fromBlock, toBlock int64) (affected int, err error)
+    MarkPositionsUncertain(ctx context.Context, chain string, fromBlock int64, reason string) error
+    ListReorgPendingExecutions(ctx context.Context, chain string) ([]Execution, error)
+    ReResolveExecutionAfterReorg(ctx context.Context, executionID, txHash string, outcome ReorgOutcome) error
+
+    // Evaluation invariant (§ 4.11.E)
+    RecordExecutionForEvaluation(ctx context.Context, executionID string, deadlineSec int) error
+    MarkEvaluationDone(ctx context.Context, executionID string) error
+    ListMissingEvaluations(ctx context.Context) ([]MissingEvaluation, error)
+
+    // Backpressure (§ 4.11.F)
+    GetUnprocessedCount(ctx context.Context, chain, consumer string) (int64, error)
+    RecordDrop(ctx context.Context, chain, reason, tokenAddress, score string) error
 
     // ── Trace Queries (§ 4.8) ───────────────────────────────────
 
@@ -840,23 +958,23 @@ For each returned row the sweeper emits an `expired_event` in the same transacti
 
 ## 11.5 Error Code Additions
 
-| Error               | Condition                                                        |
-| ------------------- | ---------------------------------------------------------------- |
-| `ErrEventExpired`   | Attempt to claim/process a row where `expires_at <= NOW()`       |
-| `ErrStaleState`     | `UpsertSystemState` CAS mismatch                                 |
-| `ErrInvalidEnum`    | Write attempted with an enum value outside the allowed set       |
-| `ErrIllegalTransition` | `SetStrategyVersionStatus` called with an illegal status move |
-| `ErrEnvelopeBreach` | Adapter-level guard if write would violate exposure invariants   |
+| Error                  | Condition                                                      |
+| ---------------------- | -------------------------------------------------------------- |
+| `ErrEventExpired`      | Attempt to claim/process a row where `expires_at <= NOW()`     |
+| `ErrStaleState`        | `UpsertSystemState` CAS mismatch                               |
+| `ErrInvalidEnum`       | Write attempted with an enum value outside the allowed set     |
+| `ErrIllegalTransition` | `SetStrategyVersionStatus` called with an illegal status move  |
+| `ErrEnvelopeBreach`    | Adapter-level guard if write would violate exposure invariants |
 
 ---
 
 ## 11.6 Retention Policy (Operational)
 
-| Tier | Location         | Retention              | Query Access                                 |
-| ---- | ---------------- | ---------------------- | -------------------------------------------- |
-| Hot  | `events`         | ≤ `cfg.retention.hot_days` (default 7)  | Direct, fast                |
-| Warm | `events`         | ≤ `cfg.retention.warm_days` (default 30), `processed=TRUE` only | Direct, fast |
-| Cold | `events_archive` | Indefinite (or detach partition for dump) | `GetEventsByTraceIncludeArchive` |
+| Tier | Location         | Retention                                                       | Query Access                     |
+| ---- | ---------------- | --------------------------------------------------------------- | -------------------------------- |
+| Hot  | `events`         | ≤ `cfg.retention.hot_days` (default 7)                          | Direct, fast                     |
+| Warm | `events`         | ≤ `cfg.retention.warm_days` (default 30), `processed=TRUE` only | Direct, fast                     |
+| Cold | `events_archive` | Indefinite (or detach partition for dump)                       | `GetEventsByTraceIncludeArchive` |
 
 Never archived (forever in primary tables): `token_lifecycle`, `executions`, `positions`, `strategy_versions`, `learning_records`, `system_state`.
 
@@ -864,6 +982,6 @@ Never archived (forever in primary tables): `token_lifecycle`, `executions`, `po
 
 ## 11.7 Idempotency & Determinism Invariants (Additions to § 4)
 
-- New columns do NOT participate in `EventID` computation *except* `priority` and `expires_at`, which ARE canonical (they affect claim order / lifetime and must be reproducible on replay).
+- New columns do NOT participate in `EventID` computation _except_ `priority` and `expires_at`, which ARE canonical (they affect claim order / lifetime and must be reproducible on replay).
 - `SystemStateDTO` writes are CAS-guarded via `state_version`; concurrent updaters serialize deterministically.
 - `SetStrategyVersionStatus` transitions are transactional; the `idx_strategy_versions_active` partial unique index guarantees the single-active invariant at the DB level (not only in application code).

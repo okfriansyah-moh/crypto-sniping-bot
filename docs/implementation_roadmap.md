@@ -31,6 +31,7 @@
 - [Phase 4 — Signal Quality (P1.5)](#phase-4--signal-quality-models--full-dqfeatures-p15)
 - [Phase 5 — Learning Engine (P2)](#phase-5--learning-engine-p2)
 - [Phase 6 — Resource Control, Scaling & Production Hardening (P2)](#phase-6--resource-control-wallet-sharding-scaling-p2)
+- [Phase 7 — Solana Market Extension (P2)](#phase-7--solana-market-extension-p2)
 - [Go-Live Checklist](#go-live-checklist)
 - [DB Adapter Mapping](#db-adapter-mapping)
 - [DTO Pipeline Map](#dto-pipeline-map)
@@ -41,7 +42,7 @@
 
 ## Phase Overview
 
-Quick reference for all 7 implementation phases. Each phase maps to one or more pipeline layers and introduces specific DTOs. See [Global Conventions](#global-conventions) for shared patterns applied across all phases.
+Quick reference for all 8 implementation phases. Each phase maps to one or more pipeline layers and introduces specific DTOs. See [Global Conventions](#global-conventions) for shared patterns applied across all phases.
 
 | Phase | Name                                        | Priority | Parallel Group    | Pipeline Layer(s)           | New DTOs Introduced                                                                                                                         | Migration                   | Requires |
 | ----- | ------------------------------------------- | -------- | ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------- |
@@ -52,18 +53,20 @@ Quick reference for all 7 implementation phases. Each phase maps to one or more 
 | **4** | Signal Quality                              | P1.5     | B — Parallel-safe | L1–L5 (models)              | `ProbabilityEstimateDTO`, `SlippageEstimateDTO`, `LatencyProfileDTO`                                                                        | —                           | Phase 3  |
 | **5** | Learning Engine                             | P2       | B — Parallel-safe | L10 (full)                  | `LearningRecordDTO`                                                                                                                         | `000005_learning_tables`    | Phase 4  |
 | **6** | Resource Control, Wallet Sharding & Scaling | P2       | C — Final         | All (operational hardening) | `SystemStateDTO`                                                                                                                            | `000006_event_partitioning` | Phase 5  |
+| **7** | Solana Market Extension                     | P2       | D — Market addon  | L0, L8 (Solana-specific)    | — (chain-agnostic; reuses existing DTOs)                                                                                                    | `000007_solana_tables`      | Phase 6  |
 
 ### Subsection Count by Phase
 
-| Phase | Subsections                      | Workers Added           | New Contracts                                 |
-| ----- | -------------------------------- | ----------------------- | --------------------------------------------- |
-| 0     | 0.1 – 0.7 (7 global conventions) | —                       | `trace.go`, `event_envelope.go`               |
-| 1     | 9 components                     | 1 (`run_ingestion.go`)  | `market_data.go`                              |
-| 2     | 2.1 – 2.11 (11 subsections)      | 9 workers               | 8 contracts                                   |
-| 3     | 8 subsections + §3.1             | 1 (`run_evaluation.go`) | `evaluation.go`                               |
-| 4     | 8 subsections                    | 3 model workers         | `probability.go`, `slippage.go`, `latency.go` |
-| 5     | 10 subsections + §5.1            | 6 workers               | `learning_record.go`                          |
-| 6     | 12 subsections                   | 2 workers               | — (no new DTOs)                               |
+| Phase | Subsections                      | Workers Added                            | New Contracts                                 |
+| ----- | -------------------------------- | ---------------------------------------- | --------------------------------------------- |
+| 0     | 0.1 – 0.7 (7 global conventions) | —                                        | `trace.go`, `event_envelope.go`               |
+| 1     | 9 components                     | 1 (`run_ingestion.go`)                   | `market_data.go`                              |
+| 2     | 2.1 – 2.11 (11 subsections)      | 9 workers                                | 8 contracts                                   |
+| 3     | 8 subsections + §3.1             | 1 (`run_evaluation.go`)                  | `evaluation.go`                               |
+| 4     | 8 subsections                    | 3 model workers                          | `probability.go`, `slippage.go`, `latency.go` |
+| 5     | 10 subsections + §5.1            | 6 workers                                | `learning_record.go`                          |
+| 6     | 12 subsections                   | 2 workers                                | — (no new DTOs)                               |
+| 7     | 7 subsections                    | 2 workers (Solana ingestion + execution) | — (chain-agnostic — reuses existing DTOs)     |
 
 ---
 
@@ -71,12 +74,13 @@ Quick reference for all 7 implementation phases. Each phase maps to one or more 
 
 ## 0.1 Priority Layers
 
-| Priority | Phases     | Description                                              |
-| -------- | ---------- | -------------------------------------------------------- |
-| **P0**   | Phase 0    | Execution blocker — DB, event bus, adapter, orchestrator |
-| **P1**   | Phase 1, 2 | Ingestion + first-trade vertical slice                   |
-| **P1.5** | Phase 3, 4 | Evaluation & correctness, model-based signal quality     |
-| **P2**   | Phase 5, 6 | Adaptive learning, resource control, scale               |
+| Priority | Phases     | Description                                                 |
+| -------- | ---------- | ----------------------------------------------------------- |
+| **P0**   | Phase 0    | Execution blocker — DB, event bus, adapter, orchestrator    |
+| **P1**   | Phase 1, 2 | Ingestion + first-trade vertical slice                      |
+| **P1.5** | Phase 3, 4 | Evaluation & correctness, model-based signal quality        |
+| **P2**   | Phase 5, 6 | Adaptive learning, resource control, scale                  |
+| **P2**   | Phase 7    | Solana market extension (multi-market deterministic sniper) |
 
 **Rule:** No Phase N may merge to `main` until Phase N-1 exit criteria are all checked.
 
@@ -3385,6 +3389,963 @@ Full DTO flow — matches `docs/architecture.md` End-to-End Pipeline diagram exa
 - Phase 2 merged with **at least 1 testnet trade confirmed**
 - Phase 3 merged with state machine + traceability enforcement active
 - Phase 4 merged with model outputs replacing priors
+
+---
+
+## Phase 7 — Solana Market Extension (P2)
+
+**Architecture:** Layer 0 (Solana ingestion) and Layer 8 (Solana execution) — see `docs/architecture.md` § 3.11.
+
+### Objective
+
+Extend the deterministic sniper from a **single-market (EVM)** system to a **multi-market** system by adding the **Solana** market as an isolated `(ingestion + execution)` domain. Layers 1–7, 9, 10 remain bit-for-bit unchanged. The pipeline processes Solana tokens identically to EVM tokens once `MarketDataDTO` is emitted.
+
+### BLOCKERS
+
+**Phase 6 exit criteria must all be checked before starting Phase 7.**
+
+Specifically: kill switch verified, capital envelope (4 caps), wallet sharding deterministic, MEV routing active, partitioning live, archival running.
+
+### Scope
+
+**In scope:**
+
+- Solana ingestion module (`internal/modules/ingestion_solana/`) consuming `logsSubscribe` + `programSubscribe` from Solana RPC, decoding via Borsh, normalizing to `MarketDataDTO` with `Chain="solana"`.
+- Solana execution module (`internal/modules/execution_solana/`) — keypair (ed25519) loader, instruction builder (Raydium / Pump.fun routes), `sendTransaction`, signature-based confirmation tracking.
+- Execution router (`internal/modules/execution/router.go`) that switches on `AllocationDTO.Chain` between EVM (`eth | bsc`) and Solana branches.
+- Configuration extensions in `config/chains.yaml::solana` and `config/execution.yaml::solana`.
+- Migration `20260101000007_solana_tables.sql` for Solana-specific RPC endpoint state and signature tracking.
+
+**Explicitly excluded:**
+
+- Any modification to existing EVM ingestion code (`internal/modules/ingestion/`).
+- Any modification to existing EVM execution code paths (`internal/modules/execution/` Phase 2/6 files).
+- Any change to DTO schemas in `contracts/` — Phase 7 is **strictly chain-agnostic** at the DTO layer.
+- Any change to the database adapter interface — Solana adapters extend, never alter, the existing interface.
+- Cross-market position aggregation logic (Layer 7 already operates chain-agnostically).
+- Solana-specific learning models — Phase 5 learning is re-used as-is; Solana cohorts emerge naturally from existing cohort labels.
+
+### Event Types Emitted
+
+| Event Type          | Emitter                 | DTO                  | Notes                                    |
+| ------------------- | ----------------------- | -------------------- | ---------------------------------------- |
+| `market_data_event` | Solana ingestion worker | `MarketDataDTO`      | Same event type as EVM; `Chain="solana"` |
+| `execution_event`   | Solana execution worker | `ExecutionResultDTO` | Same event type as EVM; `Chain="solana"` |
+
+**No new event types are introduced.** Phase 7 reuses the existing event bus.
+
+### File Structure
+
+```
+contracts/                                          # UNCHANGED — chain-agnostic
+config/
+├── chains.yaml                                     # ADDITIVE — append solana block
+└── execution.yaml                                  # ADDITIVE — append solana block
+
+internal/modules/ingestion_solana/                  # NEW
+├── ingestion_solana.go                             # Module: Start(ctx), Stop(ctx)
+├── normalize.go                                    # raw Solana event → MarketDataDTO (Chain="solana")
+├── subscribe.go                                    # logsSubscribe / programSubscribe
+├── borsh_decode.go                                 # Borsh deserialization helpers
+├── pump_fun.go                                     # Pump.fun program decoding
+├── raydium.go                                      # Raydium AMM v4 / CLMM decoding
+├── reconnect.go                                    # WS reconnect with backoff
+├── gap_recovery.go                                 # Re-fetch via getSignaturesForAddress
+└── ingestion_solana_test.go
+
+internal/modules/execution_solana/                  # NEW
+├── execution_solana.go                             # Public Execute(ctx, alloc) → ExecutionResultDTO
+├── keypair.go                                      # ed25519 keypair load + sign
+├── build_instruction.go                            # Raydium / Pump.fun instruction builder
+├── recent_blockhash.go                             # Fetch + cache recent blockhash
+├── send_tx.go                                      # sendTransaction + retry on blockhash expiry
+├── confirm.go                                      # Signature confirmation polling (processed→confirmed→finalized)
+├── compute_unit.go                                 # Priority fee / compute-unit limit selection
+└── execution_solana_test.go
+
+internal/modules/execution/
+└── router.go                                       # NEW — switch by alloc.Chain → EVM | Solana
+
+internal/workers/
+├── run_ingestion_solana.go                         # NEW — source worker (no input event)
+└── run_execution.go                                # MODIFIED — calls router.Execute
+
+database/migrations/
+└── 20260101000007_solana_tables.sql                # NEW — solana_rpc_endpoint_state, solana_signatures
+```
+
+### 7.1 Solana Ingestion (Layer 0 — Solana)
+
+**Responsibility:** Subscribe to Solana RPC for new pools and swaps. Decode via Borsh. Emit `MarketDataDTO` with `Chain="solana"`.
+
+**Subscription model:**
+
+- `logsSubscribe` filtered on Pump.fun + Raydium AMM v4 + Raydium CLMM program IDs (config-driven).
+- `programSubscribe` for account-state changes when topic-level filtering is insufficient.
+- Commitment level: `confirmed` for ingestion (matches EVM confirmation-depth semantics).
+
+**Normalization:**
+
+```go
+// internal/modules/ingestion_solana/normalize.go
+func NormalizePumpFunCreate(notif rpc.LogsNotification, endpoint, versionID string) (contracts.MarketDataDTO, error)
+func NormalizeRaydiumSwap(notif rpc.LogsNotification, endpoint, versionID string) (contracts.MarketDataDTO, error)
+func NormalizeRaydiumPoolInit(notif rpc.LogsNotification, endpoint, versionID string) (contracts.MarketDataDTO, error)
+```
+
+**Identity:**
+
+```
+EventID = SHA256("solana" || signature || instruction_index)[:16]
+TraceID = EventID                       (root)
+CorrelationID = SHA256(TraceID || slot)[:16]
+CausationID = ""                        (Layer 0 root — only allowed here)
+VersionID = active StrategyVersion pinned at worker start
+Chain = "solana"
+Market = e.g., "solana-raydium-v4" | "solana-pumpfun"
+```
+
+**Output contract (UNCHANGED):** `MarketDataDTO`. Solana-specific fields map to existing fields:
+
+| `MarketDataDTO` field                | Solana value                                      |
+| ------------------------------------ | ------------------------------------------------- |
+| `Chain`                              | `"solana"`                                        |
+| `Market`                             | `"solana-raydium-v4"` / `"solana-pumpfun"` / etc. |
+| `BlockNumber`                        | Slot number                                       |
+| `BlockHash`                          | Slot blockhash                                    |
+| `TxHash`                             | Transaction signature (base58)                    |
+| `LogIndex`                           | Instruction index within tx                       |
+| `PoolAddress`                        | AMM pool account pubkey (base58)                  |
+| `TokenAddress`                       | SPL token mint pubkey (base58)                    |
+| `BaseAddress`                        | Quote mint (SOL / USDC mint pubkey)               |
+| `Token0Address` / `Token1Address`    | Mint A / Mint B                                   |
+| `Amount0Raw` / `Amount1Raw`          | u64 amounts as decimal string                     |
+| `ReserveBaseRaw` / `ReserveTokenRaw` | Pool reserves                                     |
+| `BlockTimestamp`                     | Slot leader's reported time                       |
+
+#### 7.1.1 Connection Management (Production-Grade)
+
+The Solana ingestion worker maintains a **persistent WebSocket** to the active RPC endpoint with the following lifecycle (see `docs/architecture.md` § 3.11.10.3):
+
+- **Connect** — Open WS, subscribe via `logsSubscribe` (program-filtered) and `programSubscribe` for tracked accounts.
+- **Heartbeat** — Send periodic ping; if no pong within `cfg.solana.ws_heartbeat_timeout_ms` (default 10 s) → treat as disconnected.
+- **Disconnect** — Trigger reconnect loop with **exponential backoff + full jitter**: `delay = min(initial * 2^attempt, max) * rand(0, 1)`. Defaults: `initial=200ms`, `max=30s`, `multiplier=2.0`.
+- **Resume** — On reconnect success, read the persisted watermark via `adapter.GetIngestionWatermark(ctx, "solana")` and start from `watermark.slot + 1` via gap recovery (§7.1.2). Then attach the WS stream for current/future slots.
+- **Endpoint health** — After `cfg.solana.consecutive_ws_failures_threshold` (default 3) consecutive WS failures on the active endpoint, trigger failover (§7.1.3).
+
+#### 7.1.2 Gap Recovery
+
+```
+Pseudocode — internal/modules/ingestion_solana/gap_recovery.go
+func RecoverGap(ctx, fromSlot, toSlot uint64) error {
+    for each program in cfg.solana.programs {
+        sigs = rpc.GetSignaturesForAddress(program.pubkey, {until: fromSlot, before: toSlot})
+        // sigs are returned newest-first; reverse to ascending slot order
+        for sig in reverse(sigs) {
+            tx  = rpc.GetTransaction(sig, {commitment: "confirmed"})
+            for ix_index, ix in tx.instructions {
+                dto = NormalizeInstruction(tx, ix, ix_index, endpoint, versionID)
+                // EventID dedup absorbs any overlap with WS-delivered events
+                eventbus.Emit(MARKET_DATA_EVENT, dto)
+            }
+        }
+    }
+    return nil
+}
+```
+
+**Guarantees:**
+
+- Gap recovery and live WS may emit the **same** event simultaneously — `EventID = SHA256("solana"||sig||instruction_index)[:16]` collapses duplicates at the `events` table primary key.
+- Gap recovery is bounded: if `toSlot - fromSlot > cfg.solana.gap_recovery_max_slots` (default 5000), the worker emits a `system_event` with severity `degraded` and a Telegram alert via the dispatcher; ingestion continues from `currentSlot - max_slots`.
+
+#### 7.1.3 Multi-RPC Failover
+
+The Solana RPC client pool is ordered by priority (config-driven):
+
+```
+Active endpoint selection rule:
+  1. Filter endpoints with circuit_state == CLOSED
+  2. From those, prefer LOWEST priority value (1 = primary)
+  3. Tiebreak by lowest p95 latency (last 60 s window)
+  4. If all endpoints OPEN → emit ingestion_halted system_event; halt Solana only
+```
+
+Failover triggers (any one suffices):
+
+| Trigger                                                     | Action                                     |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| `consecutive_ws_failures >= threshold`                      | Mark active endpoint OPEN; rotate to next  |
+| `p95_latency_ms > cfg.solana.latency_failover_threshold_ms` | Rotate; previous endpoint enters HALF_OPEN |
+| `error_rate_60s > cfg.solana.error_rate_failover_threshold` | Rotate; circuit OPEN with cooldown         |
+| Manual operator command (`/solana_failover`)                | Logged operator-driven rotation            |
+
+Endpoint state transitions (`solana_rpc_endpoint_state`):
+
+```
+CLOSED ── failure_threshold ──► OPEN ── cooldown_elapsed ──► HALF_OPEN
+   ▲                                                            │
+   └─────── one_successful_probe ──────────────────────────────┘
+```
+
+#### 7.1.4 Deduplication (Mandatory)
+
+```
+EventID = SHA256("solana" || signature || instruction_index)[:16]
+```
+
+- WS observation + gap-recovery observation of the same instruction → same `EventID` → **one** row in `events` (`INSERT ... ON CONFLICT DO NOTHING`).
+- Cross-endpoint duplicate observation (primary + fallback) → same `EventID` → collapsed.
+- Worker MUST NOT pre-filter using an in-memory dedup set — the database primary key is the **single** authoritative dedup boundary.
+
+#### 7.1.5 Backpressure Control
+
+The WS subscriber → publisher pipeline uses a **bounded channel** of size `cfg.solana.publish_buffer_size` (default 4096). Drop policy follows `docs/architecture.md` § 3.11.10.11:
+
+| Event Class                           | Buffer Pressure Behavior                                        |
+| ------------------------------------- | --------------------------------------------------------------- |
+| Pool init / new launch                | NEVER drop — block subscriber if needed (apply WS backpressure) |
+| Swap on token with open position      | NEVER drop                                                      |
+| Swap on tracked but no-position token | DROP-OLDEST when buffer ≥ 80% full                              |
+| Swap on untracked token               | DROP-OLDEST when buffer ≥ 60% full                              |
+
+Drops increment `solana_ingestion_drops_total{reason}` and emit a `system_event` once per minute (rate-limited).
+
+#### 7.1.6 Watermark Consistency
+
+```
+adapter.UpsertIngestionWatermark(ctx, chain="solana", slot=M)
+  -- monotonic; must reject if M < current_value
+```
+
+**Write rule:**
+
+1. Publisher accumulates a batch of `MarketDataDTO` per WS notification.
+2. Adapter writes events to `events` (one txn).
+3. Adapter writes watermark to `solana_ingestion_watermark` with `slot = max(batch.slot)` — only on successful event INSERT.
+4. On crash between (2) and (3): on restart, watermark is stale → gap recovery replays; `EventID` dedup absorbs duplicates. **No data loss; no double-processing at downstream layers.**
+
+### 7.2 Solana Feature Adaptation (NO module changes)
+
+Layer 2 Feature Extraction is **unchanged**. The five Phase 2 features and the Phase 4 extended features all consume `MarketDataDTO`. The following interpretation rules are documented but **enforced by data**, not by code branches:
+
+| Feature                   | Solana Interpretation                                            |
+| ------------------------- | ---------------------------------------------------------------- |
+| `LiquidityScore`          | Pool reserves in SOL/USDC normalized to USD via oracle           |
+| `TxVelocityScore`         | Swap count per 30 s window (Solana confirmed slot rate ≈ 400 ms) |
+| `ContractSafety`          | Mint authority null + freeze authority null (Solana SPL flags)   |
+| `TokenAge`                | Slot delta from pool init                                        |
+| `VolumeMomentum`          | USD volume Δ across 30 s windows                                 |
+| `WalletEntropy` (Phase 4) | Distinct buyer pubkeys / total buys                              |
+
+**Cohort labels** (Phase 5 learning): Solana tokens naturally form cohorts via `Market = "solana-*"`. No new cohort dimension is introduced.
+
+### 7.3 Solana Execution Engine (Layer 8 — Solana)
+
+**Responsibility:** Consume `AllocationDTO` where `Chain="solana"`. Build and submit a Solana transaction. Track confirmation. Emit `ExecutionResultDTO`.
+
+**Function contracts:**
+
+```go
+// internal/modules/execution_solana/execution_solana.go
+type Module struct { /* keypair pool, RPC client, blockhash cache, config */ }
+
+func New(cfg Config, versionID string) *Module
+func (m *Module) Execute(ctx context.Context, alloc contracts.AllocationDTO) (contracts.ExecutionResultDTO, error)
+```
+
+**Execution flow:**
+
+```
+1. Validate alloc.Chain == "solana"; else return ErrUnsupportedChain.
+2. TTL check: if alloc.ExpiresAt < now() → emit expired_event, skip.
+3. Acquire keypair from shard pool: hash(alloc.TokenAddress) % n_solana_wallets.
+4. Fetch recent blockhash (cached, refreshed every cfg.solana.blockhash_refresh_ms).
+5. Build instruction:
+     - Raydium V4 swap: program_id=RAYDIUM_V4, accounts=[user, pool, token_in, token_out, ...].
+     - Pump.fun buy: program_id=PUMPFUN, instruction=BUY, args={lamports_in, min_token_out}.
+   slippage cap: minTokenOut = expected * (1 - cfg.solana.slippage_cap_bps/10000).
+6. Optional priority-fee instruction (compute-unit price) per cfg.solana.priority_fee_microlamports.
+7. Sign tx with keypair (ed25519) → signature = base58(sig).
+8. RPC sendTransaction(tx, {skipPreflight: cfg.solana.skip_preflight}).
+9. Confirmation poll until commitment = cfg.solana.confirm_commitment (default "confirmed"):
+     - blockhash expired → reject with FailureCategory="blockhash_expired" (RETRIABLE).
+     - confirmed → fill ExecutionResultDTO.Status="confirmed".
+     - fail → Status="reverted" or "failed" depending on tx meta.
+10. Emit execution_event with ExecutionResultDTO (Chain="solana", PathHint="solana-rpc").
+```
+
+**Output contract (UNCHANGED):** `ExecutionResultDTO`. Field mapping for Solana:
+
+| Field             | Solana semantics                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------ | ----------- | ----------- | ------ | --------- |
+| `Chain`           | `"solana"`                                                                           |
+| `WalletAddress`   | Base58 pubkey of executing keypair                                                   |
+| `Nonce`           | `0` (Solana has no nonce — field is unused; documented in `docs/db_adapter_spec.md`) |
+| `TxHash`          | Solana signature (base58)                                                            |
+| `BlockNumber`     | Slot of confirmation                                                                 |
+| `Status`          | `confirmed                                                                           | reverted    | dropped     | failed | rejected` |
+| `ExecutionPath`   | `"solana-rpc"` / `"solana-jito"` (Jito MEV bundle path)                              |
+| `MEVProtected`    | `true` if routed via Jito bundle                                                     |
+| `FailureCategory` | `blockhash_expired                                                                   | compute_oom | leader_skip | ...`   |
+
+**Idempotency:** `ExecutionID = SHA256(CorrelationID)[:16]` is unchanged. Solana adapter records `(ExecutionID, signature)` to detect duplicate submission attempts.
+
+#### 7.3.1 Bounded Retry Strategy (Production-Grade)
+
+```
+attempts = 0
+while attempts < cfg.solana.max_send_attempts (default 3, hard cap 5):
+    blockhash = blockhash_cache.GetFresh()       // refresh on every retry
+    sig = sign(tx_with(blockhash), keypair)
+    adapter.InsertSolanaSignature(execID, sig, ...)   // ON CONFLICT DO NOTHING
+    err = active_rpc.SendTransaction(tx)
+    switch classify(err):
+        case nil:                              break loop  → confirmation phase
+        case BlockhashExpired:    attempts++;  continue    // retry with fresh blockhash
+        case RpcTimeout:          attempts++;  rotate_endpoint(); continue
+        case SimulationFailure:                emit Status=reverted, FailureCategory=simulation_failure; STOP
+        case ProgramError:                     emit Status=reverted, FailureCategory=program_error;     STOP
+        case ComputeOOM:                       emit Status=reverted, FailureCategory=compute_oom;       STOP
+if attempts == max:
+    emit Status=dropped, FailureCategory=leader_skip OR blockhash_expired
+```
+
+**Hard invariants** (also in `docs/architecture.md` § 3.11.10.6):
+
+- Maximum **5** total send attempts per `ExecutionID`.
+- Each retry uses a **fresh** `recent_blockhash` — never replays a stale blockhash.
+- Every signature attempt is recorded in `solana_signatures` (idempotent INSERT). The adapter is the authoritative dedup boundary.
+- `simulation_failure`, `program_error`, `compute_oom` are NEVER retried — retrying these wastes gas and creates noise.
+
+#### 7.3.2 Confirmation Strategy
+
+The execution worker polls `getSignatureStatuses` for the submitted signature(s):
+
+```
+poll_interval = cfg.solana.receipt_poll_interval_ms (default 400 ms)
+deadline      = now + cfg.solana.confirm_timeout_ms (default 15 s)
+target        = cfg.solana.confirm_commitment (default "confirmed")
+
+loop until now > deadline:
+    status = rpc.GetSignatureStatuses([sig])
+    if status.confirmation_status >= target:
+        if status.err != nil:  emit Status=reverted, FailureCategory=program_error
+        else:                  emit Status=confirmed
+        adapter.UpdateSolanaSignatureStatus(sig, status.confirmation_status, ...)
+        return
+    sleep(poll_interval)
+
+// timeout
+emit Status=dropped, FailureCategory=confirmation_timeout
+```
+
+`processed` is **never** treated as final — it is too weak (single-leader observation, not slot-confirmed). `finalized` is supported as a stricter setting for high-value strategies but is opt-in.
+
+#### 7.3.3 Latency-Aware Execution Gate
+
+Before each `SendTransaction`, the worker reads `LatencyProfileDTO` for the active endpoint:
+
+```
+profile = adapter.GetLatencyProfile(endpoint, "solana_send_tx", window=60s)
+if profile.p95_ms > cfg.solana.latency_skip_threshold_ms (default 1500):
+    if alloc.size_usd > cfg.solana.degraded_size_cap_usd (default 50):
+        emit Status=rejected, RejectReason="latency_degraded_size_cap"
+        return
+    else:
+        // downsize and re-check Capital Engine envelope
+        alloc = capital.ReDownsize(alloc, degraded_size_cap_usd)
+        if !capital.CheckEnvelope(alloc): emit rejected; return
+```
+
+The latency gate is **only** evaluated for `chain="solana"` and is contained inside `internal/modules/execution_solana/`. Layer 7 Capital Engine remains chain-agnostic.
+
+#### 7.3.4 RPC Failover During Execution
+
+```
+On any RpcTimeout or RpcCircuitOpen during SendTransaction:
+  1. Mark active endpoint OPEN in solana_rpc_endpoint_state.
+  2. Pick next endpoint per priority + health score (§7.7).
+  3. If all endpoints OPEN → emit Status=rejected, FailureCategory=rpc_circuit_open. NO retry.
+  4. Otherwise: re-sign with fresh blockhash on the new endpoint, increment attempts counter.
+```
+
+Endpoint rotation is **per-attempt**, not per-execution: a single `ExecutionID` may submit to up to 3 different endpoints across its retry budget. Each submission records a row in `solana_signatures` keyed by signature, ensuring no double-spend at the wallet level (signature uniqueness is enforced by the Solana network itself).
+
+#### 7.3.5 Failure Classification (Required Field)
+
+Every emitted `ExecutionResultDTO` for `chain="solana"` MUST carry `FailureCategory ∈` the authoritative enum in `docs/architecture.md` § 3.11.10.8:
+
+```
+blockhash_expired | simulation_failure | rpc_timeout | rpc_circuit_open |
+program_error    | compute_oom        | leader_skip | confirmation_timeout
+```
+
+Layer 10 Learning Engine groups Solana cohorts by `FailureCategory` for adaptive threshold updates. Unknown / empty `FailureCategory` for non-confirmed Solana executions is a **bug** and fails Phase 7 exit criteria.
+
+### 7.4 Execution Router Integration (Layer 8)
+
+A thin router replaces the current `internal/workers/run_execution.go` direct call to EVM execution:
+
+```go
+// internal/modules/execution/router.go (NEW)
+package execution
+
+import (
+    "context"
+    "errors"
+    "crypto-sniping-bot/contracts"
+)
+
+var ErrUnsupportedChain = errors.New("execution: unsupported chain")
+
+type Router struct {
+    evm    EVMExecutor
+    solana SolanaExecutor
+}
+
+func (r *Router) Execute(ctx context.Context, alloc contracts.AllocationDTO) (contracts.ExecutionResultDTO, error) {
+    switch alloc.Chain {
+    case "eth", "bsc":
+        return r.evm.Execute(ctx, alloc)
+    case "solana":
+        return r.solana.Execute(ctx, alloc)
+    default:
+        return contracts.ExecutionResultDTO{}, ErrUnsupportedChain
+    }
+}
+```
+
+**Routing invariants:**
+
+- Routing is the **only** chain-aware logic in Layer 8.
+- Both branches receive the same `AllocationDTO` and return the same `ExecutionResultDTO` shape.
+- `cmd/server.go` registers the router as the `execution_worker` consumer of `allocation_event`.
+- The EVM execution module is **untouched** by this change — only `run_execution.go` is rewired.
+
+### 7.5 Testing
+
+**Unit tests:**
+
+- `ingestion_solana_test.go` — fixture Solana logs (Pump.fun create, Raydium swap) → deterministic `MarketDataDTO` with `EventID` matching `SHA256("solana"||sig||idx)[:16]`.
+- `execution_solana_test.go` — mocked RPC client; verifies tx build, signing, confirmation polling, blockhash expiry retry.
+- `router_test.go` — table-driven test asserts routing for `eth | bsc | solana` and `ErrUnsupportedChain` for unknown chains.
+
+**Integration tests:**
+
+- Solana devnet end-to-end: feed live `logsSubscribe` → emit `market_data_event` → full pipeline → Solana devnet swap confirmed → `execution_event` with `Status="confirmed"`.
+- Replay determinism: replay fixture Solana logs twice → bit-for-bit identical `events` rows (verified via `EventID`).
+- EVM regression: Phase 2 testnet trade replay → identical output (no regression from router introduction).
+
+**Failure scenarios:**
+
+- Blockhash expiry mid-flight → retry with new blockhash; if still failing, `FailureCategory="blockhash_expired"`, `Status="dropped"`.
+- Solana RPC outage → circuit breaker opens; `execution_event` carries `Status="rejected"`, `RejectReason="rpc_circuit_open"`.
+- Compute-unit OOM → `Status="reverted"`, `FailureCategory="compute_oom"`.
+- Cross-market contamination test: synthetic test asserts that no symbol from `internal/modules/ingestion_solana/` is referenced by `internal/modules/ingestion/`, and vice versa (import-graph guard).
+
+### 7.6 Migration — `20260101000007_solana_tables.sql`
+
+Adds Solana-specific operational tables. **Does not modify** any existing table.
+
+```sql
+CREATE TABLE solana_rpc_endpoint_state (
+    endpoint_url        TEXT PRIMARY KEY,
+    state               TEXT NOT NULL DEFAULT 'closed',  -- closed|open|half_open
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_failure_at     TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE solana_signatures (
+    signature           TEXT PRIMARY KEY,                -- base58 tx signature
+    execution_id        TEXT NOT NULL,                   -- FK to executions.execution_id
+    wallet_pubkey       TEXT NOT NULL,
+    slot                BIGINT,
+    commitment          TEXT,                            -- processed|confirmed|finalized
+    status              TEXT NOT NULL,                   -- confirmed|reverted|dropped|failed
+    submitted_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at        TIMESTAMPTZ
+);
+CREATE INDEX idx_solana_signatures_execution_id ON solana_signatures (execution_id);
+
+CREATE TABLE solana_ingestion_watermark (
+    chain               TEXT PRIMARY KEY,                -- always 'solana' (single row)
+    slot                BIGINT NOT NULL,                 -- highest persisted slot (monotonic)
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Watermark advance MUST be monotonic; the adapter rejects any UPDATE where new_slot < current_slot.
+
+CREATE TABLE solana_endpoint_health (
+    endpoint_url        TEXT PRIMARY KEY,
+    p95_latency_ms      INTEGER NOT NULL DEFAULT 0,
+    error_rate_60s      REAL NOT NULL DEFAULT 0.0,       -- 0.0 .. 1.0
+    success_count_60s   INTEGER NOT NULL DEFAULT 0,
+    failure_count_60s   INTEGER NOT NULL DEFAULT 0,
+    last_success_at     TIMESTAMPTZ,
+    region              TEXT,                            -- e.g. 'ap-southeast-1'
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+The `executions` table from Phase 2 is reused; `executions.tx_hash` stores the Solana signature when `chain='solana'`.
+
+### Adapter Calls (Phase 7 additions — additive)
+
+```
+adapter.UpsertSolanaEndpointState(ctx, url, state, failures)         // circuit breaker per endpoint
+adapter.GetSolanaEndpointState(ctx, url)                             // pre-call gate
+adapter.InsertSolanaSignature(ctx, sig, execID, wallet, slot, ...)   // idempotent ON CONFLICT DO NOTHING
+adapter.UpdateSolanaSignatureStatus(ctx, sig, commitment, status)    // confirmation tracking
+
+// Watermark + health (production-grade hardening)
+adapter.UpsertIngestionWatermark(ctx, chain="solana", slot)          // MONOTONIC; rejects regressions
+adapter.GetIngestionWatermark(ctx, chain="solana") (slot, error)     // resume point on reconnect
+adapter.UpsertSolanaEndpointHealth(ctx, url, p95_ms, err_rate, ...)  // dynamic routing input
+adapter.ListSolanaEndpointsRanked(ctx) ([]EndpointHealth, error)     // priority + health-sorted
+```
+
+**`AllocateNonce` and `ReconcileNonce` are NEVER called** for `chain="solana"`. Callers gate on `chain ∈ {eth, bsc}`. See `docs/db_adapter_spec.md` § 2 for the EVM-only contract.
+
+### 7.7 RPC Provider Strategy (Production-Grade)
+
+This subsection is normative — Phase 7 MUST satisfy all rules below. See `docs/architecture.md` § 3.11.10 for the architectural commitments.
+
+#### 7.7.1 Provider Set (Minimum 2)
+
+Phase 7 ships with at least **2 independent Solana RPC providers** to ensure failover capacity. A single-provider configuration is a Phase 7 exit-criteria failure.
+
+| Slot          | Role                     | Independence Requirement                                                     |
+| ------------- | ------------------------ | ---------------------------------------------------------------------------- |
+| `priority: 1` | Primary (active default) | Must be a Tier-1 provider (Helius, Triton, QuickNode, Jito-RPC, GenesysGo)   |
+| `priority: 2` | Fallback                 | MUST be a different operator from the primary                                |
+| `priority: 3` | Tertiary (optional)      | Recommended for production; required if `cfg.solana.providers_required >= 3` |
+
+#### 7.7.2 Region Awareness
+
+```
+endpoint.region (config) → matched against cfg.solana.preferred_region
+Selection: prefer endpoints with region == preferred_region; tiebreak by priority + latency.
+Operator deployment region is set in cfg.solana.preferred_region (e.g., "ap-southeast-1" for Jakarta/Singapore).
+```
+
+A region mismatch does **not** disqualify an endpoint — it only deprioritizes it. If all preferred-region endpoints are OPEN, the worker falls through to other regions.
+
+#### 7.7.3 Health Scoring
+
+The health score for endpoint `e` is computed every 5 s from the rolling 60 s window:
+
+```
+score(e) = w_lat * latency_score(e)
+        + w_err * (1 - error_rate(e))
+        + w_succ * success_rate(e)
+        + w_region * region_match(e)
+
+where:
+  latency_score(e) = clamp(1 - p95_ms(e) / cfg.solana.latency_normalizer_ms, 0, 1)
+  error_rate(e)    = failures_60s / (successes_60s + failures_60s)
+  success_rate(e)  = successes_60s / max(1, attempts_60s)
+  region_match(e)  = 1.0 if e.region == cfg.solana.preferred_region else 0.5
+  weights (default): w_lat=0.4, w_err=0.3, w_succ=0.2, w_region=0.1
+```
+
+Health is persisted to `solana_endpoint_health`. The router queries `adapter.ListSolanaEndpointsRanked(ctx)` which returns endpoints sorted by `(circuit_state == CLOSED) DESC, score DESC, priority ASC`.
+
+#### 7.7.4 Dynamic Routing
+
+```
+Per RPC call (ingestion subscribe, getSignaturesForAddress, sendTransaction, getSignatureStatuses):
+  endpoint = router.PickBest()  // top of ListSolanaEndpointsRanked
+  result, err = endpoint.Call(...)
+  router.RecordOutcome(endpoint, latency, err)
+  if err and circuit-tripping: rotate; retry per call-specific budget
+```
+
+**Determinism note.** Health-based routing introduces non-determinism in _which endpoint_ serves a request, but the _DTO output_ is deterministic by construction:
+
+- `EventID` is content-addressed and independent of endpoint.
+- `MarketDataDTO.RpcEndpoint` records which endpoint observed the event (informational; does not affect downstream layers).
+- Replay does not consult health scores — it consumes the recorded events only.
+
+#### 7.7.5 Provider Set Configuration
+
+`config/chains.yaml`:
+
+```yaml
+chains:
+  solana:
+    preferred_region: "ap-southeast-1" # operator-provided
+    rpc:
+      - url: "wss://primary.helius.example/?api-key=..."
+        priority: 1
+        kind: ws
+        region: "ap-southeast-1"
+      - url: "https://primary.helius.example/?api-key=..."
+        priority: 1
+        kind: http
+        region: "ap-southeast-1"
+      - url: "wss://fallback.triton.example/..."
+        priority: 2
+        kind: ws
+        region: "ap-southeast-1"
+      - url: "https://fallback.triton.example/..."
+        priority: 2
+        kind: http
+        region: "ap-southeast-1"
+      - url: "https://tertiary.quicknode.example/..."
+        priority: 3
+        kind: http
+        region: "us-west-2"
+    health:
+      score_refresh_interval_ms: 5000
+      latency_normalizer_ms: 800
+      latency_failover_threshold_ms: 1500
+      error_rate_failover_threshold: 0.20
+      consecutive_ws_failures_threshold: 3
+      circuit_open_cooldown_ms: 30000
+    providers_required: 2 # exit criteria — fewer = phase fails
+```
+
+### Config Additions
+
+`config/chains.yaml`:
+
+```yaml
+chains:
+  solana: # ADDITIVE — Phase 7
+    chain_id: solana-mainnet-beta
+    rpc_endpoints:
+      - url: wss://solana-mainnet.ws.primary
+        weight: 100
+        kind: ws
+      - url: https://solana-mainnet.rpc.primary
+        weight: 100
+        kind: http
+    programs:
+      - program_id: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 # Raydium V4
+        family: raydium-v4
+      - program_id: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P # Pump.fun
+        family: pumpfun
+    confirmation_commitment: "confirmed"
+    blockhash_refresh_ms: 2000
+    ingestion_backoff:
+      initial_ms: 200
+      max_ms: 30000
+      multiplier: 2.0
+```
+
+`config/execution.yaml`:
+
+```yaml
+execution:
+  solana: # ADDITIVE — Phase 7
+    keypair_pool: ["./keys/sol_1.json", "./keys/sol_2.json"]
+    slippage_cap_bps: 200
+    priority_fee_microlamports: 5000
+    compute_unit_limit: 200000
+    skip_preflight: false
+    confirm_commitment: "confirmed"
+    confirm_timeout_ms: 15000
+    receipt_poll_interval_ms: 400
+    jito_enabled: false
+```
+
+### Failure Handling
+
+| Condition                             | Action                                                                                   |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Solana RPC WS disconnect              | Exponential backoff + endpoint rotation; HTTP polling fallback active during gap         |
+| All Solana endpoints circuit-open     | Halt Solana ingestion; emit `ingestion_halted` system event; **EVM unaffected**          |
+| Borsh decode error on a single log    | Log + skip; increment `solana_decode_error_count`; do NOT halt ingestion                 |
+| Blockhash expired before send         | Refresh blockhash, retry once; on second failure → `FailureCategory="blockhash_expired"` |
+| Compute-unit OOM                      | `Status="reverted"`, `FailureCategory="compute_oom"`; no retry                           |
+| Leader skipped (tx never landed)      | `Status="dropped"`, `FailureCategory="leader_skip"`; idempotent retry by `ExecutionID`   |
+| Cross-market import detected at build | `dependency-analysis` skill check fails → phase rollback                                 |
+
+### Exit Criteria
+
+- [ ] Solana ingestion emits valid `MarketDataDTO` with `Chain="solana"` from at least 2 RPC endpoints
+- [ ] Replay of Solana fixture logs produces bit-for-bit identical `events` rows (deterministic `EventID`)
+- [ ] At least 10 successful Solana **devnet** swaps confirmed end-to-end with full causal chain in `events` table (`market_data_event → … → position_event (exited)`)
+- [ ] Pipeline processes Solana tokens **without modification** to Layers 1–7, 9, 10 (verified by zero diffs to those modules between Phase 6 and Phase 7 commits)
+- [ ] Execution router routes correctly: `eth | bsc → EVM`, `solana → Solana`, unknown → `ErrUnsupportedChain`
+- [ ] Zero EVM regression — full Phase 2 testnet trade replay produces identical output before/after Phase 7
+- [ ] Zero cross-market import: `internal/modules/ingestion/` does not reference `*_solana` packages and vice versa
+- [ ] `AllocateNonce` is never called when `alloc.Chain == "solana"` (verified by integration test counter)
+- [ ] Kill switch (Phase 6) halts Solana entries identically to EVM entries
+- [ ] Capital envelope (Phase 6) caps total exposure across `eth | bsc | solana` simultaneously
+- [ ] `go test ./internal/modules/ingestion_solana/... ./internal/modules/execution_solana/... ./internal/modules/execution/...` passes
+- [ ] Zero `database/` imports anywhere under `internal/modules/ingestion_solana/` or `internal/modules/execution_solana/`
+- [ ] Zero SQL strings anywhere under `internal/modules/ingestion_solana/` or `internal/modules/execution_solana/`
+
+#### Production-Grade Hardening Exit Criteria (Section G)
+
+- [ ] **Deterministic replay** — replay of a 1-hour Solana fixture produces bit-for-bit identical `EventID` set on two separate runs (no time, no random, no health-score leakage)
+- [ ] **Bounded retries** — chaos test injects send failures; ZERO `ExecutionID` makes more than 5 RPC `sendTransaction` attempts
+- [ ] **Endpoint failover** — kill primary RPC; the worker rotates to fallback within `cfg.solana.consecutive_ws_failures_threshold` failures (default 3) AND continues emitting events
+- [ ] **Watermark monotonicity** — adapter integration test attempts `UpsertIngestionWatermark(slot=N-1)` after `slot=N`; the call is rejected with `ErrWatermarkRegression`
+- [ ] **EventID dedup across endpoints** — primary + fallback simultaneously observe the same signature; the `events` table contains exactly **one** row for that `(signature, instruction_index)` pair
+- [ ] **Gap recovery correctness** — disconnect WS for 60 s, reconnect; `getSignaturesForAddress` replays the gap and downstream layers see no missing events versus a control run with no disconnect
+- [ ] **Provider set ≥ 2** — `len(cfg.solana.rpc) >= cfg.solana.providers_required` enforced at boot; otherwise process refuses to start with a clear error
+- [ ] **Latency-aware gate** — synthetic latency injection (p95 = 2000 ms) causes oversized allocations to be rejected with `RejectReason="latency_degraded_size_cap"` while small allocations are downsized via the Capital Engine envelope
+- [ ] **FailureCategory completeness** — every non-confirmed Solana `ExecutionResultDTO` carries a `FailureCategory` value from the §3.11.10.8 enum (assertion in execution integration test)
+- [ ] **Backpressure correctness** — synthetic burst at `5x publish_buffer_size`; pool-init events have ZERO drops; untracked-swap drops are observable in `solana_ingestion_drops_total`
+
+---
+
+# Phase 8 — Final Production Hardening
+
+> **Goal:** Lock the determinism + exactly-once + failure-safety contract of `docs/architecture.md` § 4.10. Phase 8 is mandatory before any mainnet capital is routed. Phase 8 changes are **additive** — they do not modify Phase 0–7 module logic; they add a single migration, a set of adapter methods, and worker discipline.
+
+## 8.1 Migration — `20260101000012_production_hardening.sql`
+
+```sql
+-- Event ordering (§ 4.10.A)
+ALTER TABLE events
+    ADD COLUMN logical_order_key BYTEA NOT NULL DEFAULT '\x00'::bytea,
+    ADD COLUMN partition_key      INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN retry_count        INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN processed          BOOLEAN NOT NULL DEFAULT false;
+
+CREATE INDEX idx_events_dispatch ON events
+    (chain, consumer, processed, partition_key, logical_order_key);
+
+-- Backfill for any pre-existing rows uses (chain, tx_hash/signature, log_index/instruction_index).
+-- The default '\x00' is safe because pre-existing rows are already processed.
+
+-- DLQ (§ 4.10.C)
+CREATE TABLE dead_letter_events (
+    event_id          TEXT PRIMARY KEY,
+    chain             TEXT NOT NULL,
+    consumer          TEXT NOT NULL,
+    reason            TEXT NOT NULL,
+    error_message     TEXT,
+    retry_count       INTEGER NOT NULL,
+    first_failed_at   TIMESTAMPTZ NOT NULL,
+    last_failed_at    TIMESTAMPTZ NOT NULL,
+    moved_to_dlq_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    payload_snapshot  JSONB,
+    trace_id          TEXT NOT NULL,
+    correlation_id    TEXT NOT NULL,
+    causation_id      TEXT,
+    version_id        TEXT NOT NULL
+);
+CREATE INDEX idx_dlq_consumer_reason ON dead_letter_events (consumer, reason, moved_to_dlq_at);
+
+-- Exactly-once execution lock (§ 4.10.D) — `executions.execution_id` is already PK
+-- in 20260101000003_trading_tables.sql; no schema change needed. Adapter
+-- enforces ON CONFLICT DO NOTHING via ClaimExecution.
+
+-- Position consistency (§ 4.10.E)
+ALTER TABLE positions
+    ADD COLUMN source_execution_id TEXT,
+    ADD CONSTRAINT positions_source_execution_id_unique UNIQUE (source_execution_id);
+CREATE INDEX idx_positions_open_for_reconciliation ON positions (status) WHERE status = 'open';
+
+-- Latency feedback loop (§ 4.10.F)
+CREATE TABLE latency_events (
+    id                          BIGSERIAL PRIMARY KEY,
+    execution_id                TEXT NOT NULL,
+    chain                       TEXT NOT NULL,
+    endpoint                    TEXT NOT NULL,
+    version_id                  TEXT NOT NULL,
+    decision_to_send_ms         INTEGER NOT NULL,
+    send_to_first_observe_ms    INTEGER NOT NULL,
+    first_observe_to_confirm_ms INTEGER NOT NULL,
+    total_ms                    INTEGER NOT NULL,
+    outcome                     TEXT NOT NULL,           -- confirmed|reverted|dropped|timeout
+    observed_at                 TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_latency_window ON latency_events (chain, endpoint, observed_at);
+
+-- Circuit breaker / kill switch (§ 4.10.H)
+CREATE TABLE system_state (
+    key          TEXT PRIMARY KEY,                       -- e.g. 'halt_status'
+    value        JSONB NOT NULL,
+    reason       TEXT,
+    operator     TEXT,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Reconciliation log (§ 4.10.E.2)
+CREATE TABLE reconciliation_events (
+    id              BIGSERIAL PRIMARY KEY,
+    position_id     TEXT NOT NULL,
+    db_amount       NUMERIC(78, 0) NOT NULL,
+    onchain_amount  NUMERIC(78, 0) NOT NULL,
+    action          TEXT NOT NULL,                       -- adjusted|closed|noop
+    reason          TEXT NOT NULL,
+    observed_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ── Stage 4 hardening (architecture § 4.11) ──────────────────
+
+-- Partition leases (§ 4.11.B)
+CREATE TABLE partition_leases (
+    chain         TEXT NOT NULL,
+    consumer      TEXT NOT NULL,
+    partition_key INTEGER NOT NULL,
+    worker_id     TEXT NOT NULL,
+    leased_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at    TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (chain, consumer, partition_key)
+);
+CREATE INDEX idx_partition_leases_worker ON partition_leases (chain, consumer, worker_id);
+
+-- Crash-safe recovery (§ 4.11.C) — execution_attempts journal
+CREATE TABLE execution_attempts (
+    id              BIGSERIAL PRIMARY KEY,
+    execution_id    TEXT NOT NULL,
+    attempt_number  INTEGER NOT NULL,
+    tx_hash         TEXT,
+    status          TEXT NOT NULL,                       -- reserved|sent|confirmed|reverted|lost
+    nonce           BIGINT,
+    gas_price_wei   NUMERIC(78, 0),
+    sent_at         TIMESTAMPTZ,
+    observed_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (execution_id, attempt_number)
+);
+CREATE INDEX idx_attempts_in_flight ON execution_attempts (status) WHERE status IN ('reserved','sent');
+
+-- Reorg handling (§ 4.11.D)
+CREATE TABLE reorg_events (
+    chain          TEXT NOT NULL,
+    old_block      BIGINT NOT NULL,
+    new_block      BIGINT NOT NULL,
+    detected_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    depth          INTEGER NOT NULL,
+    affected_count INTEGER NOT NULL,
+    PRIMARY KEY (chain, old_block, detected_at)
+);
+
+ALTER TABLE events ADD COLUMN invalidated_at TIMESTAMPTZ;
+CREATE INDEX idx_events_invalidated ON events (invalidated_at) WHERE invalidated_at IS NOT NULL;
+
+ALTER TABLE executions
+    ADD COLUMN confirmation_status TEXT NOT NULL DEFAULT 'confirmed',
+    ADD COLUMN block_number        BIGINT;
+-- Values: confirmed | reorg_pending | reorged_out | reorg_mutation
+
+ALTER TABLE positions
+    ADD COLUMN entry_execution_id TEXT;
+-- positions.status enum extended with: 'uncertain' | 'void'
+
+-- Evaluation invariant (§ 4.11.E)
+CREATE TABLE evaluation_invariant (
+    execution_id     TEXT PRIMARY KEY,
+    has_evaluation   BOOLEAN NOT NULL DEFAULT false,
+    deadline_at      TIMESTAMPTZ NOT NULL,
+    completed_at     TIMESTAMPTZ
+);
+CREATE INDEX idx_eval_missing ON evaluation_invariant (deadline_at) WHERE has_evaluation = false;
+
+-- Backpressure (§ 4.11.F)
+CREATE TABLE ingestion_drops (
+    id            BIGSERIAL PRIMARY KEY,
+    chain         TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    token_address TEXT,
+    score         NUMERIC(10, 4),
+    dropped_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_drops_window ON ingestion_drops (chain, dropped_at);
+```
+
+> All schema additions are additive. Existing tables receive `ADD COLUMN` with safe defaults. No `DROP`, no `ALTER COLUMN TYPE`. The migration is reversible by dropping the new tables and columns; the application is forward-compatible during the rolling rollout window.
+
+## 8.2 Adapter Methods (additive)
+
+See `docs/db_adapter_spec.md` § 2 — the "Production Hardening" block lists `ClaimNextEvents`, `IncrementEventRetry`, `MoveToDLQ`, `ClaimExecution`, `UpsertPositionFromExecution`, `ListOpenPositionsForReconciliation`, `AdjustPositionAmount`, `ClosePositionForced`, `InsertLatencyEvent`, `GetLatencyProfile`, `PromoteStrategyVersion`, `DrainAndCheckPipelineIdle`, `SetSystemHalt`, `IsSystemHalted`, `ComputeStateHash`, `RequeueFromDLQ`, `ListDLQ`.
+
+## 8.3 Worker Discipline
+
+See `docs/orchestrator_spec.md` § 11. Every consumer worker MUST:
+
+1. Use `ClaimNextEvents` with strict `logical_order_key ASC` ordering
+2. Process within its assigned partition only (`HASHTEXT(token_address) % NumWorkers == workerID`)
+3. Route failures to DLQ per the retry policy (5 transient, 3 application, 0 determinism)
+4. Layer 8 only: gate every submission on `ClaimExecution` AND `IsSystemHalted`
+5. Layer 8 only: emit a `latency_event` for **every** `ExecutionResultDTO` (success and failure)
+
+## 8.4 New Reconciliation Worker
+
+```go
+// internal/workers/run_reconciliation.go (NEW)
+func RunReconciliation(ctx context.Context, adp database.Adapter, rpc RPCClient, cfg ReconCfg) {
+    ticker := time.NewTicker(cfg.IntervalMs * time.Millisecond)
+    defer ticker.Stop()
+    for {
+        select {
+        case <-ctx.Done(): return
+        case <-ticker.C:
+            positions, _ := adp.ListOpenPositionsForReconciliation(ctx)
+            for _, p := range positions {
+                onchain, err := rpc.GetTokenBalance(ctx, p.WalletAddress, p.TokenAddress, p.Chain)
+                if err != nil { continue }
+                if !equalsWithinTolerance(p.AmountRaw, onchain, cfg.ToleranceBps) {
+                    if onchain.IsZero() { adp.ClosePositionForced(ctx, p.PositionID, "onchain_zero") }
+                    else                { adp.AdjustPositionAmount(ctx, p.PositionID, onchain.String(), "reconciliation") }
+                }
+            }
+        }
+    }
+}
+```
+
+The reconciliation worker is **non-destructive** (per § 4.10.E.2) and emits a `reconciliation_event` for every adjustment.
+
+## 8.5 Replay Validation in CI
+
+```yaml
+# .github/workflows/replay-validation.yml
+name: replay-validation
+on: [pull_request, push]
+jobs:
+  replay:
+    steps:
+      - run: ./scripts/run_replay_validation.sh
+        # 1. Spin up Postgres
+        # 2. Apply migrations
+        # 3. Load fixture event set (replay: prefix)
+        # 4. Run pipeline to completion
+        # 5. sniper snapshot --output=H_replay.txt
+        # 6. diff H_replay.txt fixtures/expected_state_hash.txt
+        # 7. Fail on mismatch
+```
+
+A green replay validation is a hard merge gate to `main`.
+
+## 8.6 Exit Criteria
+
+- [ ] **Ordering invariant** — integration test: out-of-order publish (event K+1 inserted before K) → consumer waits for K and processes in K, K+1 order
+- [ ] **Partition isolation** — chaos test: 4 workers process 100k events; assertion: every `token_address` is touched by exactly one worker
+- [ ] **DLQ correctness** — chaos test: inject 5% transient failures and 1% application failures; assertions: transient events that recover never reach DLQ; application failures land in DLQ after exactly 3 retries; pipeline never blocks behind a DLQ'd event
+- [ ] **Exactly-once execution** — concurrency test: 10 goroutines call `ClaimExecution` for the same `execution_id` simultaneously; exactly 1 returns `claimed=true`
+- [ ] **Single-position invariant** — concurrency test: same execution_id processed twice; positions table contains exactly 1 row
+- [ ] **Reconciliation non-destructive** — fixture: DB position 1.0 token, on-chain 0.95 token (5% discrepancy); reconciliation adjusts to 0.95 and emits event; no row deletion
+- [ ] **Latency feedback closed** — every `execution_event` is followed by exactly one `latency_event` with the same `execution_id`; `LatencyProfileDTO` for the endpoint includes the new sample within `windowSec`
+- [ ] **Version-mismatch routing** — fixture: emit event with `version_id=v_old` while `v_new` is active; event lands in DLQ with `reason="version_mismatch"`
+- [ ] **Mid-run protection** — attempt to activate a new version while pipeline is mid-flight: `PromoteStrategyVersion` blocks until `DrainAndCheckPipelineIdle` returns true OR returns `ErrDrainTimeout`
+- [ ] **Kill switch persistence** — set halt, restart process, verify halt persists; `Execute` returns `Status="rejected"` until `/resume`
+- [ ] **Replay determinism** — `state_hash(prod) == state_hash(replay)` over a 1h fixture covering EVM + Solana
+- [ ] **Replay CI gate** — `.github/workflows/replay-validation.yml` is green on the merge commit
+
+## 8.7 Stage 4 Exit Criteria (architecture § 4.11)
+
+- [ ] **Pure event-driven** — static analysis: zero call graph edges from `internal/orchestrator/*` to `internal/modules/*/Process` outside boot/shutdown paths
+- [ ] **Partition leases enforced** — concurrency test: 8 workers contending for 4 partitions; exactly one worker holds each partition at any point in time; lease expiry causes deterministic failover
+- [ ] **Crash recovery — confirmed tx** — chaos test: kill process during Phase 2 (between SEND and CONFIRM); restart finds tx via `GetTransactionByHash` and finalizes Phase 3 with no duplicate execution row
+- [ ] **Crash recovery — lost tx** — chaos test: kill process after RPC accepted but tx never landed; after `recovery_grace_sec`, execution is marked `lost` with `FailureCategory='crash_unknown_tx'`
+- [ ] **Crash recovery — reserved-only** — chaos test: kill process after `ClaimExecution` but before SEND; recovery aborts the reservation; the `execution_id` is freed (next attempt with same input succeeds)
+- [ ] **Reorg detection** — fixture: inject parent-hash mismatch at depth 3; `reorg_events` row created; events in `[old_block, head]` are `invalidated_at != NULL`; positions in range are `status='uncertain'`
+- [ ] **Reorg resolution — re-included** — fixture: tx in reorg is re-included in new chain; `confirmation_status` returns to `'confirmed'`; position returns to `'open'`
+- [ ] **Reorg resolution — dropped** — fixture: tx is not in new chain; `confirmation_status='reorged_out'`; position becomes `'void'`; capital is returned (not booked as loss)
+- [ ] **Reorg max-depth halt** — fixture: depth 13 reorg on EVM (max=12) → `SetSystemHalt(reason='reorg_exceeds_max_depth')` fires; trading refuses until `/resume`
+- [ ] **Evaluation coverage SLO** — load test: 1000 executions over 1h; ≥ 999 have a corresponding `evaluation_event` within `deadline_sec`
+- [ ] **Evaluation janitor alerts** — fixture: kill the evaluation worker; janitor emits `level=warn` for missing evals; after 3 cycles emits `level=critical`
+- [ ] **Backpressure pause/resume** — load test: synthetic burst at 60k events; ingestion pauses at 40k unprocessed and resumes at 20k; pool-init events are never dropped
+- [ ] **Drop policy correctness** — load test: buffer full; lowest-score candidate (composite < 0.20) is dropped first; `ingestion_drops_total{reason='buffer_full_score_based'}` increments; high-score events are preserved
+- [ ] **No mid-flight config reload** — runtime test: attempt to apply new strategy version while in-flight events exist; `PromoteStrategyVersion` blocks until drain completes OR returns `ErrDrainTimeout`; no events processed under split-brain config
 
 ---
 

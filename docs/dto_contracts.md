@@ -66,7 +66,7 @@ type MarketDataDTO struct {
     CausationID   string  `json:"causation_id"`    // "" — Layer 0 is root
     VersionID     string  `json:"version_id"`
 
-    Chain         string  `json:"chain"`            // eth | bsc
+    Chain         string  `json:"chain"`            // eth | bsc | solana
     Market        string  `json:"market"`           // e.g., "eth-uniswap-v2"
     BlockNumber   uint64  `json:"block_number"`
     BlockHash     string  `json:"block_hash"`       // 0x-prefixed
@@ -92,13 +92,24 @@ type MarketDataDTO struct {
     Transport       string `json:"transport"`       // websocket | polling | gap_recovery
     ConfirmationDepth uint32 `json:"confirmation_depth"`
     Reorged         bool   `json:"reorged"`
+
+    // Production hardening (architecture § 4.10.A.3) — additive, required.
+    // Canonical encoding (byte-wise sort == semantic sort):
+    //   EVM:    8B BE block_number || 32B tx_hash bytes || 4B BE log_index
+    //   Solana: 8B BE slot          || 64B signature   || 4B BE instruction_index
+    // Workers MUST process events in strict ascending OrderingKey per partition.
+    OrderingKey []byte `json:"ordering_key"`
 }
 ```
 
 - **Source file:** `contracts/market_data.go`
-- **Producer:** `internal/modules/ingestion`
+- **Producer:** `internal/modules/ingestion` (EVM) and `internal/modules/ingestion_solana` (Phase 7, Solana)
 - **Consumer:** `internal/modules/data_quality`
-- **ID rule:** `EventID = SHA256(chain||tx_hash||log_index)[:16]`
+- **ID rule:** `EventID = SHA256(chain||tx_hash||log_index)[:16]` (EVM) or `SHA256("solana"||signature||instruction_index)[:16]` (Solana). Both forms are content-addressable hashes over the chain-natural ordering keys; collisions across chains are statistically negligible because `chain` is part of the hash.
+
+> **Chain-agnostic invariant.** All DTOs are chain-agnostic. The `Chain` field is a free-form string identifier (`eth | bsc | solana`); per-chain interpretation lives in the **consuming module**, not in the DTO. Adding a new chain (e.g. Solana via Phase 7) requires **zero schema changes** to any DTO — only a new value in the `Chain` enumeration and new chain-specific producer/consumer modules. Layers 1–7, 9, 10 MUST never branch on `Chain`. See `docs/architecture.md` § 3.11.
+
+> **Ordering invariant.** `OrderingKey` is the **single** authoritative event-ordering field across the entire pipeline. The `events` table is read with `ORDER BY logical_order_key ASC` — never `created_at`. See `docs/architecture.md` § 4.10.A for the full contract, encoding rules, and the partitioning strategy that pairs with it.
 
 ---
 
@@ -364,7 +375,7 @@ type AllocationDTO struct {
     TokenAddress     string  `json:"token_address"`
     Chain            string  `json:"chain"`
 
-    ExecutionID      string  `json:"execution_id"`        // SHA256(correlation_id)[:16] — idempotency key
+    ExecutionID      string  `json:"execution_id"`        // SHA256(trace_id || version_id || token_address || chain)[:16] — see architecture § 4.10.D.2
     SizeUsd          float64 `json:"size_usd"`
     SizeBaseRaw      string  `json:"size_base_raw"`        // decimal string
     MaxSlippageBps   int32   `json:"max_slippage_bps"`
@@ -709,13 +720,13 @@ Priority  int32  `json:"priority"`      // Higher = processed first. Default 0.
 ### Rules
 
 - **Producer sets `ExpiresAt`** using per-stage TTL from `config/pipeline.yaml`:
-  - `market_data.ttl_seconds`    (default 30)
-  - `data_quality.ttl_seconds`   (default 15)
-  - `feature.ttl_seconds`        (default 10)
-  - `edge.ttl_seconds`           (default 8)
+  - `market_data.ttl_seconds` (default 30)
+  - `data_quality.ttl_seconds` (default 15)
+  - `feature.ttl_seconds` (default 10)
+  - `edge.ttl_seconds` (default 8)
   - `validated_edge.ttl_seconds` (default 5)
-  - `selection.ttl_seconds`      (default 4)
-  - `allocation.ttl_seconds`     (default 3)
+  - `selection.ttl_seconds` (default 4)
+  - `allocation.ttl_seconds` (default 3)
   - Position/Execution/Learning/Evaluation: `""` (no expiry)
 - **Producer sets `Priority`** via `resource_control.ComputePriority(eventType, dto, now)`.
 - Consumers MUST skip any DTO where `ExpiresAt != "" AND parseISO(ExpiresAt) < now()` and emit an `expired_event` instead.
@@ -866,13 +877,13 @@ Promotion/rollback logic in § Phase 5 uses `StrategyStatus` to separate shadow-
 
 ## 8.9 Validation Rule Additions (§ 6)
 
-| Field                             | Rule                                                                                      |
-| --------------------------------- | ----------------------------------------------------------------------------------------- |
-| `ExpiresAt`                       | Empty string OR ISO 8601 UTC with `Z` suffix                                              |
-| `Priority`                        | `int32`, `[0, 10000]` inclusive                                                           |
-| `ExecutionPath`                   | One of `{"public","flashbots","beaverbuild","eden"}`                                       |
-| `SystemStateDTO.Mode`             | One of `{"BALANCED","STRICT","EXPLORATION","DEGRADED","HALTED"}`                           |
-| `StrategyVersion.Status`          | One of `{"draft","shadow","active","deactivated","rolled_back"}`                           |
-| `AllocationDTO.RejectReason`      | One of `{"","per_token_cap","per_cohort_cap","total_exposure","max_concurrent","kill_switch"}` |
+| Field                        | Rule                                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| `ExpiresAt`                  | Empty string OR ISO 8601 UTC with `Z` suffix                                                   |
+| `Priority`                   | `int32`, `[0, 10000]` inclusive                                                                |
+| `ExecutionPath`              | One of `{"public","flashbots","beaverbuild","eden"}`                                           |
+| `SystemStateDTO.Mode`        | One of `{"BALANCED","STRICT","EXPLORATION","DEGRADED","HALTED"}`                               |
+| `StrategyVersion.Status`     | One of `{"draft","shadow","active","deactivated","rolled_back"}`                               |
+| `AllocationDTO.RejectReason` | One of `{"","per_token_cap","per_cohort_cap","total_exposure","max_concurrent","kill_switch"}` |
 
 Adapter rejects writes with out-of-set enum values (`ErrInvalidEnum`).

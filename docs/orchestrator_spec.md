@@ -254,3 +254,262 @@ adapter.close()
 3. **Skip-if-completed** — Pipeline exits early if already done
 4. **Skip-if-processed** — Individual entities skipped if already processed
 5. **Atomic file writes** — Write to temp, then rename
+
+---
+
+## 11. Production Hardening Worker Rules
+
+The orchestrator and the workers it dispatches MUST satisfy the determinism + exactly-once + failure-safety contract defined in `docs/architecture.md` § 4.10. The rules below are normative and apply to every consumer worker (ingestion, data_quality, edge, probability, selection, capital, execution, position, learning).
+
+### 11.1 Event Claim Discipline (§ 4.10.A, § 4.10.B)
+
+Every worker dequeues events using the adapter's `ClaimNextEvents` method:
+
+```
+events = adapter.ClaimNextEvents({
+    Chain:          chain,
+    Consumer:       worker.Consumer,
+    WorkerID:       worker.ID,           // 0..NumWorkers-1
+    NumWorkers:     cfg.workers.num,
+    Limit:          cfg.workers.batch_size,
+})
+// Adapter implementation:
+//   SELECT ... FROM events
+//   WHERE chain=$1 AND consumer=$2 AND processed=false
+//     AND (HASHTEXT(token_address) % $5) = $4   -- partition shard
+//   ORDER BY logical_order_key ASC               -- NEVER created_at
+//   FOR UPDATE SKIP LOCKED LIMIT $6
+```
+
+Workers MUST process the returned batch in the order delivered (already sorted by `logical_order_key`). Out-of-order processing within a partition is FORBIDDEN.
+
+### 11.2 Single-Worker-per-Token Lifecycle (§ 4.10.B.2)
+
+Partitioning by `HASHTEXT(token_address) % NumWorkers` guarantees the same token's events always land on the same worker. Operators MUST NOT rebalance partitions while events are in flight; rebalancing requires the drain procedure of § 11.5.
+
+### 11.3 DLQ Handling (§ 4.10.C)
+
+```
+result, err = handler.Process(event)
+switch classify(err) {
+case nil:
+    adapter.MarkProcessed(event.event_id, consumer)
+case Transient:
+    if retry := adapter.IncrementEventRetry(event.event_id, consumer); retry > 5 {
+        adapter.MoveToDLQ(...)
+    }
+    // event remains in events table; SKIP LOCKED returns it after backoff
+case Application:
+    if retry := adapter.IncrementEventRetry(event.event_id, consumer); retry > 3 {
+        adapter.MoveToDLQ(...)
+    }
+case Determinism:   // version mismatch, ordering gap
+    adapter.MoveToDLQ(event, consumer, "determinism_violation", err.Error())
+    // retry budget = 0; never retried
+}
+```
+
+After `MoveToDLQ` returns, the partition advances — DLQ does NOT block forward progress.
+
+### 11.4 Exactly-Once Execution Claim (§ 4.10.D)
+
+Every Layer 8 worker MUST gate submission on `ClaimExecution`:
+
+```
+claimed, err := adapter.ClaimExecution(allocDTO)
+if err != nil      { return err }
+if !claimed        { /* another worker owns this exec_id; skip silently */ return nil }
+// proceed to RPC submission
+```
+
+In-memory locks (sync.Mutex, channel-based, etc.) are advisory only — the adapter is the **single** authoritative dedup boundary. A worker that submits without a successful `ClaimExecution` is a contract violation.
+
+### 11.5 Strategy Version Activation (§ 4.10.G.2)
+
+Mid-run config changes are FORBIDDEN. A new strategy version activates only via the orchestrator's drain procedure:
+
+```
+1. orchestrator.SuspendIngestion()
+2. adapter.DrainAndCheckPipelineIdle(timeoutSec=cfg.drain.timeout_sec)
+3. adapter.PromoteStrategyVersion(newVersionID, drainTimeoutSec)
+   // atomically marks old version superseded + new version active
+4. orchestrator.ResumeIngestion()
+```
+
+Workers reading events with `event.version_id != active.version_id` route them to DLQ with `reason="version_mismatch"` (§ 11.3).
+
+### 11.6 Kill Switch Gate (§ 4.10.H)
+
+Every Layer 8 execution path MUST check the kill switch before submission:
+
+```
+halted, reason, _ := adapter.IsSystemHalted(ctx)
+if halted {
+    emit ExecutionResultDTO{Status: "rejected", FailureCategory: "system_halted", RejectReason: reason}
+    return
+}
+```
+
+Halt state is persistent across process restart. Resume requires explicit operator command (`/resume`); the orchestrator MUST NOT auto-resume on startup.
+
+### 11.7 Replay Determinism (§ 4.10.I)
+
+The orchestrator MUST NOT consume any non-deterministic input that is not already encoded in the event stream:
+
+- No `time.Now()` for DTO field values; use `event.BlockTimestamp` or `event.IngestedAt`.
+- No `rand.*` anywhere on the production path.
+- No environment variable reads after startup; config is captured into `StrategyVersion` snapshot at activation.
+- Worker count and partition count are config-time constants for any given pipeline run.
+
+CI runs replay validation (snapshot diff per § 4.10.I.2) on every merge to `main`. A green replay is a hard merge gate.
+
+---
+
+## 12. Stage 4 Hardening (architecture § 4.11)
+
+### 12.1 Pure Event-Driven Execution (§ 4.11.A)
+
+The orchestrator is a **supervisor**, not a sequencer. Boot sequence:
+
+```
+1. ApplyMigrations()
+2. CrashRecovery()                           // § 12.3
+3. LoadActiveStrategyVersion()
+4. CheckSystemHalt()                         // refuse to start workers if halted
+5. Spawn worker pools (one consumer per layer × cfg.workers.num)
+6. Spawn reconciliation worker
+7. Spawn evaluation janitor
+8. Spawn backpressure monitor
+9. Block on signal handler
+```
+
+The orchestrator MUST NOT call any module's `Process()` function during steady state. All stage transitions are mediated by the event bus. Any direct module invocation outside boot/shutdown is a contract violation.
+
+### 12.2 Partition Lease Lifecycle (§ 4.11.B)
+
+Each worker on startup:
+
+```
+parts, _ := adapter.ClaimPartitions(ctx, chain, consumer, workerID, cfg.workers.partitions_per_worker, cfg.workers.lease_ttl_sec)
+go func() {
+    t := time.NewTicker(cfg.workers.lease_ttl_sec / 3 * time.Second)
+    for { select {
+        case <-ctx.Done(): adapter.ReleasePartitions(...); return
+        case <-t.C:        adapter.RenewPartitions(...)
+    } }
+}()
+// Use only `parts` for ClaimNextEvents.
+```
+
+A worker that fails to renew its lease MUST stop processing immediately and re-claim from scratch. The orchestrator monitors lease coverage: if any partition is unclaimed for > `cfg.workers.unclaimed_alert_sec`, emit `system_event{level=critical, reason='partition_unclaimed'}`.
+
+### 12.3 Crash-Safe Recovery (§ 4.11.C)
+
+Recovery runs **before** worker pools start:
+
+```
+inFlight := adapter.ListInFlightExecutions(ctx)
+for _, ex := range inFlight {
+    switch {
+    case ex.HasTxHash:
+        receipt := rpc.GetTransactionByHash(ex.Chain, ex.TxHash)
+        if receipt != nil:
+            adapter.FinalizeExecution(ctx, ex.ID, receipt)
+        elif now - ex.SentAt > cfg.execution.recovery_grace_sec:
+            adapter.MarkExecutionLost(ctx, ex.ID, "tx_not_found_after_grace")
+        else:
+            // leave as in_flight; re-poll on next recovery cycle (worker startup blocks)
+            requeue(ex)
+    case !ex.HasTxHash:
+        // reserved but never sent
+        adapter.AbortReservedExecution(ctx, ex.ID, "crash_before_send")
+    }
+}
+emit system_event{level=info, reason='crash_recovery_complete', count=len(inFlight)}
+```
+
+Workers MUST NOT start until recovery returns. `recovery_grace_sec` default = `2 × cfg.execution.receipt_timeout_sec`.
+
+### 12.4 Reorg Detection & Cascade (§ 4.11.D)
+
+Ingestion workers detect reorgs by parent-hash mismatch. On detection:
+
+```
+adapter.RecordReorg(chain, oldBlock, newBlock, depth)
+if depth > cfg.reorg.max_depth:
+    adapter.SetSystemHalt(true, "reorg_exceeds_max_depth", "automatic")
+    return
+adapter.InvalidateBlockRange(chain, oldBlock-depth, head)
+adapter.MarkPositionsUncertain(chain, oldBlock-depth, "reorg")
+emit system_event{level=warn, reason='reorg', depth, old_block, new_block}
+```
+
+After `cfg.reorg.settle_blocks` confirmations on the new head, a reorg-resolution worker:
+
+```
+for _, ex := range adapter.ListReorgPendingExecutions(chain) {
+    receipt := rpc.GetTransactionByHash(chain, ex.TxHash)
+    outcome := classifyReorgOutcome(receipt, ex)   // confirmed | dropped | mutated
+    adapter.ReResolveExecutionAfterReorg(ex.ID, ex.TxHash, outcome)
+}
+```
+
+The position monitoring loop (§ Layer 9) MUST skip exits for positions in `status='uncertain'` until they resolve. A reorg-uncertain position never converts to a forced loss without on-chain confirmation.
+
+### 12.5 Evaluation Coverage Invariant (§ 4.11.E)
+
+Atomic to every `execution_event` emission:
+
+```
+BEGIN TX
+INSERT INTO events (..., type='execution_event', ...);
+adapter.RecordExecutionForEvaluation(executionID, cfg.evaluation.deadline_sec);
+COMMIT;
+```
+
+The evaluation worker calls `adapter.MarkEvaluationDone(executionID)` after consuming the event and producing its `evaluation_event`.
+
+The janitor worker (orchestrator-spawned) runs every `cfg.evaluation.janitor_interval_sec`:
+
+```
+missing := adapter.ListMissingEvaluations(ctx)
+for _, m := range missing {
+    emit system_event{level=warn, reason='evaluation_missing', execution_id=m.ID, age_sec=m.AgeSec}
+}
+if same execution_id missing for 3 consecutive cycles:
+    emit system_event{level=critical, reason='evaluation_worker_stalled'}
+```
+
+Coverage SLO: ≥ 99.9% over any 1h window. Below SLO triggers `cfg.alerts.evaluation_coverage_breach` Telegram alert.
+
+### 12.6 Backpressure Control (§ 4.11.F)
+
+The backpressure monitor (orchestrator-spawned) polls every `cfg.backpressure.poll_interval_sec`:
+
+```
+for each (chain, consumer):
+    n := adapter.GetUnprocessedCount(chain, consumer)
+    if n > cfg.events.ingest_pause_threshold AND chain not paused:
+        ingestion[chain].Pause("backpressure")
+        emit system_event{level=warn, reason='backpressure_pause', consumer, count=n}
+    elif n < cfg.events.ingest_resume_threshold AND chain paused:
+        ingestion[chain].Resume()
+        emit system_event{level=info, reason='backpressure_resume', consumer, count=n}
+```
+
+Ingestion drop policy on full publish buffer:
+
+```
+if buffer.full():
+    if policy == 'score_based':
+        candidate := buffer.findMinScore(features=cfg.backpressure.drop_priority_features)
+        if candidate.score < cfg.backpressure.drop_min_score:
+            buffer.evict(candidate)
+            adapter.RecordDrop(chain, "buffer_full_score_based", candidate.token, candidate.score)
+        else:
+            block until space (apply backpressure to source RPC)
+    if policy == 'tail':
+        buffer.evictNewest(); adapter.RecordDrop(...)
+```
+
+Pool-init events MUST bypass the drop policy. A dropped pool-init is a hard alert (`level=critical`).

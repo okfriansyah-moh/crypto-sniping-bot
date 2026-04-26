@@ -254,7 +254,7 @@ Phases can run simultaneously when they own **different files**:
 
 ### Canonical Phase Groups (Crypto-Sniping-Bot)
 
-Quick reference — all 7 phases at a glance. Expand the GROUP sections below for per-subsection detail.
+Quick reference — all 8 phases at a glance. Expand the GROUP sections below for per-subsection detail.
 
 | Phase | Name                                        | Group             | Priority | Parallel?    | Blocks / Requires                 | Key DTOs Produced                                                                                                                           |
 | ----- | ------------------------------------------- | ----------------- | -------- | ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -265,6 +265,7 @@ Quick reference — all 7 phases at a glance. Expand the GROUP sections below fo
 | **4** | Signal Quality                              | B — Parallel-safe | P1.5     | ✅ with 3, 5 | Requires Phase 3                  | `ProbabilityEstimateDTO`, `SlippageEstimateDTO`, `LatencyProfileDTO`                                                                        |
 | **5** | Learning Engine                             | B — Parallel-safe | P2       | ✅ with 3, 4 | Requires Phase 4                  | `LearningRecordDTO`                                                                                                                         |
 | **6** | Resource Control, Wallet Sharding & Scaling | C — Final         | P2       | No           | Requires Phase 5 + Group B merged | `SystemStateDTO`                                                                                                                            |
+| **7** | Solana Market Extension                     | D — Market addon  | P2       | No           | Requires Phase 6 merged           | — (chain-agnostic; reuses existing DTOs)                                                                                                    |
 
 ---
 
@@ -526,36 +527,73 @@ Files introduced: `internal/resource_control/` (rpc_budget.go, gas_budget.go, co
 
 Exit gate: 10× Phase 2 baseline throughput without unbounded queue growth, p95 latency `< 1500 ms`, exit always processed under full queue (10k+ pending entries synthetic test), wallet sharding deterministic (same token → same wallet), kill switch fires on drawdown threshold, cost dashboards show `cost_per_trade_usd` / `rpc_usage_rps` / `gas_spend_daily_usd`.
 
+---
+
+#### GROUP D — MARKET EXTENSION (runs after Group C)
+
+Adds an additional `(ingestion + execution)` market without touching shared layers. Must run after Phase 6 is merged, validated, and exit criteria met. See [docs/architecture.md § 3.11](architecture.md#311-multi-market-architecture-evm--solana) for the full multi-market contract.
+
+---
+
+##### Phase 7 — Solana Market Extension
+
+**Priority:** P2 | **Requires:** Phase 6 exit gate | **Must run after:** Group C fully merged and validated
+
+| Subsection                | Scope                                                                                           | Key File(s)                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Solana Ingestion          | `logsSubscribe` / `programSubscribe` for Pump.fun + Raydium; Borsh decode; emit `MarketDataDTO` | `internal/modules/ingestion_solana/`                                          |
+| Solana Execution          | ed25519 keypair, instruction builder, `sendTransaction`, signature confirmation                 | `internal/modules/execution_solana/`                                          |
+| Execution Router          | Switch by `AllocationDTO.Chain` → EVM or Solana; only chain-aware component in Layer 8          | `internal/modules/execution/router.go` (NEW)                                  |
+| Solana Workers            | Source ingestion worker + execution router rewire                                               | `internal/workers/run_ingestion_solana.go`, `run_execution.go` (rewired only) |
+| Solana RPC Endpoint State | Per-endpoint circuit breaker for Solana RPCs; isolated from EVM endpoint state                  | migration `000007`, adapter additions                                         |
+| Solana Signature Tracking | Idempotent recording of submitted signatures + confirmation status                              | migration `000007`, adapter additions                                         |
+| Config                    | Additive `chains.yaml::solana` and `execution.yaml::solana` blocks                              | `config/chains.yaml`, `config/execution.yaml`                                 |
+
+**Files introduced:** `internal/modules/ingestion_solana/` (full module), `internal/modules/execution_solana/` (full module), `internal/modules/execution/router.go` (new), `internal/workers/run_ingestion_solana.go` (new), `database/migrations/20260101000007_solana_tables.sql` (new), additive blocks in `config/chains.yaml` and `config/execution.yaml`.
+
+**Files MODIFIED (minimal, scoped):** `internal/workers/run_execution.go` (rewired to call router only — no logic change to EVM path).
+
+**Files NEVER touched by Phase 7:** `contracts/` (DTO schemas), `internal/modules/ingestion/` (EVM ingestion), `internal/modules/data_quality/`, `internal/modules/feature/`, `internal/modules/edge/`, `internal/modules/probability/`, `internal/modules/slippage/`, `internal/modules/selection/`, `internal/modules/capital/`, `internal/modules/position/`, `internal/modules/evaluation/`, `internal/modules/learning/`, EVM execution code paths in `internal/modules/execution/` (Phase 2/6 files), the `database.Adapter` interface (additive methods only).
+
+**Exit gate:** ≥ 10 Solana **devnet** swaps confirmed end-to-end, replay determinism for Solana fixtures, zero EVM regression on full Phase 2 testnet replay, zero cross-market imports (verified by import-graph guard), `AllocateNonce` never invoked when `chain="solana"`. Full criteria in [docs/implementation_roadmap.md § Phase 7 Exit Criteria](implementation_roadmap.md#phase-7--solana-market-extension-p2).
+
+---
+
 **Rules:**
 
 - Group A (Phase 0–2) MUST complete sequentially before any Group B phase starts
 - Group B (Phase 3–5) MAY run in parallel — they own separate `internal/modules/` subdirs
 - Group C (Phase 6) MUST run after all Group B phases are merged and validated
+- Group D (Phase 7) MUST run after Phase 6 is merged and validated; MUST NOT touch EVM ingestion (`internal/modules/ingestion/`), EVM execution code paths (Phase 2/6 files in `internal/modules/execution/`), `contracts/*.go` schemas, or the `database.Adapter` interface (additive methods only)
+- Group D (Phase 7) production-grade hardening (per [docs/architecture.md § 3.11.10](architecture.md#31110-solana-ingestion--execution-guarantees-production-grade)) is mandatory: deterministic replay, `EventID` PK dedup, monotonic ingestion watermark, bounded retries (≤ 5), multi-RPC failover with health scoring, latency-aware execution gate, and the full `FailureCategory` enum on every non-confirmed Solana `ExecutionResultDTO` — these are exit criteria, not optional polish
 - No phase modifies `contracts/` or `database/` without going through the DTO guardian
 - `internal/orchestrator/` is a SHARED file — requires merge validation before any edit
 
 ### File Ownership Matrix
 
-| Path                             | Owner                  | Rule                                          |
-| -------------------------------- | ---------------------- | --------------------------------------------- |
-| `contracts/`                     | LOCKED — additive only | No field removal, no rename                   |
-| `database/`                      | LOCKED — Phase 0 only  | Schema changes via migrations only            |
-| `docs/`                          | READ-ONLY              | No agent may modify                           |
-| `config/`                        | ADDITIVE only          | New keys allowed; existing keys never removed |
-| `internal/modules/dex_ingest/`   | Phase 1                | Exclusive ownership                           |
-| `internal/modules/data_quality/` | Phase 2+4              | Phase 2 skeleton, Phase 4 expands             |
-| `internal/modules/feature/`      | Phase 2+4              | Phase 2 basic, Phase 4 full                   |
-| `internal/modules/edge/`         | Phase 2+4              | Phase 2 single rule, Phase 4 full             |
-| `internal/modules/probability/`  | Phase 4                | Exclusive ownership                           |
-| `internal/modules/slippage/`     | Phase 4                | Exclusive ownership                           |
-| `internal/modules/selection/`    | Phase 2+4              | Phase 2 top-1, Phase 4 top-K                  |
-| `internal/modules/capital/`      | Phase 2+6              | Phase 2 fixed, Phase 6 full sharding          |
-| `internal/modules/execution/`    | Phase 2+6              | Phase 2 basic, Phase 6 full sharding          |
-| `internal/modules/position/`     | Phase 2+5              | Phase 2 TP/SL, Phase 5 adaptive               |
-| `internal/modules/evaluation/`   | Phase 3                | Exclusive ownership                           |
-| `internal/modules/learning/`     | Phase 5                | Exclusive ownership                           |
-| `internal/orchestrator/`         | SHARED                 | Merge validation required before any edit     |
-| `internal/workers/`              | Per-phase              | Each phase owns its own worker file           |
+| Path                                 | Owner                  | Rule                                                                                                                    |
+| ------------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `contracts/`                         | LOCKED — additive only | No field removal, no rename                                                                                             |
+| `database/`                          | LOCKED — Phase 0 only  | Schema changes via migrations only                                                                                      |
+| `docs/`                              | READ-ONLY              | No agent may modify                                                                                                     |
+| `config/`                            | ADDITIVE only          | New keys allowed; existing keys never removed                                                                           |
+| `internal/modules/dex_ingest/`       | Phase 1                | Exclusive ownership                                                                                                     |
+| `internal/modules/data_quality/`     | Phase 2+4              | Phase 2 skeleton, Phase 4 expands                                                                                       |
+| `internal/modules/feature/`          | Phase 2+4              | Phase 2 basic, Phase 4 full                                                                                             |
+| `internal/modules/edge/`             | Phase 2+4              | Phase 2 single rule, Phase 4 full                                                                                       |
+| `internal/modules/probability/`      | Phase 4                | Exclusive ownership                                                                                                     |
+| `internal/modules/slippage/`         | Phase 4                | Exclusive ownership                                                                                                     |
+| `internal/modules/selection/`        | Phase 2+4              | Phase 2 top-1, Phase 4 top-K                                                                                            |
+| `internal/modules/capital/`          | Phase 2+6              | Phase 2 fixed, Phase 6 full sharding                                                                                    |
+| `internal/modules/execution/`        | Phase 2+6+7            | Phase 2 basic, Phase 6 sharding, Phase 7 router only (NEW file `router.go`); EVM execution paths are LOCKED for Phase 7 |
+| `internal/modules/execution_solana/` | Phase 7                | Exclusive ownership — Solana execution                                                                                  |
+| `internal/modules/ingestion/`        | Phase 1                | LOCKED for Phase 7                                                                                                      |
+| `internal/modules/ingestion_solana/` | Phase 7                | Exclusive ownership — Solana ingestion                                                                                  |
+| `internal/modules/position/`         | Phase 2+5              | Phase 2 TP/SL, Phase 5 adaptive                                                                                         |
+| `internal/modules/evaluation/`       | Phase 3                | Exclusive ownership                                                                                                     |
+| `internal/modules/learning/`         | Phase 5                | Exclusive ownership                                                                                                     |
+| `internal/orchestrator/`             | SHARED                 | Merge validation required before any edit                                                                               |
+| `internal/workers/`                  | Per-phase              | Each phase owns its own worker file                                                                                     |
 
 ---
 
@@ -1053,15 +1091,18 @@ and track offset via `consumer_offsets`. Full state is reconstructible from even
 The following failure modes can occur during parallel development. Each has a defined
 detection method and resolution path.
 
-| Failure Mode                | Description                                                           | Detection                                                | Resolution                                                               |
-| --------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **DTO Drift**               | A module uses fields not in `contracts/` or uses stale types          | `dto-guardian` reports mismatches                        | Agent fixes contract or module; additive only                            |
-| **Module Collision**        | Two parallel phases write to the same `internal/modules/<name>/` file | Git merge conflict on merge                              | `conflict-resolver` agent + union merge strategy                         |
-| **Lifecycle Race**          | Two workers transition a token simultaneously without CAS             | Duplicate processing in logs or corrupted position state | Fix transition to use CAS + SKIP LOCKED; replay from event log           |
-| **Merge Corruption**        | A phase's module silently breaks an earlier phase after union merge   | Global validation quality gates fail post-merge          | `refactor` agent with full quality gate context; re-run gates            |
-| **Adapter Signature Break** | A phase changes `database/adapter.go` interface during parallel work  | Compile error in other phases                            | Sequential fix: finish and merge the changing phase before others        |
-| **Event Type Rename**       | An event type string is renamed in one branch                         | Consumer worker silently stops processing in merged code | `integration` agent detects; revert rename, use additive versioning      |
-| **Orchestrator Conflict**   | Two phases both modify `internal/orchestrator/orchestrator.go`        | Git merge conflict                                       | `conflict-resolver` agent; union merge preserves all stage registrations |
+| Failure Mode                         | Description                                                                                                                                                                                                                   | Detection                                                                                                                                                               | Resolution                                                                                                          |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --- | --------- | --- | ------------------------------------------------------------------------------------------------- |
+| **DTO Drift**                        | A module uses fields not in `contracts/` or uses stale types                                                                                                                                                                  | `dto-guardian` reports mismatches                                                                                                                                       | Agent fixes contract or module; additive only                                                                       |
+| **Module Collision**                 | Two parallel phases write to the same `internal/modules/<name>/` file                                                                                                                                                         | Git merge conflict on merge                                                                                                                                             | `conflict-resolver` agent + union merge strategy                                                                    |
+| **Lifecycle Race**                   | Two workers transition a token simultaneously without CAS                                                                                                                                                                     | Duplicate processing in logs or corrupted position state                                                                                                                | Fix transition to use CAS + SKIP LOCKED; replay from event log                                                      |
+| **Merge Corruption**                 | A phase's module silently breaks an earlier phase after union merge                                                                                                                                                           | Global validation quality gates fail post-merge                                                                                                                         | `refactor` agent with full quality gate context; re-run gates                                                       |
+| **Adapter Signature Break**          | A phase changes `database/adapter.go` interface during parallel work                                                                                                                                                          | Compile error in other phases                                                                                                                                           | Sequential fix: finish and merge the changing phase before others                                                   |
+| **Event Type Rename**                | An event type string is renamed in one branch                                                                                                                                                                                 | Consumer worker silently stops processing in merged code                                                                                                                | `integration` agent detects; revert rename, use additive versioning                                                 |
+| **Orchestrator Conflict**            | Two phases both modify `internal/orchestrator/orchestrator.go`                                                                                                                                                                | Git merge conflict                                                                                                                                                      | `conflict-resolver` agent; union merge preserves all stage registrations                                            |
+| **Cross-Market Contamination**       | Solana logic leaks into EVM code path (or vice versa) — e.g. Solana module imports `internal/modules/ingestion/`, or EVM execution invokes Solana RPC                                                                         | Import-graph guard via `dependency-analysis` skill; integration test counter for `AllocateNonce` calls when `chain="solana"`                                            | Phase 7 rollback; refactor to relocate logic into the chain-specific module under `internal/modules/*_solana/`      |
+| **Solana Ingestion Non-Determinism** | Solana worker writes events with mismatched `EventID` across two replay runs of the same fixture (e.g. `time.Now()` leaked into `IngestedAt`, RPC endpoint URL leaked into the ID, or non-deterministic instruction ordering) | Replay test diff: `SELECT event_id FROM events WHERE event_id LIKE 'replay:%' ORDER BY ...` differs run-to-run; or duplicate rows missing from `ON CONFLICT DO NOTHING` | Revert `internal/modules/ingestion_solana/` to last-known-good commit; re-verify `EventID = SHA256("solana"         |     | signature |     | instruction_index)[:16]`is exact; ensure`IngestedAt` derives from event timestamp, not wall clock |
+| **Solana Watermark Regression**      | Crash between event INSERT and watermark UPDATE leaves `solana_ingestion_watermark.slot` behind the highest `events.slot`; or a buggy adapter caller passes a smaller slot                                                    | `UpsertIngestionWatermark` rejects regression; integration test asserts monotonicity post-restart                                                                       | Run gap recovery from persisted watermark; `EventID` PK absorbs duplicate emission; never manually rewind watermark |
 
 ### Merge Validation Steps (run after every branch merge)
 
