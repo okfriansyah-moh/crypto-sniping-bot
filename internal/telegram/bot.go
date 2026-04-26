@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -73,7 +74,10 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("telegram: send: %w", err)
+		// Mask the bot token from the error string: net/http errors include the
+		// request URL which embeds the token (e.g. "/botTOKEN/sendMessage").
+		sanitized := strings.ReplaceAll(err.Error(), c.botToken, "[REDACTED]")
+		return fmt.Errorf("telegram: send: %s", sanitized)
 	}
 	defer resp.Body.Close()
 

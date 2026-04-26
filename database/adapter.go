@@ -254,6 +254,12 @@ type Adapter interface {
 	// Never archives events linked to open positions.
 	ArchiveEvents(ctx context.Context, olderThan time.Time, batchSize int) (archivedCount int, err error)
 
+	// ComputeDrawdown returns the realized drawdown fraction for the given window.
+	// drawdown = |sum(pnl_usd where pnl_usd < 0, exited_at >= now()-windowHours)|
+	//            / max(sum(entry_size_usd of all exited positions in window), 1)
+	// Returns 0 when no positions exist or total PnL is non-negative.
+	ComputeDrawdown(ctx context.Context, windowHours int) (drawdownFraction float64, err error)
+
 	// ── Pipeline Runs ────────────────────────────────────────────────────────
 
 	// CreateRun creates a new pipeline run record.

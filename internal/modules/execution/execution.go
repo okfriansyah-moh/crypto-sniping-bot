@@ -93,6 +93,11 @@ func (m *Module) Process(
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	start := time.Now()
 
+	// Fail fast on already-cancelled context before any I/O.
+	if err := ctx.Err(); err != nil {
+		return m.failResult(in, now, fmt.Sprintf("context_cancelled:%v", err))
+	}
+
 	if in.Rejected {
 		eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-skip:%s", in.EventID))
 		return contracts.ExecutionResultDTO{
@@ -162,6 +167,28 @@ func (m *Module) Process(
 	if expectedOut == nil || expectedOut.Sign() <= 0 {
 		return m.failResult(in, now, "get_amounts_out:zero_expected_output")
 	}
+
+	// Phase 6 slippage guard: if quoted output is substantially worse than input,
+	// estimate slippage bps = (valueWei - expectedOut) * 10000 / valueWei.
+	// Fire guard only when expectedOut < valueWei (comparable raw units from mock/quote).
+	//
+	// KNOWN LIMITATION (Phase 6): this comparison is only valid when expectedOut and
+	// valueWei are in the same unit (e.g., both 18-decimal tokens, or in simulation).
+	// For real ETH→ERC20 swaps the units differ (e.g., wei vs USDC 6-decimal), making
+	// this comparison meaningless and potentially incorrect.  The amountOutMin guard
+	// below provides the real on-chain slippage protection.  This pre-flight check will
+	// be replaced with a proper same-unit price-feed comparison in Phase 7.
+	if expectedOut.Cmp(valueWei) < 0 && valueWei.Sign() > 0 {
+		diff := new(big.Int).Sub(valueWei, expectedOut)
+		diff.Mul(diff, big.NewInt(10000))
+		diff.Div(diff, valueWei)
+		if int32(diff.Int64()) > slippageBps {
+			res, resErr := m.failResult(in, now, "slippage_guard:estimated_slippage_exceeded")
+			res.SlippageGuardBps = slippageBps
+			return res, resErr
+		}
+	}
+
 	// amountOutMin = expectedOut × (10000 − slippageBps) / 10000
 	amountOutMin := new(big.Int).Mul(expectedOut, big.NewInt(int64(10000-slippageBps)))
 	amountOutMin.Div(amountOutMin, big.NewInt(10000))
@@ -201,13 +228,18 @@ func (m *Module) Process(
 	status := "confirmed"
 	success := true
 	if receipt == nil {
-		// Receipt not observed within the polling deadline is not a confirmed revert.
-		// Treat as pending so callers can retry or reconcile later.
-		status = "pending"
+		// Receipt not observed within the polling deadline: tx dropped or evicted from mempool.
+		// Status=dropped per docs/dto_contracts.md § 6 enum registry.
+		status = "dropped"
 		success = false
 	} else if receipt.Status == 0 {
 		status = "reverted"
 		success = false
+	}
+
+	errorCode := ""
+	if status == "dropped" {
+		errorCode = "timeout"
 	}
 
 	return contracts.ExecutionResultDTO{
@@ -232,6 +264,7 @@ func (m *Module) Process(
 		LatencyMs:        latencyMs,
 		CompletedAt:      now,
 		SlippageGuardBps: slippageBps,
+		ErrorCode:        errorCode,
 	}, nil
 }
 

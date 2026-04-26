@@ -10,7 +10,7 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 7          |
-| **Completed**    | 7          |
+| **Completed**    | 9          |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
 | **Not Started**  | 0          |
@@ -28,7 +28,7 @@
 | 3     | Evaluation Correctness | completed   | 0           | Mandatory CAS, evaluation worker, state_machine, traceability, circuit_breaker, fee-bump, Telegram dispatcher+commands, migration 000008                                                                                                                                  |
 | 4     | Probability Models     | completed   | 0           | Logistic probability model, bucket-based slippage, rolling-window latency profiles; new workers (probability, slippage, latency); validation worker now consumes model estimates with prior fallback; additive DQ/feature/edge detector helpers; tests + build/vet clean. |
 | 5     | Learning Engine        | completed   | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass.                                                                                                                           |
-| 6     | Observability & Risk   | not-started | 0           |                                                                                                                                                                                                                                                                           |
+| 6     | Observability & Risk   | completed   | 0           | All pipeline agents passed |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 
@@ -46,7 +46,7 @@
 | 3     | pass          | pass               | pass        | pass                       | pass         | completed |
 | 4     | pass          | pass               | pass        | pass                       | pass         | completed |
 | 5     | pass          | pass               | pass        | pass                       | pass         | completed |
-| 6     | —             | —                  | —           | —                          | —            | —         |
+| 6     | pass          | completed   | pass        | All pipeline agents passed | pass         | completed |
 
 **Values:** `pass`, `fail (N retries)`, `skipped`, `rolled-back`
 
@@ -106,3 +106,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | 2026-04-25 | mode-2            | 1      | —             | —           | completed             |
 | 2026-04-25 | mode-2            | 2      | —             | —           | completed             |
 | 2026-04-26 | integration-agent | 3      | —             | —           | integration-validated |
+| 2026-04-26 | mode-2            | 6      | —            | —           | completed |

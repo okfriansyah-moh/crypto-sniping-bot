@@ -363,3 +363,7 @@ return nil, nil
 func (m *mockAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
 return nil, nil
 }
+
+func (m *mockAdapter) ComputeDrawdown(_ context.Context, _ int) (float64, error) {
+	return 0.0, nil
+}
