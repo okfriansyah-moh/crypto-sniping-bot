@@ -54,7 +54,7 @@ func runServer() {
 		os.Exit(1)
 	}
 
-	// Register Phase 2 pipeline stage workers.
+	// Register pipeline stage workers (Phase 2 baseline + Phase 3 evaluation gate).
 	orch.RegisterStage("dq_worker", workers.NewDataQualityWorker(db, cfg, logger), "market_data_event")
 	orch.RegisterStage("features_worker", workers.NewFeaturesWorker(db, cfg, logger), "data_quality_event")
 	orch.RegisterStage("edge_worker", workers.NewEdgeWorker(db, cfg, logger), "feature_event")
@@ -66,6 +66,9 @@ func runServer() {
 		"allocation_event",
 	)
 	orch.RegisterStage("position_open_worker", workers.NewPositionOpenWorker(db, cfg, logger), "execution_result_event")
+	// Phase 3: evaluation gate — mandatory pre-learning stage.
+	// Consumes position_state_event where Status=exited.
+	orch.RegisterStage("evaluation_worker", workers.NewEvaluationWorker(db, cfg, logger), "position_state_event")
 
 	// Position poll runs as a separate goroutine (timer-driven, not event-driven).
 	go func() {
