@@ -38,7 +38,8 @@ if err := json.Unmarshal(evt.Payload, &dto); err != nil {
 return nil, fmt.Errorf("validation_worker: unmarshal: %w", err)
 }
 
-vedge, err := w.mod.Process(ctx, dto)
+prob, slip, lat := w.fetchEstimates(ctx, evt.TraceID, evt.CorrelationID)
+vedge, err := w.mod.ProcessWithEstimates(ctx, dto, prob, slip, lat)
 if err != nil {
 return nil, fmt.Errorf("validation_worker: module: %w", err)
 }
@@ -70,4 +71,37 @@ return makeOutputEvent(
 vedge.EventID, vedge, "validated_edge_event",
 evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 )
+}
+
+// fetchEstimates returns the latest model estimates for this trace.  Any of the
+// returned values may be nil — in that case the validation module will fall
+// back to its configured priors.  All errors are logged and treated as nil.
+func (w *ValidationWorker) fetchEstimates(
+ctx context.Context,
+traceID, correlationID string,
+) (*contracts.ProbabilityEstimateDTO, *contracts.SlippageEstimateDTO, *contracts.LatencyProfileDTO) {
+var (
+prob *contracts.ProbabilityEstimateDTO
+slip *contracts.SlippageEstimateDTO
+lat  *contracts.LatencyProfileDTO
+)
+if p, err := w.adapter.GetProbabilityEstimateByTrace(ctx, traceID); err == nil {
+prob = p
+} else {
+w.logger.Debug("validation_prob_lookup_failed", "trace_id", traceID, "error", err)
+}
+if s, err := w.adapter.GetSlippageEstimateByTrace(ctx, traceID); err == nil {
+slip = s
+} else {
+w.logger.Debug("validation_slip_lookup_failed", "trace_id", traceID, "error", err)
+}
+chain := chainFromCorrelation(ctx, w.adapter, correlationID, w.logger)
+if chain != "" {
+if l, err := w.adapter.GetLatestLatencyProfile(ctx, chain); err == nil {
+lat = l
+} else {
+w.logger.Debug("validation_lat_lookup_failed", "chain", chain, "error", err)
+}
+}
+return prob, slip, lat
 }

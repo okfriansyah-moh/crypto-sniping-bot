@@ -122,6 +122,29 @@ type Adapter interface {
 	// InsertLearningRecord persists a LearningRecordDTO.
 	InsertLearningRecord(ctx context.Context, dto contracts.LearningRecordDTO) error
 
+	// ── Phase 4: Signal Quality Models ───────────────────────────────────────
+
+	// InsertProbabilityEstimate persists a ProbabilityEstimateDTO. Idempotent.
+	InsertProbabilityEstimate(ctx context.Context, dto contracts.ProbabilityEstimateDTO) error
+
+	// InsertSlippageEstimate persists a SlippageEstimateDTO. Idempotent.
+	InsertSlippageEstimate(ctx context.Context, dto contracts.SlippageEstimateDTO) error
+
+	// InsertLatencyProfile persists a LatencyProfileDTO. Idempotent.
+	InsertLatencyProfile(ctx context.Context, dto contracts.LatencyProfileDTO) error
+
+	// GetProbabilityEstimateByTrace returns the most recent probability estimate
+	// for the given trace ID, or nil if not present.
+	GetProbabilityEstimateByTrace(ctx context.Context, traceID string) (*contracts.ProbabilityEstimateDTO, error)
+
+	// GetSlippageEstimateByTrace returns the most recent slippage estimate
+	// for the given trace ID, or nil if not present.
+	GetSlippageEstimateByTrace(ctx context.Context, traceID string) (*contracts.SlippageEstimateDTO, error)
+
+	// GetLatestLatencyProfile returns the most recent latency profile for the
+	// given chain, or nil if no profile has been recorded.
+	GetLatestLatencyProfile(ctx context.Context, chain string) (*contracts.LatencyProfileDTO, error)
+
 	// ── Execution: Nonce Manager ─────────────────────────────────────────────
 
 	// AllocateNonce atomically reserves the next nonce for a wallet.

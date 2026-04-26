@@ -244,6 +244,24 @@ func (m *memAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationD
 func (m *memAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
 }
+func (m *memAdapter) InsertProbabilityEstimate(_ context.Context, _ contracts.ProbabilityEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *memAdapter) InsertSlippageEstimate(_ context.Context, _ contracts.SlippageEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *memAdapter) InsertLatencyProfile(_ context.Context, _ contracts.LatencyProfileDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *memAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
+	return nil, nil
+}
+func (m *memAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
+	return nil, nil
+}
+func (m *memAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
+	return nil, nil
+}
 func (m *memAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error) {
 	return 0, database.ErrNotImplemented
 }

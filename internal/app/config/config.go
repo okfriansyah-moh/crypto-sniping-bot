@@ -24,6 +24,8 @@ type Config struct {
 	Selection  SelectionConfig        `yaml:"selection"`
 	Capital    CapitalConfig          `yaml:"capital"`
 	Position   PositionConfig         `yaml:"position"`
+	Models     ModelsConfig           `yaml:"models"`
+	Execution  ExecutionConfig        `yaml:"execution"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -115,6 +117,63 @@ type PositionConfig struct {
 	SlBps               int32 `yaml:"sl_bps"`
 	MaxHoldSeconds      int32 `yaml:"max_hold_seconds"`
 	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
+}
+
+// ModelsConfig holds Phase 4 model parameters (probability, slippage, latency).
+// All values are loaded from config/pipeline.yaml; safe defaults are applied
+// when keys are absent so existing Phase 2/3 configs remain valid.
+type ModelsConfig struct {
+	Probability                  ProbabilityCoefficients `yaml:"probability"`
+	Slippage                     SlippageModelConfig     `yaml:"slippage"`
+	Latency                      LatencyModelConfig      `yaml:"latency"`
+	LatencyProfileIntervalSecs   int                     `yaml:"latency_profile_interval_seconds"`
+	ModelJoinTimeoutMs           int                     `yaml:"model_join_timeout_ms"`
+}
+
+// ProbabilityCoefficients are the fixed weights for the Phase 4 logistic model.
+type ProbabilityCoefficients struct {
+	Bias                float64 `yaml:"bias"`
+	WLiquidityScore     float64 `yaml:"w_liquidity_score"`
+	WTxVelocityScore    float64 `yaml:"w_tx_velocity_score"`
+	WHolderDistribution float64 `yaml:"w_holder_distribution"`
+	WWalletEntropy      float64 `yaml:"w_wallet_entropy"`
+	WContractSafety     float64 `yaml:"w_contract_safety"`
+	WTokenAge           float64 `yaml:"w_token_age"`
+	WVolumeMomentum     float64 `yaml:"w_volume_momentum"`
+	WPriceMomentum      float64 `yaml:"w_price_momentum"`
+	ModelVersionID      string  `yaml:"model_version_id"`
+	BrierCalibration    float64 `yaml:"brier_calibration"`
+}
+
+// SlippageModelConfig holds the slippage bucket grid + fallbacks.
+type SlippageModelConfig struct {
+	Buckets        []SlippageBucketConfig `yaml:"buckets"`
+	FallbackP50Bps int32                  `yaml:"fallback_p50_bps"`
+	FallbackP95Bps int32                  `yaml:"fallback_p95_bps"`
+	ModelVersionID string                 `yaml:"model_version_id"`
+}
+
+// SlippageBucketConfig is a single (liquidity, size) calibration entry.
+type SlippageBucketConfig struct {
+	LiquidityMaxUsd float64 `yaml:"liquidity_max_usd"`
+	SizeMaxUsd      float64 `yaml:"size_max_usd"`
+	P50Bps          int32   `yaml:"p50_bps"`
+	P95Bps          int32   `yaml:"p95_bps"`
+}
+
+// LatencyModelConfig holds rolling-window settings + fallbacks.
+type LatencyModelConfig struct {
+	WindowSeconds int32 `yaml:"window_seconds"`
+	MinSamples    int   `yaml:"min_samples"`
+	FallbackP50Ms int32 `yaml:"fallback_p50_ms"`
+	FallbackP95Ms int32 `yaml:"fallback_p95_ms"`
+}
+
+// ExecutionConfig holds Phase 4 execution-level settings (private RPC routing).
+type ExecutionConfig struct {
+	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
+	PrivateEndpoints         []string `yaml:"private_endpoints"`
+	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
 }
 
 // Load reads configuration from one or more YAML config files.

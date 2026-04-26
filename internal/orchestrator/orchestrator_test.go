@@ -168,6 +168,24 @@ func (m *mockAdapter) InsertEvaluation(_ context.Context, _ contracts.Evaluation
 func (m *mockAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
 }
+func (m *mockAdapter) InsertProbabilityEstimate(_ context.Context, _ contracts.ProbabilityEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertSlippageEstimate(_ context.Context, _ contracts.SlippageEstimateDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) InsertLatencyProfile(_ context.Context, _ contracts.LatencyProfileDTO) error {
+	return database.ErrNotImplemented
+}
+func (m *mockAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
+	return nil, nil
+}
 func (m *mockAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error) {
 	return 0, database.ErrNotImplemented
 }

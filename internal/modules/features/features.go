@@ -33,8 +33,8 @@ func (m *Module) Process(_ context.Context, in contracts.DataQualityDTO) (contra
 	// TxVelocityScore [0,1]: Phase 2 stub — moderate positive signal.
 	txVelocityScore := 0.5
 
-	// HolderDistribution [0,1]: Phase 2 stub — unknown without on-chain data.
-	holderDistribution := 0.5
+	// HolderDistribution [0,1]: derived from raw LP holder count (Phase 4).
+	holderDistribution := HolderDistributionScore(int64(in.LpHolderCount))
 
 	// WalletEntropy [0,1]: Phase 2 stub.
 	walletEntropy := 0.5
