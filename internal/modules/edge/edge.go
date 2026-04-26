@@ -55,8 +55,8 @@ func (m *Module) Process(_ context.Context, in contracts.FeatureDTO) (contracts.
 		// EdgeConfidence: minimum of per-feature confidences that drove the decision.
 		edgeConfidence = minFloat(in.Confidence.LiquidityScore, in.Confidence.ContractSafety)
 
-		// MomentumScore: direct from feature.
-		momentumScore = in.VolumeMomentum
+		// MomentumScore: composed from price + volume momentum (Phase 4).
+		momentumScore = MomentumScore(in.PriceMomentum, in.VolumeMomentum)
 	}
 
 	// Opportunity window: base_ms * (1 + momentum_factor * momentum_score).

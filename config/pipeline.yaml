@@ -63,3 +63,44 @@ position:
   sl_bps: 1500                   # stop-loss threshold (15%)
   max_hold_seconds: 3600         # maximum hold time (1 hour)
   poll_interval_seconds: 15      # how often to poll open position prices
+
+# Phase 4 — Probability / Slippage / Latency models
+models:
+  latency_profile_interval_seconds: 60
+  model_join_timeout_ms: 0       # 0 = fall back to priors immediately if model events not yet available
+
+  probability:
+    model_version_id: "logistic-v1"
+    bias: -0.5
+    w_liquidity_score: 1.5
+    w_tx_velocity_score: 0.8
+    w_holder_distribution: 0.6
+    w_wallet_entropy: 0.4
+    w_contract_safety: 1.2
+    w_token_age: -0.5            # newer = riskier
+    w_volume_momentum: 0.7
+    w_price_momentum: 0.5
+    brier_calibration: 0.18      # baseline calibration score (lower = better)
+
+  slippage:
+    model_version_id: "buckets-v1"
+    fallback_p50_bps: 100
+    fallback_p95_bps: 250
+    buckets:
+      - { liquidity_max_usd: 100000,    size_max_usd: 100,   p50_bps: 80,  p95_bps: 200 }
+      - { liquidity_max_usd: 100000,    size_max_usd: 1000,  p50_bps: 150, p95_bps: 400 }
+      - { liquidity_max_usd: 1000000,   size_max_usd: 100,   p50_bps: 30,  p95_bps: 90 }
+      - { liquidity_max_usd: 1000000,   size_max_usd: 1000,  p50_bps: 60,  p95_bps: 180 }
+      - { liquidity_max_usd: 10000000,  size_max_usd: 1000,  p50_bps: 20,  p95_bps: 60 }
+      - { liquidity_max_usd: 10000000,  size_max_usd: 10000, p50_bps: 50,  p95_bps: 150 }
+
+  latency:
+    window_seconds: 600
+    min_samples: 30
+    fallback_p50_ms: 250
+    fallback_p95_ms: 800
+
+execution:
+  mode: "live"                    # "live" | "shadow" (Phase 5 placeholder)
+  private_route_threshold_usd: 0  # 0 disables private routing in Phase 4
+  private_endpoints: []

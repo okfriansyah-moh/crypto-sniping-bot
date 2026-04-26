@@ -24,10 +24,11 @@ type Config struct {
 	Selection    SelectionConfig        `yaml:"selection"`
 	Capital      CapitalConfig          `yaml:"capital"`
 	Position     PositionConfig         `yaml:"position"`
-	Execution    ExecutionPhase3Config  `yaml:"execution"`
+	Execution    ExecutionConfig        `yaml:"execution"` // Phase 3+4 combined
 	Evaluation   EvaluationConfig       `yaml:"evaluation"`
 	StateMachine StateMachineConfig     `yaml:"state_machine"`
 	EventWeights EventPriorityWeights   `yaml:"event_weights"`
+	Models       ModelsConfig           `yaml:"models"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -121,8 +122,10 @@ type PositionConfig struct {
 	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
 }
 
-// ExecutionPhase3Config holds Phase 3 execution retry and replacement parameters.
-type ExecutionPhase3Config struct {
+// ExecutionConfig holds Phase 3+4 execution parameters: retry/replacement (Phase 3)
+// and private RPC routing (Phase 4).
+type ExecutionConfig struct {
+	// Phase 3: retry and fee-bump parameters
 	MaxRetry                 int     `yaml:"max_retry"`
 	MaxReplacements          int     `yaml:"max_replacements"`
 	RetryBackoffMs           []int   `yaml:"retry_backoff_ms"`
@@ -134,13 +137,17 @@ type ExecutionPhase3Config struct {
 	ConcurrencyMin           int     `yaml:"concurrency_min"`
 	ConcurrencyMax           int     `yaml:"concurrency_max"`
 	DefaultMaxSlippageBps    int32   `yaml:"default_max_slippage_bps"`
+	// Phase 4: private RPC routing
+	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
+	PrivateEndpoints         []string `yaml:"private_endpoints"`
+	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
 }
 
 // EvaluationConfig holds Phase 3 evaluation engine parameters.
 type EvaluationConfig struct {
-	FPLossThresholdPct  float64 `yaml:"fp_loss_threshold_pct"`
-	FNGainThresholdPct  float64 `yaml:"fn_gain_threshold_pct"`
-	WindowSeconds       int     `yaml:"window_seconds"`
+	FPLossThresholdPct float64 `yaml:"fp_loss_threshold_pct"`
+	FNGainThresholdPct float64 `yaml:"fn_gain_threshold_pct"`
+	WindowSeconds      int     `yaml:"window_seconds"`
 }
 
 // StateMachineConfig holds Phase 3 state machine enforcement parameters.
@@ -151,16 +158,66 @@ type StateMachineConfig struct {
 // EventPriorityWeights maps event types to base priority values.
 // Used by ComputePriority in resource_control package.
 type EventPriorityWeights struct {
-	PositionEventExit   int32 `yaml:"position_event_exit"`
+	PositionEventExit    int32 `yaml:"position_event_exit"`
 	ExecutionReplacement int32 `yaml:"execution_replacement"`
-	PositionEventOpen   int32 `yaml:"position_event_open"`
-	AllocationEvent     int32 `yaml:"allocation_event"`
-	ValidatedEdgeEvent  int32 `yaml:"validated_edge_event"`
-	EdgeEvent           int32 `yaml:"edge_event"`
-	FeatureEvent        int32 `yaml:"feature_event"`
-	DataQualityEvent    int32 `yaml:"data_quality_event"`
-	MarketDataEvent     int32 `yaml:"market_data_event"`
-	AdjustmentEvent     int32 `yaml:"adjustment_event"`
+	PositionEventOpen    int32 `yaml:"position_event_open"`
+	AllocationEvent      int32 `yaml:"allocation_event"`
+	ValidatedEdgeEvent   int32 `yaml:"validated_edge_event"`
+	EdgeEvent            int32 `yaml:"edge_event"`
+	FeatureEvent         int32 `yaml:"feature_event"`
+	DataQualityEvent     int32 `yaml:"data_quality_event"`
+	MarketDataEvent      int32 `yaml:"market_data_event"`
+	AdjustmentEvent      int32 `yaml:"adjustment_event"`
+}
+
+// ModelsConfig holds Phase 4 model parameters (probability, slippage, latency).
+// All values are loaded from config/pipeline.yaml; safe defaults are applied
+// when keys are absent so existing Phase 2/3 configs remain valid.
+type ModelsConfig struct {
+	Probability                ProbabilityCoefficients `yaml:"probability"`
+	Slippage                   SlippageModelConfig     `yaml:"slippage"`
+	Latency                    LatencyModelConfig      `yaml:"latency"`
+	LatencyProfileIntervalSecs int                     `yaml:"latency_profile_interval_seconds"`
+	ModelJoinTimeoutMs         int                     `yaml:"model_join_timeout_ms"`
+}
+
+// ProbabilityCoefficients are the fixed weights for the Phase 4 logistic model.
+type ProbabilityCoefficients struct {
+	Bias                float64 `yaml:"bias"`
+	WLiquidityScore     float64 `yaml:"w_liquidity_score"`
+	WTxVelocityScore    float64 `yaml:"w_tx_velocity_score"`
+	WHolderDistribution float64 `yaml:"w_holder_distribution"`
+	WWalletEntropy      float64 `yaml:"w_wallet_entropy"`
+	WContractSafety     float64 `yaml:"w_contract_safety"`
+	WTokenAge           float64 `yaml:"w_token_age"`
+	WVolumeMomentum     float64 `yaml:"w_volume_momentum"`
+	WPriceMomentum      float64 `yaml:"w_price_momentum"`
+	ModelVersionID      string  `yaml:"model_version_id"`
+	BrierCalibration    float64 `yaml:"brier_calibration"`
+}
+
+// SlippageModelConfig holds the slippage bucket grid + fallbacks.
+type SlippageModelConfig struct {
+	Buckets        []SlippageBucketConfig `yaml:"buckets"`
+	FallbackP50Bps int32                  `yaml:"fallback_p50_bps"`
+	FallbackP95Bps int32                  `yaml:"fallback_p95_bps"`
+	ModelVersionID string                 `yaml:"model_version_id"`
+}
+
+// SlippageBucketConfig is a single (liquidity, size) calibration entry.
+type SlippageBucketConfig struct {
+	LiquidityMaxUsd float64 `yaml:"liquidity_max_usd"`
+	SizeMaxUsd      float64 `yaml:"size_max_usd"`
+	P50Bps          int32   `yaml:"p50_bps"`
+	P95Bps          int32   `yaml:"p95_bps"`
+}
+
+// LatencyModelConfig holds rolling-window settings + fallbacks.
+type LatencyModelConfig struct {
+	WindowSeconds int32 `yaml:"window_seconds"`
+	MinSamples    int   `yaml:"min_samples"`
+	FallbackP50Ms int32 `yaml:"fallback_p50_ms"`
+	FallbackP95Ms int32 `yaml:"fallback_p95_ms"`
 }
 
 // Load reads configuration from one or more YAML config files.

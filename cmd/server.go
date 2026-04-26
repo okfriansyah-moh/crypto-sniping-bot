@@ -58,6 +58,8 @@ func runServer() {
 	orch.RegisterStage("dq_worker", workers.NewDataQualityWorker(db, cfg, logger), "market_data_event")
 	orch.RegisterStage("features_worker", workers.NewFeaturesWorker(db, cfg, logger), "data_quality_event")
 	orch.RegisterStage("edge_worker", workers.NewEdgeWorker(db, cfg, logger), "feature_event")
+	orch.RegisterStage("probability_worker", workers.NewProbabilityWorker(db, cfg, logger), "feature_event")
+	orch.RegisterStage("slippage_worker", workers.NewSlippageWorker(db, cfg, logger), "feature_event")
 	orch.RegisterStage("validation_worker", workers.NewValidationWorker(db, cfg, logger), "edge_event")
 	orch.RegisterStage("selection_worker", workers.NewSelectionWorker(db, cfg, logger), "validated_edge_event")
 	orch.RegisterStage("capital_worker", workers.NewCapitalWorker(db, cfg, logger), "selection_event")
@@ -74,6 +76,14 @@ func runServer() {
 	go func() {
 		if err := workers.RunPositionPoll(ctx, db, cfg, nil, logger); err != nil && err != ctx.Err() {
 			logger.Error("position_poll_failed", "error", err)
+		}
+	}()
+
+	// Latency profile emitter — periodic per-chain profile generator (Phase 4).
+	latencyWorker := workers.NewLatencyWorker(db, cfg, orch.VersionID(), logger)
+	go func() {
+		if err := latencyWorker.Run(ctx); err != nil && err != ctx.Err() {
+			logger.Error("latency_worker_failed", "error", err)
 		}
 	}()
 
