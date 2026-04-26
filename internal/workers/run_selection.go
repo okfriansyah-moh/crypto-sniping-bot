@@ -38,6 +38,18 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		return nil, fmt.Errorf("selection_worker: unmarshal: %w", err)
 	}
 
+	// Kill-switch pre-check (Phase 6): drop entry events when HALTED.
+	state, stateErr := w.adapter.GetSystemState(ctx)
+	if stateErr == nil && state != nil && state.Mode == "HALTED" {
+		w.logger.Info("selection_worker_halted",
+			"mode", state.Mode,
+			"event_id", evt.EventID,
+			"token_lifecycle_id", dto.TokenLifecycleID,
+		)
+		_ = doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "VALIDATED", "REJECTED", "system_halted", "selection_worker")
+		return nil, nil
+	}
+
 	openPositions, err := w.adapter.GetOpenPositions(ctx)
 	if err != nil {
 		w.logger.Warn("selection_worker_open_positions_failed", "error", err)

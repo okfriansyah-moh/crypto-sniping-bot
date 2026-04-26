@@ -93,6 +93,11 @@ func (m *Module) Process(
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	start := time.Now()
 
+	// Fail fast on already-cancelled context before any I/O.
+	if err := ctx.Err(); err != nil {
+		return m.failResult(in, now, fmt.Sprintf("context_cancelled:%v", err))
+	}
+
 	if in.Rejected {
 		eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-skip:%s", in.EventID))
 		return contracts.ExecutionResultDTO{
@@ -162,6 +167,21 @@ func (m *Module) Process(
 	if expectedOut == nil || expectedOut.Sign() <= 0 {
 		return m.failResult(in, now, "get_amounts_out:zero_expected_output")
 	}
+
+	// Phase 6 slippage guard: if quoted output is substantially worse than input,
+	// estimate slippage bps = (valueWei - expectedOut) * 10000 / valueWei.
+	// Fire guard only when expectedOut < valueWei (comparable raw units from mock/quote).
+	if expectedOut.Cmp(valueWei) < 0 && valueWei.Sign() > 0 {
+		diff := new(big.Int).Sub(valueWei, expectedOut)
+		diff.Mul(diff, big.NewInt(10000))
+		diff.Div(diff, valueWei)
+		if int32(diff.Int64()) > slippageBps {
+			res, resErr := m.failResult(in, now, "slippage_guard:estimated_slippage_exceeded")
+			res.SlippageGuardBps = slippageBps
+			return res, resErr
+		}
+	}
+
 	// amountOutMin = expectedOut × (10000 − slippageBps) / 10000
 	amountOutMin := new(big.Int).Mul(expectedOut, big.NewInt(int64(10000-slippageBps)))
 	amountOutMin.Div(amountOutMin, big.NewInt(10000))

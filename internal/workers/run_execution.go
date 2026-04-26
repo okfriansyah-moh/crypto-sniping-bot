@@ -59,6 +59,33 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		return nil, fmt.Errorf("execution_worker: unmarshal: %w", err)
 	}
 
+	// Kill-switch pre-check (Phase 6): only exit events pass through HALTED mode.
+	// Allocation events are new entry events and must be blocked when HALTED.
+	if state, stateErr := w.adapter.GetSystemState(ctx); stateErr == nil && state != nil && state.Mode == "HALTED" {
+		w.logger.Info("execution_worker_halted",
+			"mode", state.Mode,
+			"event_id", evt.EventID,
+			"token_lifecycle_id", alloc.TokenLifecycleID,
+		)
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		result := haltedExecResult(alloc, now)
+		if err := w.adapter.InsertExecutionResult(ctx, result); err != nil {
+			w.logger.Warn("execution_worker_persist_failed", "event_id", result.EventID, "error", err)
+		}
+		_ = doMandatoryTransition(ctx, w.adapter, alloc.TokenLifecycleID, "SELECTED", "REJECTED", "system_halted", "execution_worker")
+		return makeOutputEvent(
+			result.EventID, result, "execution_result_event",
+			evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+		)
+	}
+
+	// Apply MEV routing (Phase 6).
+	mevRoute := "public"
+	if w.cfg != nil {
+		// Use a zero LatencyProfileDTO when none available — PickRoute will use size threshold only.
+		mevRoute = execution.PickRoute(alloc, contracts.LatencyProfileDTO{}, w.cfg.MEV)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	var result contracts.ExecutionResultDTO
@@ -84,6 +111,13 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		if modErr != nil {
 			return nil, fmt.Errorf("execution_worker: module: %w", modErr)
 		}
+	}
+
+	// Override MEV routing fields on the result (Phase 6).
+	result.MempoolRoute = mevRoute
+	result.ExecutionPath = mevRoute
+	if mevRoute != "public" {
+		result.MEVProtected = true
 	}
 
 	if err := w.adapter.InsertExecutionResult(ctx, result); err != nil {
@@ -142,6 +176,29 @@ func rejectedExecResult(alloc contracts.AllocationDTO, now string) contracts.Exe
 		Status:          "rejected",
 		Success:         false,
 		RejectionReason: alloc.RejectReason,
+		MempoolRoute:    "public",
+		WalletAddress:   alloc.WalletAddress,
+		CompletedAt:     now,
+	}
+}
+
+// haltedExecResult creates a rejected execution result for events dropped due to HALTED mode.
+func haltedExecResult(alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {
+	eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-halt:%s", alloc.EventID))
+	return contracts.ExecutionResultDTO{
+		EventID:       eventID,
+		TraceID:       alloc.TraceID,
+		CorrelationID: alloc.CorrelationID,
+		CausationID:   alloc.EventID,
+		VersionID:     alloc.VersionID,
+
+		TokenLifecycleID: alloc.TokenLifecycleID,
+		ExecutionID:      alloc.ExecutionID,
+		AllocationID:     alloc.EventID,
+
+		Status:          "rejected",
+		Success:         false,
+		RejectionReason: "system_halted",
 		MempoolRoute:    "public",
 		WalletAddress:   alloc.WalletAddress,
 		CompletedAt:     now,

@@ -241,10 +241,18 @@ func TestProcess_GasPriceError_ReturnsFailResult(t *testing.T) {
 // Phase 3 removes this gate and restores send/receipt/confirmed/reverted tests.
 
 func TestProcess_LiveExecution_BlockedBySlippageGuard(t *testing.T) {
-	// Arrange: provide a real client and private key so the worker routes to
-	// the live (non-simulated) execution path.
-	mod, _ := New(testCapitalCfg(), successfulMock(), testPrivKey, 1, testBaseTokenAddr)
-	in := allocationFixture()
+	// Arrange: mock returns a tiny output (0.5% of input) simulating 99.5% slippage.
+	// With MaxSlippageBps=200, the slippage guard must fire and block the trade.
+	amountIn := usdToWei(10.0)
+	tinyOut := new(big.Int).Div(amountIn, big.NewInt(200)) // 0.5% of input → ~9950 bps slippage
+	client := &mockEVMClient{
+		gasPrice:   big.NewInt(20_000_000_000),
+		amountsOut: []*big.Int{amountIn, tinyOut},
+		txHash:     "0xdeadbeef",
+		receipt:    confirmedReceipt(),
+	}
+	mod, _ := New(testCapitalCfg(), client, testPrivKey, 1, testBaseTokenAddr)
+	in := allocationFixture() // MaxSlippageBps=200
 
 	// Act
 	result, err := mod.Process(context.Background(), in, 0, "0xrouter")

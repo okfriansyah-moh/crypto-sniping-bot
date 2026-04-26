@@ -30,6 +30,10 @@ type Config struct {
 	EventWeights EventPriorityWeights   `yaml:"event_weights"`
 	Models       ModelsConfig           `yaml:"models"`
 	Learning     LearningConfig         `yaml:"learning"`
+	Risk         RiskConfig             `yaml:"risk"`
+	Retention    RetentionConfig        `yaml:"retention"`
+	MEV          MEVConfig              `yaml:"mev"`
+	Budgets      BudgetsConfig          `yaml:"budgets"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -249,6 +253,62 @@ type LearningConfig struct {
 	RollbackCheckIntervalSeconds int `yaml:"rollback_check_interval_seconds"`
 }
 
+// RiskConfig holds Phase 6 global kill-switch / drawdown risk parameters.
+type RiskConfig struct {
+	// CheckIntervalSeconds is how often the risk controller runs (default: 30).
+	CheckIntervalSeconds int `yaml:"check_interval_seconds"`
+	// DrawdownWindowHours is the look-back window for computing drawdown (default: 24).
+	DrawdownWindowHours int `yaml:"drawdown_window_hours"`
+	// DegradedDrawdownPct triggers DEGRADED mode (default: 0.05 = 5%).
+	DegradedDrawdownPct float64 `yaml:"degraded_drawdown_pct"`
+	// HaltDrawdownPct triggers HALTED mode (default: 0.10 = 10%).
+	HaltDrawdownPct float64 `yaml:"halt_drawdown_pct"`
+	// ResumeDrawdownPct auto-resumes to BALANCED when drawdown recovers below this (default: 0.03).
+	ResumeDrawdownPct float64 `yaml:"resume_drawdown_pct"`
+	// DegradedSizeMultiplier scales SizeUsd in DEGRADED mode (default: 0.5).
+	DegradedSizeMultiplier float64 `yaml:"degraded_size_multiplier"`
+}
+
+// RetentionConfig holds Phase 6 data retention / archival parameters.
+type RetentionConfig struct {
+	// IntervalHours is how often the archive worker runs (default: 24).
+	IntervalHours int `yaml:"interval_hours"`
+	// HotDays is the number of days to keep events in the hot table (default: 7).
+	HotDays int `yaml:"hot_days"`
+	// WarmDays is the maximum age of processed events before archival (default: 30).
+	WarmDays int `yaml:"warm_days"`
+	// BatchSize is the number of events moved per archival run (default: 10000).
+	BatchSize int `yaml:"batch_size"`
+}
+
+// MEVConfig holds Phase 6 MEV-aware execution routing parameters.
+type MEVConfig struct {
+	// PrivateSizeThresholdUsd is the trade size above which private routing is used (default: 500).
+	PrivateSizeThresholdUsd float64 `yaml:"private_size_threshold_usd"`
+	// PreferredPrivate is the default private relay when above threshold (default: "flashbots").
+	PreferredPrivate string `yaml:"preferred_private"`
+	// SlippageGuardBps is the amountOutMin guard in basis points (default: 150).
+	SlippageGuardBps int32 `yaml:"slippage_guard_bps"`
+	// FrontRunWindowMs is the time window for front-run pattern detection (default: 500).
+	FrontRunWindowMs int `yaml:"front_run_window_ms"`
+}
+
+// BudgetsConfig holds Phase 6 resource budget parameters.
+type BudgetsConfig struct {
+	// RPCRequestsPerSecond is the token bucket rate per RPC endpoint (default: 50).
+	RPCRequestsPerSecond int `yaml:"rpc_requests_per_second"`
+	// RPCBurstSize is the token bucket burst capacity (default: 100).
+	RPCBurstSize int `yaml:"rpc_burst_size"`
+	// RPCWaitMs is how long to wait when budget is exhausted before shedding (default: 200).
+	RPCWaitMs int `yaml:"rpc_wait_ms"`
+	// GasWalletDailyCapGwei is the per-wallet daily gas cap in gwei (default: 1_000_000).
+	GasWalletDailyCapGwei int64 `yaml:"gas_wallet_daily_cap_gwei"`
+	// GasSystemDailyCapGwei is the system-wide daily gas cap in gwei (default: 5_000_000).
+	GasSystemDailyCapGwei int64 `yaml:"gas_system_daily_cap_gwei"`
+	// ComputeMaxQueueDepth is the maximum number of pending events before shedding (default: 1000).
+	ComputeMaxQueueDepth int `yaml:"compute_max_queue_depth"`
+}
+
 // Load reads configuration from one or more YAML config files.
 // Files are merged in order (later files override earlier ones for shared keys).
 // Environment variables can override values: SNIPER_DB_PASSWORD overrides database.password.
@@ -264,6 +324,10 @@ func Load(paths ...string) (*Config, error) {
 		chainsPath := filepath.Join(cwd, "config", "chains.yaml")
 		if _, statErr := os.Stat(chainsPath); statErr == nil {
 			paths = append(paths, chainsPath)
+		}
+		budgetsPath := filepath.Join(cwd, "config", "budgets.yaml")
+		if _, statErr := os.Stat(budgetsPath); statErr == nil {
+			paths = append(paths, budgetsPath)
 		}
 	}
 

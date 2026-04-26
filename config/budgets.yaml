@@ -1,0 +1,38 @@
+# Phase 6: Resource budget configuration.
+# All workers enforce these caps before processing events.
+
+budgets:
+  # RPC token bucket per endpoint.
+  rpc_requests_per_second: 50
+  rpc_burst_size: 100
+  rpc_wait_ms: 200          # wait this long before shedding low-priority events
+
+  # Gas caps (in gwei).
+  gas_wallet_daily_cap_gwei: 1000000   # per wallet shard
+  gas_system_daily_cap_gwei: 5000000   # system-wide; halts NEW entries when reached
+
+  # Compute queue.
+  compute_max_queue_depth: 1000        # shed entry events when queue exceeds this
+
+# Phase 6: Risk controller drawdown thresholds.
+risk:
+  check_interval_seconds: 30
+  drawdown_window_hours: 24
+  degraded_drawdown_pct: 0.05          # 5% → DEGRADED
+  halt_drawdown_pct: 0.10              # 10% → HALTED
+  resume_drawdown_pct: 0.03            # <3% → auto-resume to BALANCED
+  degraded_size_multiplier: 0.5        # scale SizeUsd by 50% in DEGRADED mode
+
+# Phase 6: Data retention / archival.
+retention:
+  interval_hours: 24
+  hot_days: 7
+  warm_days: 30
+  batch_size: 10000
+
+# Phase 6: MEV-aware execution routing.
+mev:
+  private_size_threshold_usd: 500.0
+  preferred_private: "flashbots"
+  slippage_guard_bps: 150              # amountOutMin guard (1.5%)
+  front_run_window_ms: 500

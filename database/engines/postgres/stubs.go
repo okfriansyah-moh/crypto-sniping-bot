@@ -235,3 +235,26 @@ ORDER BY created_at ASC`
 	}
 	return result, rows.Err()
 }
+
+// ComputeDrawdown computes the realized drawdown fraction over the given window.
+func (d *DB) ComputeDrawdown(ctx context.Context, windowHours int) (float64, error) {
+	if windowHours <= 0 {
+		windowHours = 24
+	}
+	const q = `
+SELECT
+    COALESCE(SUM(CASE WHEN pnl_usd < 0 THEN ABS(pnl_usd) ELSE 0 END), 0) AS total_loss_usd,
+    COALESCE(SUM(size_usd), 1) AS total_size_usd
+FROM positions
+WHERE closed_at >= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 hour')`
+
+	row := d.pool.QueryRowContext(ctx, q, windowHours)
+	var lossUsd, sizeUsd float64
+	if err := row.Scan(&lossUsd, &sizeUsd); err != nil {
+		return 0, fmt.Errorf("compute drawdown: %w", err)
+	}
+	if sizeUsd <= 0 {
+		return 0, nil
+	}
+	return lossUsd / sizeUsd, nil
+}
