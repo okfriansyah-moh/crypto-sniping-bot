@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"crypto-sniping-bot/contracts"
-	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 )
 
@@ -110,10 +109,10 @@ func TestProcess_FalseNegativeCount(t *testing.T) {
 	mod := New(defaultCfg())
 	pos := exitedPosition(5.0)
 
-	shadows := []database.ShadowTrade{
-		{ShadowTradeID: "s1", PeakGainPct: 25.0, IsFNCandidate: true}, // above 20% threshold
-		{ShadowTradeID: "s2", PeakGainPct: 15.0, IsFNCandidate: true}, // below threshold
-		{ShadowTradeID: "s3", PeakGainPct: 30.0, IsFNCandidate: true}, // above threshold
+	shadows := []ShadowTradeInput{
+		{PeakGainPct: 25.0}, // above 20% threshold
+		{PeakGainPct: 15.0}, // below threshold
+		{PeakGainPct: 30.0}, // above threshold
 	}
 
 	dto, err := mod.Process(context.Background(), EvaluationInput{

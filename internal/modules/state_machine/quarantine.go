@@ -6,29 +6,33 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"crypto-sniping-bot/database"
 )
+
+// Quarantiner is a narrow interface for token quarantine operations.
+// Workers inject a concrete adapter; the module only sees this interface.
+type Quarantiner interface {
+	QuarantineToken(ctx context.Context, tokenAddress string, reason string) error
+}
 
 // QuarantineChecker tracks CAS violation counts per lifecycle and triggers
 // quarantine when the configured threshold is exceeded.
 type QuarantineChecker struct {
 	threshold  int
 	violations map[string]int // lifecycleID → violation count
-	adapter    database.Adapter
+	q          Quarantiner
 	logger     *slog.Logger
 }
 
 // NewQuarantineChecker returns a QuarantineChecker.
 // threshold is the number of violations before QuarantineToken is called.
-func NewQuarantineChecker(threshold int, adapter database.Adapter, logger *slog.Logger) *QuarantineChecker {
+func NewQuarantineChecker(threshold int, q Quarantiner, logger *slog.Logger) *QuarantineChecker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &QuarantineChecker{
 		threshold:  threshold,
 		violations: make(map[string]int),
-		adapter:    adapter,
+		q:          q,
 		logger:     logger,
 	}
 }
@@ -50,7 +54,7 @@ func (q *QuarantineChecker) RecordViolation(ctx context.Context, lifecycleID, to
 
 	if count >= q.threshold {
 		quarantineReason := fmt.Sprintf("violation_threshold_exceeded:%s", reason)
-		if err := q.adapter.QuarantineToken(ctx, tokenAddress, quarantineReason); err != nil {
+		if err := q.q.QuarantineToken(ctx, tokenAddress, quarantineReason); err != nil {
 			q.logger.Error("quarantine_failed",
 				"lifecycle_id", lifecycleID,
 				"token", tokenAddress,

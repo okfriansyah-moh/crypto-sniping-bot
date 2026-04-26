@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"crypto-sniping-bot/contracts"
-	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 )
 
@@ -38,11 +37,18 @@ func New(cfg config.EvaluationConfig) *Module {
 	return &Module{cfg: cfg}
 }
 
+// ShadowTradeInput is a rejected token observed to pump after rejection.
+// It decouples the evaluation module from the database package — only the
+// fields needed for FalseNegative computation are included.
+type ShadowTradeInput struct {
+	PeakGainPct float64
+}
+
 // EvaluationInput bundles all data needed to evaluate a single exited position.
 type EvaluationInput struct {
 	Position     contracts.PositionStateDTO
 	Execution    *contracts.ExecutionResultDTO // nil if not found
-	ShadowTrades []database.ShadowTrade        // FN candidates in the evaluation window
+	ShadowTrades []ShadowTradeInput            // FN candidates in the evaluation window
 }
 
 // Process computes the EvaluationDTO from an exited PositionStateDTO.
