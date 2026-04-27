@@ -208,6 +208,10 @@ ON CONFLICT (event_id) DO NOTHING`
 }
 
 // InsertExecutionResult persists an ExecutionResultDTO.
+// Uses ON CONFLICT (execution_id) DO UPDATE to handle the pre-claim reservation row
+// inserted by ClaimExecution. The reservation row has execution_id as its unique key;
+// the final result updates all mutable fields in place.
+// Idempotent: calling again with the same execution_id overwrites with identical data.
 func (d *DB) InsertExecutionResult(ctx context.Context, dto contracts.ExecutionResultDTO) error {
 	const q = `
 INSERT INTO execution_results (
@@ -229,7 +233,31 @@ INSERT INTO execution_results (
     $27, $28, $29, $30, $31,
     $32, $33, $34
 )
-ON CONFLICT (event_id) DO NOTHING`
+ON CONFLICT (execution_id) DO UPDATE SET
+    status                 = EXCLUDED.status,
+    success                = EXCLUDED.success,
+    tx_hash                = EXCLUDED.tx_hash,
+    block_number           = EXCLUDED.block_number,
+    attempts               = EXCLUDED.attempts,
+    replaced               = EXCLUDED.replaced,
+    replacement_count      = EXCLUDED.replacement_count,
+    mempool_route          = EXCLUDED.mempool_route,
+    nonce_used             = EXCLUDED.nonce_used,
+    wallet_address         = EXCLUDED.wallet_address,
+    wallet_shard           = EXCLUDED.wallet_shard,
+    final_gas_used         = EXCLUDED.final_gas_used,
+    final_max_fee_wei      = EXCLUDED.final_max_fee_wei,
+    final_priority_fee_wei = EXCLUDED.final_priority_fee_wei,
+    realized_entry_price   = EXCLUDED.realized_entry_price,
+    slippage_realized_bps  = EXCLUDED.slippage_realized_bps,
+    latency_ms             = EXCLUDED.latency_ms,
+    error_code             = EXCLUDED.error_code,
+    mev_protected          = EXCLUDED.mev_protected,
+    execution_path         = EXCLUDED.execution_path,
+    slippage_guard_bps     = EXCLUDED.slippage_guard_bps,
+    rejection_reason       = EXCLUDED.rejection_reason,
+    simulated              = EXCLUDED.simulated,
+    completed_at           = EXCLUDED.completed_at`
 
 	_, err := d.pool.ExecContext(ctx, q,
 		dto.EventID, dto.TraceID, dto.CorrelationID, nullableString(dto.CausationID), dto.VersionID,

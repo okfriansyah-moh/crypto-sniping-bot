@@ -10,11 +10,11 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 10         |
-| **Completed**    | 10         |
+| **Completed**    | 11         |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
 | **Not Started**  | 0          |
-| **Last Updated** | 2026-07-07 |
+| **Last Updated** | 2026-04-27 |
 
 ---
 
@@ -119,3 +119,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | 2026-04-26 | mode-2            | 7      | —             | —           | completed                                                                                            |
 | 2026-04-27 | copilot phase-8   | 8      | —             | —           | Final production hardening: 33 adapter methods, migration 000013, reconciliation worker, 14 tests; all 30 packages pass |
 | 2026-07-07 | copilot docs-sync | —      | —             | —           | Docs-sync: wired 5 unstarted workers (RunRiskController, RunRollbackWatchdog, RunEvaluator, RunUpdater, RunArchive) in cmd/server.go; make vet+test clean. Advisory: single-flag event bus prevents safe wiring of RunLearningRecord/RunShadowRecorder; RunShadowObserver/RunReconciliation need external clients. |
+| 2026-04-27 | mode-2            | 8      | —            | —           | completed |

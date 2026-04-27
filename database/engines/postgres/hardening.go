@@ -92,7 +92,7 @@ WITH claimed AS (
       AND invalidated_at IS NULL
       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
       AND event_type IN (%s)
-    ORDER BY logical_order_key ASC
+    ORDER BY logical_order_key ASC, event_id ASC
     LIMIT $5
     FOR UPDATE SKIP LOCKED
 )
@@ -336,12 +336,13 @@ ON CONFLICT (source_execution_id) WHERE source_execution_id IS NOT NULL DO NOTHI
 	return n > 0, nil
 }
 
-// ListOpenPositionsForReconciliation returns all open positions with wallet addresses.
+// ListOpenPositionsForReconciliation returns all open positions with wallet addresses and last-known on-chain amount.
 func (d *DB) ListOpenPositionsForReconciliation(ctx context.Context) ([]database.ReconciliationPosition, error) {
 	const q = `
 SELECT DISTINCT ON (p.position_id)
     p.position_id, p.token_address, p.chain, p.execution_id,
-    COALESCE(e.wallet_address, '') AS wallet_address
+    COALESCE(e.wallet_address, '') AS wallet_address,
+    COALESCE(p.amount_raw, '')     AS amount_raw
 FROM positions p
 LEFT JOIN execution_results e ON e.execution_id = p.execution_id
 WHERE p.status = 'open'
@@ -357,7 +358,7 @@ ORDER BY p.position_id, p.snapshot_at DESC`
 	for rows.Next() {
 		var r database.ReconciliationPosition
 		if err := rows.Scan(
-			&r.PositionID, &r.TokenAddress, &r.Chain, &r.ExecutionID, &r.WalletAddress,
+			&r.PositionID, &r.TokenAddress, &r.Chain, &r.ExecutionID, &r.WalletAddress, &r.AmountRaw,
 		); err != nil {
 			return nil, fmt.Errorf("ListOpenPositionsForReconciliation scan: %w", err)
 		}
@@ -366,15 +367,20 @@ ORDER BY p.position_id, p.snapshot_at DESC`
 	return result, rows.Err()
 }
 
-// AdjustPositionAmount updates the amount for a position and emits a reconciliation_event.
+// AdjustPositionAmount records an on-chain amount reconciliation event for an open position
+// without mutating price fields used by exit evaluation.
+// It writes the on-chain token balance to positions.amount_raw (not current_price, which
+// is a price decimal used by the position engine for TP/SL evaluation).
 func (d *DB) AdjustPositionAmount(ctx context.Context, positionID, onchainAmount, reason string) error {
 	return d.withTx(ctx, func(tx *sql.Tx) error {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		// Update amount_raw (on-chain token balance) and snapshot_at only.
+		// current_price is a float price string used for exit evaluation — do NOT overwrite it.
 		const upd = `
 UPDATE positions
-   SET current_price = $2,
-       snapshot_at   = $3
+   SET amount_raw  = $2,
+       snapshot_at = $3
 WHERE position_id = $1 AND status = 'open'`
-		now := time.Now().UTC().Format(time.RFC3339Nano)
 		if _, err := tx.ExecContext(ctx, upd, positionID, onchainAmount, now); err != nil {
 			return fmt.Errorf("AdjustPositionAmount update: %w", err)
 		}
@@ -391,12 +397,14 @@ ON CONFLICT DO NOTHING`
 }
 
 // ClosePositionForced closes an open position when on-chain balance is zero.
+// Uses status='exited' (not 'closed') so downstream evaluation and learning workers
+// that check for status='exited' can pick up the position for PnL recording.
 func (d *DB) ClosePositionForced(ctx context.Context, positionID, reason string) error {
 	return d.withTx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		const upd = `
 UPDATE positions
-   SET status      = 'closed',
+   SET status      = 'exited',
        exit_reason = $2,
        exited_at   = $3,
        snapshot_at = $3
@@ -463,12 +471,12 @@ WHERE chain    = $1
 	}
 
 	return contracts.LatencyProfileDTO{
-		EventID:          contracts.ContentIDFromString(chain + ":" + endpoint + ":" + opKind),
-		Chain:            chain,
-		ExpectedP50Ms:    int32(p50),
-		ExpectedP95Ms:    int32(p95),
+		EventID:           contracts.ContentIDFromString(chain + ":" + endpoint + ":" + opKind),
+		Chain:             chain,
+		ExpectedP50Ms:     int32(p50),
+		ExpectedP95Ms:     int32(p95),
 		WindowSizeSeconds: int32(windowSec),
-		EstimatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		EstimatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}, nil
 }
 
@@ -708,12 +716,17 @@ WHERE partition_leases.expires_at < CURRENT_TIMESTAMP
 }
 
 // RenewPartitions extends the expiry on all leases held by workerID.
+// Extension duration is read from d.cfg.PartitionLeaseTTLSec (default 60).
 func (d *DB) RenewPartitions(ctx context.Context, chain, consumer, workerID string) error {
+	ttlSec := d.cfg.PartitionLeaseTTLSec
+	if ttlSec <= 0 {
+		ttlSec = 60
+	}
 	const q = `
 UPDATE partition_leases
-   SET expires_at = CURRENT_TIMESTAMP + INTERVAL '60 seconds'
+   SET expires_at = CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second')
 WHERE chain = $1 AND consumer = $2 AND worker_id = $3`
-	if _, err := d.pool.ExecContext(ctx, q, chain, consumer, workerID); err != nil {
+	if _, err := d.pool.ExecContext(ctx, q, chain, consumer, workerID, ttlSec); err != nil {
 		return fmt.Errorf("RenewPartitions: %w", err)
 	}
 	return nil
@@ -842,25 +855,23 @@ ON CONFLICT (chain, old_block, detected_at) DO NOTHING`
 	return nil
 }
 
-// InvalidateBlockRange marks events in [fromBlock, toBlock] as invalidated.
+// InvalidateBlockRange marks unprocessed events in [fromBlock, toBlock] as invalidated.
+// When block_number is populated on the event (Phase 8+), filtering is precise.
+// When block_number = 0 (legacy events), events are NOT invalidated by range queries
+// (fromBlock > 0) to avoid incorrectly dropping unrelated events during a reorg.
+// Only events with processed = FALSE are eligible — already-processed events are left intact.
 func (d *DB) InvalidateBlockRange(ctx context.Context, chain string, fromBlock, toBlock int64) (int, error) {
-	// events.chain column was added by this migration; use correlation_id as proxy
-	// for chain identification when chain column is blank.
 	const q = `
 UPDATE events
    SET invalidated_at = CURRENT_TIMESTAMP
-WHERE chain BETWEEN '' AND 'zzz'
-  AND chain = $1
-  AND invalidated_at IS NULL
-  AND processed = FALSE
-RETURNING event_id`
-	_ = fromBlock
-	_ = toBlock
-	// Simplified: mark unprocessed events for the chain as invalidated.
-	// A production version would filter by block_number extracted from payload.
-	res, err := d.pool.ExecContext(ctx,
-		`UPDATE events SET invalidated_at=CURRENT_TIMESTAMP WHERE chain=$1 AND invalidated_at IS NULL`,
-		chain)
+WHERE chain           = $1
+  AND processed       = FALSE
+  AND invalidated_at  IS NULL
+  AND (
+       $2 = 0  -- no block range specified: invalidate all unprocessed chain events
+       OR (block_number > 0 AND block_number >= $2 AND block_number <= $3)
+  )`
+	res, err := d.pool.ExecContext(ctx, q, chain, fromBlock, toBlock)
 	if err != nil {
 		return 0, fmt.Errorf("InvalidateBlockRange: %w", err)
 	}
