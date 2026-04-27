@@ -19,9 +19,11 @@
    - [Linux (Ubuntu/Debian)](#22-linux-ubuntudebian)
    - [Windows](#23-windows)
 3. [Obtaining All Required Credentials](#3-obtaining-all-required-credentials)
-   - [Blockchain RPC Endpoints (Infura, Alchemy, QuickNode)](#31-blockchain-rpc-endpoints)
+   - [EVM RPC Endpoints (Infura, Alchemy, QuickNode)](#31-blockchain-rpc-endpoints)
    - [Telegram Bot Token](#32-telegram-bot-token)
-   - [Crypto Wallet Private Key](#33-crypto-wallet-private-key)
+   - [EVM Wallet Private Key](#33-crypto-wallet-private-key)
+   - [Solana RPC Endpoints (Phase 7)](#34-solana-rpc-endpoints-phase-7)
+   - [Solana Wallet Keypair (Phase 7)](#35-solana-wallet-keypair-phase-7)
 4. [Clone the Repository](#4-clone-the-repository)
 5. [Configure the Application](#5-configure-the-application)
    - [Create .env File](#51-create-env-file--all-environment-variables)
@@ -35,6 +37,7 @@
 10. [Monitoring & Health Check](#10-monitoring--health-check)
 11. [Common Errors and Fixes](#11-common-errors-and-fixes)
 12. [Reference — All Environment Variables](#12-reference--all-environment-variables)
+13. [Phase 7 & 8 Features Overview](#13-phase-7--8-features-overview)
 
 ---
 
@@ -50,13 +53,15 @@ detects new token launches on Uniswap (Ethereum) and PancakeSwap (BSC), scores t
 
 ### What the bot is made of
 
-| Component            | Technology                                        | Why                                            |
-| -------------------- | ------------------------------------------------- | ---------------------------------------------- |
-| Application language | **Go 1.25**                                       | Fast, compiled, low memory usage               |
-| Database             | **PostgreSQL**                                    | Stores all pipeline state, events, trades      |
-| Blockchain access    | **RPC endpoints** (Infura, Alchemy, or QuickNode) | Reads blockchain data and submits transactions |
-| Notifications        | **Telegram Bot API**                              | Sends alerts to your phone                     |
-| Blockchain wallet    | **Ethereum-compatible private key**               | Signs and submits on-chain transactions        |
+| Component            | Technology                                        | Why                                         |
+| -------------------- | ------------------------------------------------- | ------------------------------------------- |
+| Application language | **Go 1.25**                                       | Fast, compiled, low memory usage            |
+| Database             | **PostgreSQL**                                    | Stores all pipeline state, events, trades   |
+| EVM blockchain       | **RPC endpoints** (Infura, Alchemy, or QuickNode) | ETH/BSC: read data, submit EVM transactions |
+| Solana blockchain    | **Solana RPC endpoints** (Helius, Triton, QN)     | SOL: Raydium/PumpFun sniping (Phase 7)      |
+| Notifications        | **Telegram Bot API**                              | Sends alerts and accepts operator commands  |
+| EVM wallet           | **Ethereum private key**                          | Signs EVM transactions (ETH/BSC)            |
+| Solana wallet        | **Ed25519 keypair JSON file**                     | Signs Solana transactions (Phase 7)         |
 
 ### Minimum hardware requirements
 
@@ -259,15 +264,20 @@ git --version
 
 ## 3. Obtaining All Required Credentials
 
-You need three types of credentials:
+You need up to five types of credentials:
 
-1. **RPC endpoint URLs** — to read from and write to the blockchain
-2. **Telegram Bot Token + Chat ID** — to receive alerts on your phone
-3. **Wallet private key** — to sign and submit trades
+1. **EVM RPC endpoint URLs** — to read from and write to Ethereum and BSC
+2. **Telegram Bot Token + Chat ID** — to receive alerts and send commands
+3. **EVM Wallet private key** — to sign ETH/BSC trades
+4. **Solana RPC endpoint URLs** — to read from and write to Solana (Phase 7, required only if running Solana chain)
+5. **Solana Wallet keypair JSON file** — to sign Solana trades (Phase 7, required only if running Solana chain)
+
+> **Minimum setup:** To run the bot with only Ethereum or BSC, you only need credentials 1–3.
+> Solana credentials (4–5) are only required when you enable Solana in `config/chains.yaml`.
 
 ---
 
-### 3.1 Blockchain RPC Endpoints
+### 3.1 EVM Blockchain RPC Endpoints (Ethereum & BSC)
 
 An RPC (Remote Procedure Call) endpoint is a URL that lets your bot talk to the Ethereum or BSC
 blockchain. You cannot run the bot without at least one RPC endpoint.
@@ -449,13 +459,14 @@ SNIPER_TELEGRAM_BOT_TOKEN=1234567890:AABBCCDDEEFFaabbccddeeff1234567890
 SNIPER_TELEGRAM_CHAT_ID=123456789
 ```
 
-> **Note:** The Telegram dispatcher is implemented and ready in the codebase
-> (`internal/telegram/`). The wiring in `server.go` is being completed in Phase 6.
-> You still need these values now so you don't have to hunt for them later.
+> **Note:** The Telegram dispatcher is fully operational in the codebase
+> (`internal/telegram/`). It receives all notifications through the event bus and supports
+> operator commands: `/status`, `/mode`, `/pnl`, `/positions`, `/kill`, `/resume`, `/version`.
+> Set these values now — they take effect immediately.
 
 ---
 
-### 3.3 Crypto Wallet Private Key
+### 3.3 EVM Crypto Wallet Private Key
 
 The bot needs a wallet to sign and broadcast transactions on-chain. This wallet will hold real
 cryptocurrency (ETH or BNB) to pay for gas fees and buy tokens.
@@ -507,6 +518,206 @@ SNIPER_WALLET_3_KEY=privateKey3WithoutHexPrefix
 > **Where to buy ETH/BNB in Indonesia?** Registered Indonesian exchanges: **Indodax** (indodax.com),
 > **Tokocrypto** (tokocrypto.com), **Pintu** (pintu.co.id). Indodax and Tokocrypto both support
 > ETH and BNB trading pairs against IDR (Indonesian Rupiah).
+
+---
+
+### 3.4 Solana RPC Endpoints (Phase 7)
+
+> **Skip this section if you are not enabling Solana trading.** Solana support is controlled by
+> `config/chains.yaml`. If you leave the Solana block blank or don’t set the env vars, the
+> bot will simply not ingest Solana markets.
+
+Solana RPC endpoints work differently from EVM endpoints:
+
+- **HTTP RPC** — used for transaction submission and slot queries
+- **WebSocket** — used for real-time program log subscription (new pool detection on Raydium/PumpFun)
+
+You need both. The bot monitors **Raydium v4** and **PumpFun** programs on Solana mainnet.
+
+#### Option A — Helius (Best Free Tier for Solana, Recommended)
+
+Helius is the most popular Solana RPC provider with a generous free tier and Asia nodes.
+
+**How to sign up:**
+
+1. Go to [https://www.helius.dev](https://www.helius.dev) and click **Sign Up Free**
+2. Sign up with email or GitHub
+3. After logging in, go to **API Keys** in the dashboard
+4. You will see a default API key — click **Copy**
+5. Your Helius endpoints will be:
+
+```
+# Solana HTTP RPC
+SOLANA_RPC_HTTP_1=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
+
+# Solana WebSocket
+SOLANA_WS_1=wss://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
+```
+
+**Helius Free Tier Limits:** 1 million credits/month. One transaction fetch uses ~5 credits.
+Sufficient for testing. For production, the Developer plan ($49/month) gives 10M credits.
+
+> **Latency note for Jakarta users:** Helius does not have a Southeast Asia server as of 2026.
+> All requests route to US-East (~180ms from Jakarta). Use QuickNode Solana Singapore (Option B)
+> for lower latency.
+
+---
+
+#### Option B — QuickNode Solana (Best Latency from Jakarta)
+
+QuickNode has a Singapore Solana endpoint, which is the lowest-latency option from Jakarta.
+
+**How to get an endpoint:**
+
+1. Go to [https://www.quicknode.com](https://www.quicknode.com) and sign in
+2. Click **Create Endpoint**
+3. Select **Solana** → **Mainnet Beta**
+4. Under **Advanced settings**, select **Asia Pacific (Singapore)**
+5. Click **Create Endpoint**
+6. Copy the **HTTP Provider** and **WSS Provider** URLs
+
+```
+SOLANA_RPC_HTTP_1=https://YOUR-ENDPOINT.solana-mainnet.quiknode.pro/YOUR_KEY/
+SOLANA_WS_1=wss://YOUR-ENDPOINT.solana-mainnet.quiknode.pro/YOUR_KEY/
+```
+
+---
+
+#### Option C — Triton One (Professional Grade)
+
+Triton One is favored by high-frequency trading bots for its ultra-low latency and high throughput.
+
+1. Go to [https://triton.one](https://triton.one) and contact sales or sign up for an RPC node
+2. They provide dedicated endpoints — no shared rate limits
+3. Cost starts around $100–$300/month for a shared node
+
+> **Best for:** Production bots doing high-frequency sniping where every millisecond counts.
+
+---
+
+#### Option D — Free Public Solana Endpoints (Testing Only)
+
+```
+# Public Solana mainnet (rate-limited, not for production)
+SOLANA_RPC_HTTP_1=https://api.mainnet-beta.solana.com
+SOLANA_WS_1=wss://api.mainnet-beta.solana.com
+```
+
+> **Warning:** Public endpoints are heavily rate-limited (100 req/sec). They will throttle or
+> disconnect your bot under load. Use only for initial setup testing.
+
+---
+
+#### Solana RPC Provider Summary for Jakarta Users
+
+| Provider   | Price (Free)       | SEA Server?  | Recommended Use                     |
+| ---------- | ------------------ | ------------ | ----------------------------------- |
+| Helius     | 1M credits/month   | No (US-East) | Best free tier, backup for prod     |
+| QuickNode  | 8M credits/month   | ✅ Singapore | **Primary — best latency from SGP** |
+| Triton One | Paid only (~$100+) | Yes          | Production HFT, dedicated           |
+| Public API | Rate-limited free  | No           | Testing setup only                  |
+
+**Recommended setup for Jakarta users:**
+
+- Primary Solana: QuickNode Singapore
+- Fallback: Helius
+
+---
+
+### 3.5 Solana Wallet Keypair (Phase 7)
+
+> **Skip this section if you are not enabling Solana trading.**
+
+Solana wallets are different from Ethereum wallets. Instead of a 64-char hex private key, Solana
+uses a **keypair JSON file** — a JSON array of 64 bytes (seed + public key). This is the standard
+format output by the `solana-keygen` CLI tool.
+
+> ⚠️ **SECURITY WARNING:** Your keypair JSON file gives complete control over all funds in that
+> wallet. Treat it like a private key — never commit it to Git, never share it.
+> Store it in a secure location (e.g., `/etc/sniper/keys/` with permissions 600).
+
+#### Step 1 — Install the Solana CLI
+
+The easiest way to generate Solana keypairs is with the official Solana CLI.
+
+**macOS / Linux:**
+
+```bash
+# Install the Solana CLI
+sh -c "$(curl -sSfL https://release.solana.com/v1.18.0/install)"
+
+# Add to PATH
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+echo 'export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"' >> ~/.zshrc  # macOS
+echo 'export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"' >> ~/.bashrc # Linux
+
+# Verify
+solana --version
+```
+
+**Windows (WSL2):**
+
+Follow the Linux instructions inside your WSL2 Ubuntu terminal.
+
+**Windows (native, Git Bash):**
+
+```powershell
+# In PowerShell (as Administrator):
+curl https://release.solana.com/v1.18.0/solana-install-init-x86_64-pc-windows-msvc.exe --output C:\solana-install-init.exe
+C:\solana-install-init.exe v1.18.0
+```
+
+#### Step 2 — Generate a new keypair
+
+```bash
+# Create directory for keys (secure it)
+mkdir -p ~/.config/sniper/keys
+chmod 700 ~/.config/sniper/keys
+
+# Generate a new keypair JSON file
+solana-keygen new --outfile ~/.config/sniper/keys/solana-wallet-1.json
+
+# The tool will ask you to set a passphrase (press Enter to skip, or set one)
+# It prints your public key (wallet address) at the end
+# Example output:
+#   pubkey: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM
+```
+
+**Your wallet address** is the `pubkey` printed. **Fund this address with SOL** for gas fees.
+
+#### Step 3 — Get your wallet's public address
+
+```bash
+solana-keygen pubkey ~/.config/sniper/keys/solana-wallet-1.json
+# Prints: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM  (your actual address will differ)
+```
+
+#### Step 4 — Set the env var to the file path
+
+Unlike EVM wallets (where you pass the raw key), Solana wallets use the **file path**:
+
+```bash
+# In your .env file:
+SOLANA_WALLET_KEY_1=/home/your_username/.config/sniper/keys/solana-wallet-1.json
+```
+
+For a VPS or Docker, use the absolute path on the server:
+
+```bash
+# VPS example:
+SOLANA_WALLET_KEY_1=/etc/sniper/keys/solana-wallet-1.json
+```
+
+#### How much SOL do you need?
+
+| Purpose                 | Minimum          | Recommended     |
+| ----------------------- | ---------------- | --------------- |
+| Local testing (dry run) | 0                | 0               |
+| Live trading on Solana  | 0.1 SOL (~$15)   | 0.5–1 SOL       |
+| Gas reserve per wallet  | 0.01 SOL minimum | Always maintain |
+
+> **Where to buy SOL in Indonesia?** Registered exchanges: **Indodax**, **Tokocrypto**, **Pintu**.
+> All three support SOL/IDR trading pairs. Transfer SOL from exchange to your wallet address.
 
 ---
 
@@ -604,7 +815,27 @@ SNIPER_WALLET_KEY=yourPrivateKeyHere64CharHexNoPrefixNoQuotes
 # SNIPER_WALLET_3_KEY=shard3PrivateKey
 
 # =============================================================================
-# TELEGRAM (for notifications — wiring in progress in Phase 6)
+# BLOCKCHAIN RPC ENDPOINTS — Solana (required only if using Solana chain)
+# See Section 3.4 for how to obtain these from Helius or QuickNode Solana
+# =============================================================================
+
+# Solana HTTP RPC endpoint (for transaction submission and slot queries)
+SOLANA_RPC_HTTP_1=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
+
+# Solana WebSocket endpoint (for real-time Raydium/PumpFun log subscription)
+SOLANA_WS_1=wss://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
+
+# =============================================================================
+# SOLANA WALLET CONFIGURATION (required only if using Solana chain)
+# This is a FILE PATH to a JSON keypair file, NOT a raw private key.
+# See Section 3.5 for how to generate this file with solana-keygen.
+# =============================================================================
+
+# Path to the Solana keypair JSON file (64-byte array generated by solana-keygen)
+SOLANA_WALLET_KEY_1=/home/your_username/.config/sniper/keys/solana-wallet-1.json
+
+# =============================================================================
+# TELEGRAM (fully operational — see Section 3.2 for setup instructions)
 # =============================================================================
 
 SNIPER_TELEGRAM_BOT_TOKEN=1234567890:YourTelegramBotTokenHere
@@ -669,6 +900,30 @@ chains:
 > The `${...}` syntax is automatically replaced with your environment variable values at startup.
 > You do not need to change the YAML — just ensure your env vars are set correctly.
 
+**Solana chain (Phase 7)** is configured separately in the same file:
+
+```yaml
+# Phase 7: Solana ingestion configuration.
+solana:
+  chain_id: "solana"
+  confirmation_commitment: "confirmed"
+  rpc:
+    - url: "${SOLANA_RPC_HTTP_1}" # Set via env var
+      priority: 1
+      kind: http
+    - url: "${SOLANA_WS_1}" # Set via env var
+      priority: 1
+      kind: ws
+  programs:
+    - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8" # Raydium v4
+      family: raydium-v4
+    - program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" # PumpFun
+      family: pumpfun
+```
+
+If you do not set `SOLANA_RPC_HTTP_1` / `SOLANA_WS_1`, the Solana ingestion worker will not
+start — this is safe and does not affect EVM chains.
+
 #### `config/pipeline.yaml` — Core trading parameters
 
 The most important settings for beginners:
@@ -712,6 +967,15 @@ wallet_shard_count: 4
 
 # Use 'public' mempool for testing, 'private_flashbots' for MEV protection in production
 mempool_route: public
+
+# Phase 7: Solana execution parameters (only used when Solana chain is enabled)
+solana:
+  slippage_cap_bps: 200 # 2% max slippage on Solana swaps
+  confirm_timeout_ms: 15000 # Wait up to 15s for tx confirmation
+  max_send_attempts: 3 # Retry tx up to 3 times
+  priority_fee_lamports: 5000 # Tip for faster inclusion (1 lamport = 0.000000001 SOL)
+  wallet_key_paths:
+    - "${SOLANA_WALLET_KEY_1}" # File path to keypair JSON
 ```
 
 ---
@@ -782,7 +1046,10 @@ Running migration: 20260101000001_initial_schema.sql ... OK
 Running migration: 20260101000002_add_claimed_at.sql ... OK
 ...
 Running migration: 20260101000011_phase6_hardening.sql ... OK
-All migrations applied successfully
+Running migration: 20260101000012_solana_tables.sql ... OK
+Running migration: 20260101000013_production_hardening.sql ... OK
+Running migration: 20260101000014_pr_fixes.sql ... OK
+All 14 migrations applied successfully
 ```
 
 If you see a connection error, check that:
@@ -798,7 +1065,8 @@ psql -U sniper -d sniper -c "\dt"
 ```
 
 You should see a list of tables including `events`, `consumer_offsets`, `strategy_versions`,
-`pipeline_runs`, `token_lifecycle`, `positions`, `learning_records`, and others.
+`pipeline_runs`, `token_lifecycle`, `positions`, `learning_records`, `solana_slot_cursors`,
+`execution_receipts`, `dlq_events`, `partition_leases`, and others.
 
 ---
 
@@ -962,9 +1230,20 @@ services:
       SNIPER_WALLET_KEY: ${SNIPER_WALLET_KEY}
       SNIPER_TELEGRAM_BOT_TOKEN: ${SNIPER_TELEGRAM_BOT_TOKEN}
       SNIPER_TELEGRAM_CHAT_ID: ${SNIPER_TELEGRAM_CHAT_ID}
+      # Solana (Phase 7) - only required if using Solana chain
+      SOLANA_RPC_HTTP_1: ${SOLANA_RPC_HTTP_1:-}
+      SOLANA_WS_1: ${SOLANA_WS_1:-}
+      # SOLANA_WALLET_KEY_1 points to the keypair file inside the container.
+      # The file is mounted via the volume below.
+      SOLANA_WALLET_KEY_1: /keys/solana-wallet-1.json
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
       CONFIG_PATH: /app/config/pipeline.yaml
+    volumes:
+      # Mount your Solana keypair directory into the container.
+      # Only needed if SOLANA_WS_1 is set (i.e. Solana chain enabled).
+      # Replace the left side with the actual path on your host machine.
+      - /home/your_username/.config/sniper/keys:/keys:ro
     ports:
       - "8080:8080"
     depends_on:
@@ -1142,6 +1421,22 @@ Create `.env`:
 nano .env
 # Paste all your environment variables (same as Section 5.1)
 # Save with Ctrl+O, exit with Ctrl+X
+```
+
+If you are enabling Solana trading, also set up the keypair directory on the VPS:
+
+```bash
+# Create a secure directory for keys
+mkdir -p /etc/sniper/keys
+chmod 700 /etc/sniper/keys
+
+# Copy your keypair file from your local machine to the VPS:
+# Run this on your LOCAL machine (not on the VPS):
+scp ~/.config/sniper/keys/solana-wallet-1.json root@YOUR_SERVER_IP:/etc/sniper/keys/
+ssh root@YOUR_SERVER_IP "chmod 600 /etc/sniper/keys/solana-wallet-1.json"
+
+# Then in your .env on the VPS, set:
+# SOLANA_WALLET_KEY_1=/etc/sniper/keys/solana-wallet-1.json
 ```
 
 #### Step 5 — Set up PostgreSQL
@@ -1324,6 +1619,10 @@ make test-cover
 | `connection refused` on health check                      | Bot not started or wrong port | Check bot is running and `PORT` env var is correct                                       |
 | `migration already applied`                               | Running migrate-up twice      | This is safe — idempotent. Already-applied migrations are skipped.                       |
 | `go: module crypto-sniping-bot: not found`                | Running from wrong directory  | `cd` into the project root first                                                         |
+| `load keypair: read file: no such file`                   | Wrong Solana wallet path      | Check `SOLANA_WALLET_KEY_1` points to your actual `*.json` keypair file                  |
+| `parse keypair: expected 64 bytes`                        | Invalid Solana keypair file   | Re-generate with `solana-keygen new --outfile <path>.json`                               |
+| `websocket: dial wss://...`                               | Bad Solana WS URL             | Verify `SOLANA_WS_1` is correct and your Helius/QuickNode key has WebSocket access       |
+| `solana: rpc rate limit exceeded`                         | RPC plan limit hit            | Upgrade Helius/QuickNode plan or reduce scan frequency                                   |
 
 ---
 
@@ -1355,13 +1654,141 @@ cause startup failure if not set.
 | `SNIPER_WALLET_2_KEY`       | Optional     | —                      | Shard 2 private key                                           |
 | `SNIPER_WALLET_3_ADDRESS`   | Optional     | —                      | Shard 3 wallet address                                        |
 | `SNIPER_WALLET_3_KEY`       | Optional     | —                      | Shard 3 private key                                           |
+| `SOLANA_RPC_HTTP_1`         | Required‡    | —                      | Solana HTTP RPC endpoint (‡if Solana chain enabled)           |
+| `SOLANA_WS_1`               | Required‡    | —                      | Solana WebSocket endpoint (‡if Solana chain enabled)          |
+| `SOLANA_WALLET_KEY_1`       | Required‡    | —                      | File path to Solana keypair JSON (‡if Solana chain enabled)   |
 | `SNIPER_TELEGRAM_BOT_TOKEN` | Optional     | —                      | Telegram bot token (for notifications)                        |
 | `SNIPER_TELEGRAM_CHAT_ID`   | Optional     | —                      | Telegram chat/group ID (for notifications)                    |
 | `PORT`                      | Optional     | `8080`                 | HTTP server port for health check endpoint                    |
 | `LOG_LEVEL`                 | Optional     | `info`                 | Log verbosity: `debug`, `info`, `warn`, `error`               |
 | `CONFIG_PATH`               | Optional     | `config/pipeline.yaml` | Override path to main config file                             |
 
+> **‡ Solana variables** are only required when `config/chains.yaml` has a `solana:` block with
+> valid `rpc:` entries. If the env vars are absent, the Solana ingestion and execution workers
+> will not start. EVM (ETH/BSC) workers are unaffected.
+
 > **Security rule:** Never put private keys or the DB password in any YAML file or commit them
 > to Git. These values must only ever exist as environment variables.
 
 ---
+
+## 13. Phase 7 & 8 Features Overview
+
+This section explains what was added in Phase 7 (Solana Market) and Phase 8 (Production Hardening)
+so you can understand what the bot is doing under the hood.
+
+---
+
+### 13.1 Phase 7 — Solana Market Sniping
+
+Phase 7 added a complete Solana trading pipeline alongside the existing EVM (ETH/BSC) pipeline.
+Both pipelines run independently; they do not interfere with each other.
+
+#### What markets does it watch?
+
+The Solana ingestion module watches **two programs** in real time:
+
+| Program            | Program ID                                     | What it is                   |
+| ------------------ | ---------------------------------------------- | ---------------------------- |
+| **Raydium v4 AMM** | `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8` | Largest Solana DEX by volume |
+| **PumpFun**        | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`  | Meme-coin launch platform    |
+
+It uses the Solana WebSocket `logsSubscribe` API to get notified of new pool creation events
+in real time \u2014 equivalent to watching `PairCreated` events on EVM.
+
+#### Solana execution flow
+
+1. WebSocket subscription → `ingestion_solana` module detects new pool events
+2. Normalizes to `MarketDataDTO` and emits to the event bus
+3. Same 10-layer pipeline processes the event (Data Quality → Feature → Edge → Score → Select)
+4. `execution_solana` module signs the swap transaction using your Ed25519 keypair
+5. Submits to the Solana network; polls for confirmation up to `confirm_timeout_ms` (default: 15s)
+6. Wallet sharding: `hash(tokenAddress) % len(keypairs)` ensures one in-flight tx per wallet
+
+#### New Solana tables (Migration 000012)
+
+Migration `20260101000012_solana_tables.sql` adds:
+
+- `solana_slot_cursors` — tracks which Solana slot each program was last processed at (for gap recovery)
+- `solana_execution_receipts` — records on-chain signatures and confirmation status
+
+#### Solana keypair security
+
+The keypair JSON file (`solana-keygen new` output) contains a 64-byte array:
+
+- Bytes 0–31: Ed25519 private key seed
+- Bytes 32–63: Public key (derivable from seed — ignored on load)
+
+The file must have permission `600` (readable only by your user). On VPS:
+
+```bash
+chmod 600 /etc/sniper/keys/solana-wallet-1.json
+```
+
+---
+
+### 13.2 Phase 8 — Production Hardening
+
+Phase 8 added a set of reliability and safety mechanisms that operate transparently. You do not
+need to configure these for normal use — they activate automatically.
+
+#### What was added
+
+| Feature                   | What it does                                                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Reconciliation worker** | Detects positions the bot holds but has no open record for (e.g. after crash). Resolves discrepancy by emitting corrective events.                                                                     |
+| **Partition leasing**     | Workers claim exclusive ownership of event partitions via `partition_leases` table. Prevents two workers processing the same event on restart.                                                         |
+| **DLQ retry policy**      | Events that fail processing more than `max_transient_retries` (default: 5) times are moved to the Dead Letter Queue (DLQ). The DLQ worker retries them on a slower schedule.                           |
+| **Crash recovery**        | On restart, the bot detects in-flight executions (status = `submitted`) that were started before the crash. If they are older than `recovery_grace_sec` (default: 300s), it marks them for evaluation. |
+| **Reorg protection**      | On EVM chains, if a confirmed block is re-orged beyond `max_reorg_depth` (default: 12 blocks), the bot emits a halt event and stops trading until the chain stabilizes.                                |
+
+#### New tables (Migrations 000013–000014)
+
+Migration `20260101000013_production_hardening.sql` adds:
+
+- `partition_leases` — worker lease table with TTL
+- `dlq_events` — dead-letter queue for unprocessable events
+
+Migration `20260101000014_pr_fixes.sql` adds:
+
+- Index improvements and minor schema corrections from code review
+
+#### HardeningConfig parameters (in `config/pipeline.yaml`)
+
+All Phase 8 parameters have sensible defaults. You can override them in `config/pipeline.yaml`:
+
+```yaml
+hardening:
+  reconciliation_interval_ms: 30000 # Check for orphaned positions every 30s
+  reconciliation_tolerance_bps: 50 # 0.5% tolerance before flagging discrepancy
+  partition_lease_ttl_sec: 60 # Worker holds a partition for 60s max
+  max_transient_retries: 5 # Retry a failing event up to 5x before DLQ
+  max_application_retries: 3 # Retry application-logic errors up to 3x
+  recovery_grace_sec: 300 # Wait 5 min after crash before marking tx lost
+  max_reorg_depth: 12 # Halt if >12 blocks re-orged (EVM)
+```
+
+---
+
+### 13.3 Telegram Operator Commands (Phase 6, fully operational)
+
+The Telegram dispatcher (`internal/telegram/`) is fully wired and active. All notifications flow
+through the PostgreSQL event bus \u2014 modules never call Telegram directly.
+
+**Operator commands** (send from your Telegram chat to the bot):
+
+| Command          | What it does                                                           |
+| ---------------- | ---------------------------------------------------------------------- |
+| `/status`        | Shows current mode (STRICT/BALANCED/EXPLORATION), active positions     |
+| `/pnl`           | Shows today's realized PnL and win/loss rate                           |
+| `/positions`     | Lists all open positions with entry price and current P&L              |
+| `/mode strict`   | Switches to STRICT mode (conservative thresholds)                      |
+| `/mode balanced` | Switches to BALANCED mode (default)                                    |
+| `/mode explore`  | Switches to EXPLORATION mode (relaxed thresholds)                      |
+| `/kill`          | Triggers emergency kill switch \u2014 halts all new trades immediately |
+| `/resume`        | Resumes trading after kill switch (requires confirmation)              |
+| `/version`       | Shows current strategy version and config snapshot hash                |
+
+> **Note:** `/kill` and `/resume` are destructive commands. They are logged with timestamp and
+> require confirmation. The kill switch also fires automatically when daily drawdown exceeds the
+> `halt_drawdown_pct` threshold (default: 10%).

@@ -59,8 +59,36 @@ func (w *PositionOpenWorker) Process(ctx context.Context, evt *database.Event) (
 	// Without this, PnlUsd calculations and exposure risk controls are always zero.
 	pos.EntrySizeUsd = allocationSizeFromCorrelation(ctx, w.adapter, evt.CorrelationID, w.logger)
 
-	if err := w.adapter.InsertPositionState(ctx, pos); err != nil {
-		w.logger.Warn("position_open_worker_persist_failed", "event_id", pos.EventID, "error", err)
+	// Exactly-once position creation (architecture.md § 4.10.E, certification § E).
+	// UpsertPositionFromExecution uses ON CONFLICT (source_execution_id) DO NOTHING
+	// keyed on pos.ExecutionID, guaranteeing 1:1 binding between execution_id and
+	// open position. Re-delivery of the same execution_result_event yields
+	// created=false; we then suppress the lifecycle transition, but still re-emit
+	// the downstream position_state_event idempotently so the original handler's
+	// outputs remain recoverable across the crash window.
+	created, persistErr := w.adapter.UpsertPositionFromExecution(ctx, pos)
+	if persistErr != nil {
+		return nil, fmt.Errorf("position_open_worker: persist: %w", persistErr)
+	}
+	if !created {
+		// Duplicate redelivery: the prior delivery already persisted the position
+		// row and transitioned the lifecycle. We must NOT call doMandatoryTransition
+		// again (CAS would fail since lifecycle is no longer EXECUTED). However,
+		// we MUST re-emit the deterministically-derived position_state_event so a
+		// crash between UpsertPositionFromExecution and the outer InsertEvent
+		// (worker.go) cannot leave position monitoring permanently un-started.
+		// pos.EventID is content-addressable, InsertEvent is idempotent via
+		// ON CONFLICT (event_id), so re-emission is safe.
+		w.logger.Info("position_open_worker_duplicate_reemit",
+			"execution_id", pos.ExecutionID,
+			"event_id", pos.EventID,
+			"trace_id", evt.TraceID,
+			"correlation_id", evt.CorrelationID,
+		)
+		return makeOutputEvent(
+			pos.EventID, pos, "position_state_event",
+			evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+		)
 	}
 
 	nextState := "POSITION_OPEN"
