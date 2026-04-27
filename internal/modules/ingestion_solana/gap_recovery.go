@@ -79,33 +79,6 @@ func RecoverGap(
 			if instr.ProgramID != prog.ProgramID {
 				continue
 			}
-			var dto interface{}
-			switch prog.Family {
-			case "pumpfun":
-				dto, _ = NormalizePumpFunCreate(tx, instr, versionID)
-			case "raydium-v4":
-				dto, _ = NormalizeRaydiumPoolInit(tx, instr, versionID)
-			}
-			if dto == nil {
-				continue
-			}
-			switch d := dto.(type) {
-			case *interface{}:
-				_ = d
-			}
-		}
-
-		// Re-process using the same path as live events.
-		notif := LogsNotification{
-			Signature: sig,
-			Slot:      tx.Slot,
-		}
-		_ = notif // Handled below inline for better error reporting.
-
-		for _, instr := range tx.Instructions {
-			if instr.ProgramID != prog.ProgramID {
-				continue
-			}
 			var emitErr error
 			switch prog.Family {
 			case "pumpfun":
