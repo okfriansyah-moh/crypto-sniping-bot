@@ -22,7 +22,8 @@ func (m *Module) ProcessWithEstimates(
 	slip *contracts.SlippageEstimateDTO,
 	lat *contracts.LatencyProfileDTO,
 ) (contracts.ValidatedEdgeDTO, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	nowTime := time.Now().UTC()
+	now := nowTime.Format(time.RFC3339Nano)
 
 	p := m.cfg.PriorProbability
 	if prob != nil && prob.Probability > 0 && prob.Probability < 1 {
@@ -76,7 +77,7 @@ func (m *Module) ProcessWithEstimates(
 	gainBps := int32(p * float64(m.cfg.PriorGainBps))
 	lossBps := int32((1 - p) * float64(m.cfg.PriorLossBps))
 
-	expiresAt := time.Now().UTC().Add(
+	expiresAt := nowTime.Add(
 		time.Duration(m.cfg.TTLSeconds) * time.Second,
 	).Format(time.RFC3339Nano)
 
