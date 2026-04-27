@@ -219,7 +219,93 @@ func (a *dispatcherStubAdapter) UpsertSolanaIngestionWatermark(_ context.Context
 	return nil
 }
 
-// ── Dispatcher tests ──────────────────────────────────────────────────────────
+// ── Phase 8: Production Hardening stubs ──────────────────────────────────────
+
+func (a *dispatcherStubAdapter) ClaimNextEvents(_ context.Context, _ database.EventClaimQuery) ([]contracts.EventEnvelope, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) IncrementEventRetry(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
+func (a *dispatcherStubAdapter) MoveToDLQ(_ context.Context, _ database.DLQEntry) error { return nil }
+func (a *dispatcherStubAdapter) RequeueFromDLQ(_ context.Context, _ string) error       { return nil }
+func (a *dispatcherStubAdapter) ListDLQ(_ context.Context, _ database.DLQFilter) ([]database.DLQEntry, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) ClaimExecution(_ context.Context, _ contracts.AllocationDTO) (bool, error) {
+	return true, nil
+}
+func (a *dispatcherStubAdapter) UpsertPositionFromExecution(_ context.Context, _ contracts.PositionStateDTO) (bool, error) {
+	return true, nil
+}
+func (a *dispatcherStubAdapter) ListOpenPositionsForReconciliation(_ context.Context) ([]database.ReconciliationPosition, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) AdjustPositionAmount(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) ClosePositionForced(_ context.Context, _, _ string) error { return nil }
+func (a *dispatcherStubAdapter) InsertLatencyEvent(_ context.Context, _ database.LatencyEvent) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) GetLatencyProfile(_ context.Context, _, _, _ string, _ int) (contracts.LatencyProfileDTO, error) {
+	return contracts.LatencyProfileDTO{}, nil
+}
+func (a *dispatcherStubAdapter) PromoteStrategyVersion(_ context.Context, _ string, _ int) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool, error) {
+	return true, nil
+}
+func (a *dispatcherStubAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) IsSystemHalted(_ context.Context) (bool, string, error) {
+	return false, "", nil
+}
+func (a *dispatcherStubAdapter) ComputeStateHash(_ context.Context) (string, error) { return "", nil }
+func (a *dispatcherStubAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) RenewPartitions(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) ReleasePartitions(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) ListInFlightExecutions(_ context.Context) ([]database.InFlightExecution, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) FinalizeExecution(_ context.Context, _ string, _ database.ExecutionReceipt) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) AbortReservedExecution(_ context.Context, _, _ string) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) MarkExecutionLost(_ context.Context, _, _ string) error { return nil }
+func (a *dispatcherStubAdapter) RecordReorg(_ context.Context, _ string, _, _ int64, _ int) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) InvalidateBlockRange(_ context.Context, _ string, _, _ int64) (int, error) {
+	return 0, nil
+}
+func (a *dispatcherStubAdapter) MarkPositionsUncertain(_ context.Context, _ string, _ int64, _ string) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) ReResolveExecutionAfterReorg(_ context.Context, _, _ string, _ database.ReorgOutcome) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) RecordExecutionForEvaluation(_ context.Context, _ string, _ int) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) MarkEvaluationDone(_ context.Context, _ string) error { return nil }
+func (a *dispatcherStubAdapter) ListMissingEvaluations(_ context.Context) ([]database.MissingEvaluation, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+func (a *dispatcherStubAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }
 
 func TestNewDispatcher_NilLogger_DoesNotPanic(t *testing.T) {
 	adapter := &dispatcherStubAdapter{}

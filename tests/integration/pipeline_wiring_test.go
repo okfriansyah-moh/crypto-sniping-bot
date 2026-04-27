@@ -736,3 +736,77 @@ func (m *memAdapter) GetSolanaIngestionWatermark(_ context.Context, _ string) (u
 func (m *memAdapter) UpsertSolanaIngestionWatermark(_ context.Context, _ string, _ uint64) error {
 	return nil
 }
+
+// ── Phase 8: Production Hardening stubs ──────────────────────────────────────
+
+func (m *memAdapter) ClaimNextEvents(_ context.Context, _ database.EventClaimQuery) ([]contracts.EventEnvelope, error) {
+	return nil, nil
+}
+func (m *memAdapter) IncrementEventRetry(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
+func (m *memAdapter) MoveToDLQ(_ context.Context, _ database.DLQEntry) error { return nil }
+func (m *memAdapter) RequeueFromDLQ(_ context.Context, _ string) error       { return nil }
+func (m *memAdapter) ListDLQ(_ context.Context, _ database.DLQFilter) ([]database.DLQEntry, error) {
+	return nil, nil
+}
+func (m *memAdapter) ClaimExecution(_ context.Context, _ contracts.AllocationDTO) (bool, error) {
+	return true, nil
+}
+func (m *memAdapter) UpsertPositionFromExecution(_ context.Context, _ contracts.PositionStateDTO) (bool, error) {
+	return true, nil
+}
+func (m *memAdapter) ListOpenPositionsForReconciliation(_ context.Context) ([]database.ReconciliationPosition, error) {
+	return nil, nil
+}
+func (m *memAdapter) AdjustPositionAmount(_ context.Context, _, _, _ string) error { return nil }
+func (m *memAdapter) ClosePositionForced(_ context.Context, _, _ string) error     { return nil }
+func (m *memAdapter) InsertLatencyEvent(_ context.Context, _ database.LatencyEvent) error {
+	return nil
+}
+func (m *memAdapter) GetLatencyProfile(_ context.Context, _, _, _ string, _ int) (contracts.LatencyProfileDTO, error) {
+	return contracts.LatencyProfileDTO{}, nil
+}
+func (m *memAdapter) PromoteStrategyVersion(_ context.Context, _ string, _ int) error { return nil }
+func (m *memAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool, error) {
+	return true, nil
+}
+func (m *memAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error { return nil }
+func (m *memAdapter) IsSystemHalted(_ context.Context) (bool, string, error)     { return false, "", nil }
+func (m *memAdapter) ComputeStateHash(_ context.Context) (string, error)          { return "", nil }
+func (m *memAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
+	return nil, nil
+}
+func (m *memAdapter) RenewPartitions(_ context.Context, _, _, _ string) error   { return nil }
+func (m *memAdapter) ReleasePartitions(_ context.Context, _, _, _ string) error { return nil }
+func (m *memAdapter) ListInFlightExecutions(_ context.Context) ([]database.InFlightExecution, error) {
+	return nil, nil
+}
+func (m *memAdapter) FinalizeExecution(_ context.Context, _ string, _ database.ExecutionReceipt) error {
+	return nil
+}
+func (m *memAdapter) AbortReservedExecution(_ context.Context, _, _ string) error { return nil }
+func (m *memAdapter) MarkExecutionLost(_ context.Context, _, _ string) error      { return nil }
+func (m *memAdapter) RecordReorg(_ context.Context, _ string, _, _ int64, _ int) error {
+	return nil
+}
+func (m *memAdapter) InvalidateBlockRange(_ context.Context, _ string, _, _ int64) (int, error) {
+	return 0, nil
+}
+func (m *memAdapter) MarkPositionsUncertain(_ context.Context, _ string, _ int64, _ string) error {
+	return nil
+}
+func (m *memAdapter) ReResolveExecutionAfterReorg(_ context.Context, _, _ string, _ database.ReorgOutcome) error {
+	return nil
+}
+func (m *memAdapter) RecordExecutionForEvaluation(_ context.Context, _ string, _ int) error {
+	return nil
+}
+func (m *memAdapter) MarkEvaluationDone(_ context.Context, _ string) error { return nil }
+func (m *memAdapter) ListMissingEvaluations(_ context.Context) ([]database.MissingEvaluation, error) {
+	return nil, nil
+}
+func (m *memAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+func (m *memAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }

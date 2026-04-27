@@ -304,6 +304,143 @@ type Adapter interface {
 	// GetSolanaIngestionWatermark returns the last processed slot for a market.
 	// Returns 0 if no watermark exists yet.
 	GetSolanaIngestionWatermark(ctx context.Context, market string) (uint64, error)
+
+	// ── Phase 8: Production Hardening (architecture § 4.10) ─────────────────
+
+	// ClaimNextEvents claims a batch of unprocessed events for a given consumer
+	// and chain in strict ascending logical_order_key order, restricted to the
+	// worker's partition shard. NEVER orders by created_at.
+	ClaimNextEvents(ctx context.Context, q EventClaimQuery) ([]contracts.EventEnvelope, error)
+
+	// IncrementEventRetry increments the retry_count for an event and returns
+	// the new count. Used to decide whether to route to DLQ.
+	IncrementEventRetry(ctx context.Context, eventID, consumer string) (retryCount int, err error)
+
+	// MoveToDLQ moves a failed event to the dead_letter_events table and marks
+	// the source row as processed so the partition advances.
+	// Idempotent: ON CONFLICT (event_id) DO NOTHING.
+	MoveToDLQ(ctx context.Context, e DLQEntry) error
+
+	// RequeueFromDLQ re-inserts a DLQ event back into the events table for
+	// reprocessing. Clears its retry_count and processed flag.
+	RequeueFromDLQ(ctx context.Context, eventID string) error
+
+	// ListDLQ returns dead-letter events matching the given filter.
+	ListDLQ(ctx context.Context, filter DLQFilter) ([]DLQEntry, error)
+
+	// ClaimExecution atomically reserves an execution_id for exactly-once
+	// submission via INSERT ... ON CONFLICT DO NOTHING.
+	// Returns claimed=true if this caller is the first to claim the ID;
+	// false means another worker already claimed it — caller MUST NOT submit.
+	ClaimExecution(ctx context.Context, dto contracts.AllocationDTO) (claimed bool, err error)
+
+	// UpsertPositionFromExecution creates a position row keyed on
+	// source_execution_id with a UNIQUE constraint to enforce single-position
+	// per execution. Returns created=true on first insert, false on conflict.
+	UpsertPositionFromExecution(ctx context.Context, p contracts.PositionStateDTO) (created bool, err error)
+
+	// ListOpenPositionsForReconciliation returns all open positions with their
+	// wallet_address and token_address for on-chain reconciliation.
+	ListOpenPositionsForReconciliation(ctx context.Context) ([]ReconciliationPosition, error)
+
+	// AdjustPositionAmount updates the current_price / entry_size_usd of an
+	// open position to reflect an on-chain balance discrepancy and emits a
+	// reconciliation_event row.
+	AdjustPositionAmount(ctx context.Context, positionID string, onchainAmount string, reason string) error
+
+	// ClosePositionForced marks an open position as closed (status='closed')
+	// when the on-chain balance is zero. Emits a reconciliation_event row.
+	ClosePositionForced(ctx context.Context, positionID string, reason string) error
+
+	// InsertLatencyEvent records one execution latency sample.
+	// Idempotent: duplicate rows are harmless (no PK check required).
+	InsertLatencyEvent(ctx context.Context, le LatencyEvent) error
+
+	// GetLatencyProfile aggregates latency samples over windowSec and returns
+	// a LatencyProfileDTO with P50/P95 estimates.
+	GetLatencyProfile(ctx context.Context, chain, endpoint, opKind string, windowSec int) (contracts.LatencyProfileDTO, error)
+
+	// PromoteStrategyVersion atomically deactivates the current active version
+	// and activates newVersionID. Blocks until DrainAndCheckPipelineIdle returns
+	// true or drainTimeoutSec elapses (returns ErrDrainTimeout on timeout).
+	PromoteStrategyVersion(ctx context.Context, newVersionID string, drainTimeoutSec int) error
+
+	// DrainAndCheckPipelineIdle returns true when all in-flight events (claimed
+	// but not processed) have completed within timeoutSec.
+	DrainAndCheckPipelineIdle(ctx context.Context, timeoutSec int) (idle bool, err error)
+
+	// SetSystemHalt sets or clears the global kill switch. All execution workers
+	// MUST check IsSystemHalted before submitting any transaction.
+	SetSystemHalt(ctx context.Context, halt bool, reason, operator string) error
+
+	// IsSystemHalted returns the current kill switch state.
+	IsSystemHalted(ctx context.Context) (halted bool, reason string, err error)
+
+	// ComputeStateHash returns a deterministic hex digest over canonical pipeline
+	// state (positions, executions, strategy_versions). Used for replay validation.
+	ComputeStateHash(ctx context.Context) (hexDigest string, err error)
+
+	// ── Phase 8: Stage 4 Hardening (architecture § 4.11) ────────────────────
+
+	// ClaimPartitions acquires partition leases for the given worker.
+	// Returns the list of partition keys granted. Idempotent on re-claim.
+	ClaimPartitions(ctx context.Context, chain, consumer, workerID string, n, ttlSec int) ([]int, error)
+
+	// RenewPartitions extends the expiry of all leases held by workerID.
+	RenewPartitions(ctx context.Context, chain, consumer, workerID string) error
+
+	// ReleasePartitions removes all leases held by workerID.
+	ReleasePartitions(ctx context.Context, chain, consumer, workerID string) error
+
+	// ListInFlightExecutions returns execution_attempts rows in reserved or
+	// sent state for crash-safe recovery.
+	ListInFlightExecutions(ctx context.Context) ([]InFlightExecution, error)
+
+	// FinalizeExecution records the on-chain outcome (confirmed/reverted) for
+	// an in-flight execution attempt.
+	FinalizeExecution(ctx context.Context, executionID string, receipt ExecutionReceipt) error
+
+	// AbortReservedExecution clears a reserved execution_attempt so the
+	// execution_id can be retried by the next worker.
+	AbortReservedExecution(ctx context.Context, executionID, reason string) error
+
+	// MarkExecutionLost marks an execution as lost (tx never landed after
+	// recovery_grace_sec). Does NOT book a loss — capital is returned.
+	MarkExecutionLost(ctx context.Context, executionID, reason string) error
+
+	// RecordReorg records a chain reorganization event.
+	RecordReorg(ctx context.Context, chain string, oldBlock, newBlock int64, depth int) error
+
+	// InvalidateBlockRange marks events in [fromBlock, toBlock] as invalidated
+	// due to a reorg. Returns the number of affected rows.
+	InvalidateBlockRange(ctx context.Context, chain string, fromBlock, toBlock int64) (affected int, err error)
+
+	// MarkPositionsUncertain marks open positions whose execution confirmed in
+	// a reorged block range as status='uncertain'.
+	MarkPositionsUncertain(ctx context.Context, chain string, fromBlock int64, reason string) error
+
+	// ReResolveExecutionAfterReorg updates confirmation_status after a reorg
+	// resolution (re-included or dropped).
+	ReResolveExecutionAfterReorg(ctx context.Context, executionID, txHash string, outcome ReorgOutcome) error
+
+	// RecordExecutionForEvaluation registers an execution in the evaluation
+	// invariant table. Called immediately after ClaimExecution succeeds.
+	RecordExecutionForEvaluation(ctx context.Context, executionID string, deadlineSec int) error
+
+	// MarkEvaluationDone marks the evaluation invariant as complete for an
+	// execution. Called after the evaluation event is persisted.
+	MarkEvaluationDone(ctx context.Context, executionID string) error
+
+	// ListMissingEvaluations returns executions whose deadline has passed but
+	// no evaluation event has been recorded.
+	ListMissingEvaluations(ctx context.Context) ([]MissingEvaluation, error)
+
+	// GetUnprocessedCount returns the number of unprocessed events for a
+	// consumer + chain combination. Used for backpressure decisions.
+	GetUnprocessedCount(ctx context.Context, chain, consumer string) (int64, error)
+
+	// RecordDrop records a dropped ingestion event for observability.
+	RecordDrop(ctx context.Context, chain, reason, tokenAddress, score string) error
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────
@@ -311,18 +448,19 @@ type Adapter interface {
 // Config holds database connection parameters.
 // Values are loaded from config/pipeline.yaml via the config package.
 type Config struct {
-	Engine              string // postgres
-	Host                string
-	Port                int
-	Database            string
-	User                string
-	Password            string
-	SSLMode             string // disable | require | verify-ca | verify-full
-	MaxOpenConns        int
-	MaxIdleConns        int
-	ConnMaxLifetimeSecs int
-	MigrationsDir       string // absolute path to database/migrations/
-	ClaimTimeoutSecs    int    // seconds before a stale claim is eligible for re-claim (default 300)
+	Engine               string // postgres
+	Host                 string
+	Port                 int
+	Database             string
+	User                 string
+	Password             string
+	SSLMode              string // disable | require | verify-ca | verify-full
+	MaxOpenConns         int
+	MaxIdleConns         int
+	ConnMaxLifetimeSecs  int
+	MigrationsDir        string // absolute path to database/migrations/
+	ClaimTimeoutSecs     int    // seconds before a stale claim is eligible for re-claim (default 300)
+	PartitionLeaseTTLSec int    // TTL for partition leases in seconds (default 60); used by RenewPartitions
 }
 
 // Event is the event bus row representation.
@@ -339,6 +477,20 @@ type Event struct {
 	Processed     bool
 	Priority      int    // higher = processed first; default 0
 	ExpiresAt     string // ISO 8601 UTC; "" = no expiry
+	// Phase 8 routing fields — required for ClaimNextEvents partitioned workers.
+	// Set to the source chain (e.g. "eth-uniswap-v2") and consuming worker group.
+	Chain    string // source chain identifier; "" = unrouted (legacy)
+	Consumer string // target consumer group; "" = unrouted (legacy)
+	// LogicalOrderKey is a big-endian byte representation of created_at nanoseconds.
+	// Auto-generated by InsertEvent if not set. Used for deterministic ordering.
+	LogicalOrderKey []byte // big-endian int64 nanoseconds since epoch
+	// PartitionKey pre-computed shard index for the dispatch index.
+	// Auto-generated by InsertEvent as HASHTEXT(correlation_id) % total_partitions.
+	// Zero is the default partition and is always valid.
+	PartitionKey int
+	// BlockNumber is the on-chain block in which this event was observed.
+	// Zero means unknown. Used by InvalidateBlockRange for reorg filtering.
+	BlockNumber int64
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
@@ -436,18 +588,122 @@ type SolanaEndpointState struct {
 type SolanaSignature struct {
 	ExecutionID string
 	Signature   string
-	Status      string  // pending | confirmed | failed | expired
-	Slot        int64   // confirmed slot; 0 if pending
-	ErrMsg      string  // non-empty if failed
-	CreatedAt   string  // ISO 8601
+	Status      string // pending | confirmed | failed | expired
+	Slot        int64  // confirmed slot; 0 if pending
+	ErrMsg      string // non-empty if failed
+	CreatedAt   string // ISO 8601
 }
 
 // SolanaEndpointHealth holds rolling health metrics for a Solana RPC endpoint.
 type SolanaEndpointHealth struct {
-	EndpointURL   string
-	P95LatencyMs  int32
-	ErrorRate     float64
-	SuccessCount  int64
-	FailureCount  int64
-	UpdatedAt     string // ISO 8601
+	EndpointURL  string
+	P95LatencyMs int32
+	ErrorRate    float64
+	SuccessCount int64
+	FailureCount int64
+	UpdatedAt    string // ISO 8601
+}
+
+// ── Phase 8 Domain Types ─────────────────────────────────────────────────────
+
+// EventClaimQuery carries the parameters for ClaimNextEvents.
+// Partition assignment: HASHTEXT(correlation_id) % NumWorkers == WorkerID.
+// Events are returned sorted by logical_order_key ASC, event_id ASC — callers MUST NOT
+// reorder them.
+type EventClaimQuery struct {
+	Chain          string   // required
+	Consumer       string   // required
+	EventTypes     []string // required; exact match on event_type
+	WorkerID       int      // this worker's shard index (0-based)
+	NumWorkers     int      // total shard count (must be > 0)
+	Limit          int      // max rows to return (default 10 if 0)
+	MinOrderingKey []byte   // resume cursor; nil = start from beginning
+}
+
+// DLQEntry is a row in the dead_letter_events table.
+type DLQEntry struct {
+	EventID       string // PK — matches events.event_id
+	Chain         string
+	Consumer      string
+	Reason        string // "transient_exceeded"|"application_error"|"version_mismatch"|"determinism_violation"
+	ErrorMessage  string
+	RetryCount    int
+	FirstFailedAt string // ISO 8601
+	LastFailedAt  string // ISO 8601
+	MovedToDLQAt  string // ISO 8601
+	TraceID       string
+	CorrelationID string
+	CausationID   *string
+	VersionID     string
+	PayloadJSON   []byte // snapshot of the original event payload
+}
+
+// DLQFilter constrains a ListDLQ query.
+type DLQFilter struct {
+	Consumer string // optional; "" = all consumers
+	Reason   string // optional; "" = all reasons
+	Limit    int    // max rows; 0 = 100
+}
+
+// LatencyEvent is one raw execution latency sample written to latency_events.
+type LatencyEvent struct {
+	ExecutionID             string
+	Chain                   string
+	Endpoint                string
+	VersionID               string
+	OpKind                  string // execute|confirm|rpc_call
+	DecisionToSendMs        int
+	SendToFirstObserveMs    int
+	FirstObserveToConfirmMs int
+	TotalMs                 int
+	Outcome                 string // confirmed|reverted|dropped|timeout
+	ObservedAt              string // ISO 8601
+}
+
+// InFlightExecution is an execution_attempt in reserved or sent state.
+// Used by crash-safe recovery to detect and finalize stuck transactions.
+type InFlightExecution struct {
+	ExecutionID   string
+	AttemptNumber int
+	TxHash        *string
+	Status        string // reserved|sent
+	Nonce         *int64
+	GasPriceWei   string
+	SentAt        *string // ISO 8601; nil if not yet sent
+	ObservedAt    string  // ISO 8601
+}
+
+// ExecutionReceipt carries the on-chain outcome of an execution attempt.
+type ExecutionReceipt struct {
+	TxHash      string
+	BlockNumber int64
+	Status      string // confirmed|reverted|lost
+	ErrMsg      string // non-empty on revert/lost
+}
+
+// MissingEvaluation is returned by ListMissingEvaluations for executions
+// whose evaluation deadline has passed without a corresponding evaluation event.
+type MissingEvaluation struct {
+	ExecutionID string
+	DeadlineAt  string // ISO 8601
+}
+
+// ReorgOutcome is the resolution of a reorged execution.
+type ReorgOutcome string
+
+const (
+	ReorgOutcomeReincluded ReorgOutcome = "re_included"    // tx landed in new chain
+	ReorgOutcomeDropped    ReorgOutcome = "reorged_out"    // tx not in new chain
+	ReorgOutcomeMutation   ReorgOutcome = "reorg_mutation" // tx modified by reorg
+)
+
+// ReconciliationPosition is an open position enriched with wallet_address.
+// Returned by ListOpenPositionsForReconciliation for on-chain balance checks.
+type ReconciliationPosition struct {
+	PositionID    string
+	TokenAddress  string
+	Chain         string
+	WalletAddress string // from execution_results.wallet_address
+	ExecutionID   string
+	AmountRaw     string // last known on-chain amount; empty if unknown
 }

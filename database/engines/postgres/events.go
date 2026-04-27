@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -16,21 +17,52 @@ import (
 // Idempotent: ON CONFLICT (event_id) DO NOTHING.
 // Validates trace_id, correlation_id, and version_id.
 // Returns ErrMissingTraceField if required trace fields are absent.
+//
+// Phase 8 routing fields (chain, consumer, logical_order_key, partition_key,
+// block_number) are auto-populated when not set by the caller:
+//   - logical_order_key: big-endian nanosecond timestamp (deterministic ordering)
+//   - partition_key: HASHTEXT(correlation_id) % 256 (deterministic sharding)
+//   - chain/consumer: empty string default (legacy events; set explicitly for Phase 8 workers)
 func (d *DB) InsertEvent(ctx context.Context, evt database.Event) error {
 	if evt.TraceID == "" || evt.CorrelationID == "" || evt.VersionID == "" {
 		return database.ErrMissingTraceField
 	}
 
-	const q = `
-		INSERT INTO events
-		    (event_id, event_type, payload, trace_id, correlation_id, causation_id, version_id, created_at, processed)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
-		ON CONFLICT (event_id) DO NOTHING`
-
 	createdAt := evt.CreatedAt
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
+
+	// Auto-compute logical_order_key from nanosecond timestamp for deterministic ordering.
+	logicalOrderKey := evt.LogicalOrderKey
+	if len(logicalOrderKey) == 0 {
+		t, parseErr := time.Parse(time.RFC3339Nano, createdAt)
+		if parseErr != nil {
+			t = time.Now().UTC()
+		}
+		logicalOrderKey = make([]byte, 8)
+		binary.BigEndian.PutUint64(logicalOrderKey, uint64(t.UnixNano()))
+	}
+
+	// Auto-compute partition_key as a simple hash of correlation_id mod 256.
+	partitionKey := evt.PartitionKey
+	if partitionKey == 0 && evt.CorrelationID != "" {
+		var h int
+		for _, c := range evt.CorrelationID {
+			h = h*31 + int(c)
+		}
+		if h < 0 {
+			h = -h
+		}
+		partitionKey = h % 256
+	}
+
+	const q = `
+		INSERT INTO events
+		    (event_id, event_type, payload, trace_id, correlation_id, causation_id, version_id,
+		     created_at, processed, chain, consumer, logical_order_key, partition_key, block_number)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, $9, $10, $11, $12, $13)
+		ON CONFLICT (event_id) DO NOTHING`
 
 	_, err := d.pool.ExecContext(ctx, q,
 		evt.EventID,
@@ -41,6 +73,11 @@ func (d *DB) InsertEvent(ctx context.Context, evt database.Event) error {
 		evt.CausationID,
 		evt.VersionID,
 		createdAt,
+		evt.Chain,
+		evt.Consumer,
+		logicalOrderKey,
+		partitionKey,
+		evt.BlockNumber,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError

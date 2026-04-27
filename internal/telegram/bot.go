@@ -16,6 +16,9 @@ import (
 	"time"
 )
 
+// maxResponseBytes caps the Telegram API response size to prevent unbounded reads.
+const maxResponseBytes = 1 << 20 // 1 MiB
+
 // Client is a minimal Telegram Bot API client.
 // Only SendMessage is needed for the dispatcher.
 type Client struct {
@@ -81,7 +84,7 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("telegram: read response: %w", err)
 	}

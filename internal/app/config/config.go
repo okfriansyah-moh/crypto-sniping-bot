@@ -35,6 +35,7 @@ type Config struct {
 	Retention    RetentionConfig        `yaml:"retention"`
 	MEV          MEVConfig              `yaml:"mev"`
 	Budgets      BudgetsConfig          `yaml:"budgets"`
+	Hardening    HardeningConfig        `yaml:"hardening"` // Phase 8 production hardening
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -337,6 +338,36 @@ type BudgetsConfig struct {
 	GasSystemDailyCapGwei int64 `yaml:"gas_system_daily_cap_gwei"`
 	// ComputeMaxQueueDepth is the maximum number of pending events before shedding (default: 1000).
 	ComputeMaxQueueDepth int `yaml:"compute_max_queue_depth"`
+}
+
+// HardeningConfig holds Phase 8 production hardening parameters.
+type HardeningConfig struct {
+	// Reconciliation worker parameters (§ 4.10.E.2).
+	ReconciliationIntervalMs int `yaml:"reconciliation_interval_ms"` // default: 30000
+	ReconciliationToleranceBps int `yaml:"reconciliation_tolerance_bps"` // default: 50 (0.5%)
+
+	// Worker partition parameters (§ 4.11.B).
+	PartitionLeaseTTLSec    int `yaml:"partition_lease_ttl_sec"`    // default: 60
+	PartitionRenewIntervalSec int `yaml:"partition_renew_interval_sec"` // default: 30
+
+	// DLQ retry policy (§ 4.10.C).
+	MaxTransientRetries    int `yaml:"max_transient_retries"`    // default: 5
+	MaxApplicationRetries  int `yaml:"max_application_retries"`  // default: 3
+
+	// Event bus batch size for ClaimNextEvents.
+	EventClaimBatchSize int `yaml:"event_claim_batch_size"` // default: 10
+
+	// Drain timeout for PromoteStrategyVersion (seconds).
+	DrainTimeoutSec int `yaml:"drain_timeout_sec"` // default: 60
+
+	// Evaluation deadline in seconds after execution.
+	EvaluationDeadlineSec int `yaml:"evaluation_deadline_sec"` // default: 3600
+
+	// Crash recovery: grace period before marking execution lost.
+	RecoveryGraceSec int `yaml:"recovery_grace_sec"` // default: 300
+
+	// Reorg protection: max reorg depth before triggering halt.
+	MaxReorgDepth int `yaml:"max_reorg_depth"` // default: 12 for EVM
 }
 
 // Load reads configuration from one or more YAML config files.
