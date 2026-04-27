@@ -63,11 +63,12 @@ func (w *PositionOpenWorker) Process(ctx context.Context, evt *database.Event) (
 	// UpsertPositionFromExecution uses ON CONFLICT (source_execution_id) DO NOTHING
 	// keyed on pos.ExecutionID, guaranteeing 1:1 binding between execution_id and
 	// open position. Re-delivery of the same execution_result_event yields
-	// created=false; we then suppress the downstream position_state_event and the
-	// lifecycle transition so the original handler's outputs remain authoritative.
+	// created=false; we then suppress the lifecycle transition, but still re-emit
+	// the downstream position_state_event idempotently so the original handler's
+	// outputs remain recoverable across the crash window.
 	created, persistErr := w.adapter.UpsertPositionFromExecution(ctx, pos)
 	if persistErr != nil {
-		w.logger.Warn("position_open_worker_persist_failed", "event_id", pos.EventID, "error", persistErr)
+		return nil, fmt.Errorf("position_open_worker: persist: %w", persistErr)
 	}
 	if !created {
 		// Duplicate redelivery: the prior delivery already persisted the position

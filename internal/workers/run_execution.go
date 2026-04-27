@@ -126,7 +126,24 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 				"token_lifecycle_id", alloc.TokenLifecycleID,
 				"error", lookupErr,
 			)
-			return nil, nil
+			// Return an error so the orchestrator retries or DLQ's this event
+			// rather than calling MarkEventProcessed and permanently dropping it.
+			return nil, fmt.Errorf("execution_worker: duplicate redelivery lookup failed for lifecycle %s: %w", alloc.TokenLifecycleID, lookupErr)
+		}
+		// A stale reservation row (status="reserved") means ClaimExecution succeeded
+		// but InsertExecutionResult never ran. Its EventID equals the current allocation
+		// event_id, so re-emitting it would collide in the event bus and never produce
+		// an execution_result_event. Treat as a hard failure so the event is retried
+		// or DLQ'd for manual recovery of the stale reservation.
+		if prior.Status == "reserved" {
+			w.logger.Warn("execution_worker_stale_reservation",
+				"execution_id", alloc.ExecutionID,
+				"event_id", evt.EventID,
+				"trace_id", evt.TraceID,
+				"correlation_id", evt.CorrelationID,
+				"token_lifecycle_id", alloc.TokenLifecycleID,
+			)
+			return nil, fmt.Errorf("execution_worker: stale reserved execution for lifecycle %s — needs recovery before retry", alloc.TokenLifecycleID)
 		}
 		w.logger.Info("execution_worker_duplicate_reemit",
 			"execution_id", alloc.ExecutionID,

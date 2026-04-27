@@ -142,7 +142,7 @@ func handleStageFailure(
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		entry := database.DLQEntry{
 			EventID:       evt.EventID,
-			Chain:         "", // filled by adapter from event row when not provided
+			Chain:         evt.Chain,
 			Consumer:      group,
 			Reason:        "transient_exceeded",
 			ErrorMessage:  stageErr.Error(),
