@@ -96,6 +96,52 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		return nil, fmt.Errorf("execution_worker: unmarshal: %w", err)
 	}
 
+	// Exactly-once execution gate (architecture.md § 4.10.D, certification § D+E).
+	// ClaimExecution atomically reserves execution_id via INSERT ... ON CONFLICT DO NOTHING
+	// BEFORE any nonce allocation or transaction submission. On a duplicate redelivery
+	// of the same allocation event (e.g. claim_token expiry, MarkEventProcessed failure,
+	// worker crash mid-flow), the second attempt observes claimed=false and returns
+	// without re-broadcasting the transaction. This is the only barrier preventing
+	// duplicate on-chain trades against real capital.
+	claimed, claimErr := w.adapter.ClaimExecution(ctx, alloc)
+	if claimErr != nil {
+		return nil, fmt.Errorf("execution_worker: claim: %w", claimErr)
+	}
+	if !claimed {
+		// Duplicate redelivery: side effects (InsertExecutionResult + lifecycle
+		// transition) were already applied on the first delivery. We must NOT
+		// re-broadcast the transaction or re-transition the lifecycle. However,
+		// we MUST re-emit the same downstream execution_result_event so that
+		// a crash window between InsertExecutionResult and outer InsertEvent
+		// (worker.go) cannot leave the pipeline stuck with no position ever
+		// opened. InsertEvent is idempotent via ON CONFLICT (event_id),
+		// so re-emission is safe.
+		prior, lookupErr := w.adapter.GetExecutionByLifecycle(ctx, alloc.TokenLifecycleID)
+		if lookupErr != nil || prior == nil {
+			w.logger.Warn("execution_worker_duplicate_lookup_failed",
+				"execution_id", alloc.ExecutionID,
+				"event_id", evt.EventID,
+				"trace_id", evt.TraceID,
+				"correlation_id", evt.CorrelationID,
+				"token_lifecycle_id", alloc.TokenLifecycleID,
+				"error", lookupErr,
+			)
+			return nil, nil
+		}
+		w.logger.Info("execution_worker_duplicate_reemit",
+			"execution_id", alloc.ExecutionID,
+			"event_id", evt.EventID,
+			"prior_event_id", prior.EventID,
+			"trace_id", evt.TraceID,
+			"correlation_id", evt.CorrelationID,
+			"token_lifecycle_id", alloc.TokenLifecycleID,
+		)
+		return makeOutputEvent(
+			prior.EventID, *prior, "execution_result_event",
+			evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+		)
+	}
+
 	// Kill-switch pre-check (Phase 6): only exit events pass through HALTED mode.
 	// Allocation events are new entry events and must be blocked when HALTED.
 	if state, stateErr := w.adapter.GetSystemState(ctx); stateErr == nil && state != nil && state.Mode == "HALTED" {

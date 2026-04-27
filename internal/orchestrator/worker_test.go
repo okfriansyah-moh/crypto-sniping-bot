@@ -26,6 +26,11 @@ type workerAdapter struct {
 	inserted     []database.Event  // events passed to InsertEvent
 	markErr      error             // returned by MarkEventProcessed if set
 	insertOutErr error             // returned by InsertEvent if set
+
+	// DLQ instrumentation (CRIT-2 retry+DLQ wiring).
+	retryCounts atomic.Int32        // per-event retry counter; bumped each IncrementEventRetry
+	dlqEntries  []database.DLQEntry // entries passed to MoveToDLQ
+	dlqErr      error               // returned by MoveToDLQ if set
 }
 
 func newWorkerAdapter(events ...*database.Event) *workerAdapter {
@@ -60,6 +65,21 @@ func (w *workerAdapter) InsertEvent(_ context.Context, evt database.Event) error
 		return w.insertOutErr
 	}
 	w.inserted = append(w.inserted, evt)
+	return nil
+}
+
+// IncrementEventRetry overrides mockAdapter to monotonically count failures.
+// Returns the new retry count so RunWorker can decide release-vs-DLQ.
+func (w *workerAdapter) IncrementEventRetry(_ context.Context, _, _ string) (int, error) {
+	return int(w.retryCounts.Add(1)), nil
+}
+
+// MoveToDLQ overrides mockAdapter to capture DLQ entries for assertions.
+func (w *workerAdapter) MoveToDLQ(_ context.Context, e database.DLQEntry) error {
+	if w.dlqErr != nil {
+		return w.dlqErr
+	}
+	w.dlqEntries = append(w.dlqEntries, e)
 	return nil
 }
 
@@ -240,4 +260,84 @@ func TestRunWorker_NilLogger_DoesNotPanic(t *testing.T) {
 
 	// Act / Assert: must not panic
 	orchestrator.RunWorker(ctx, adapter, "group-nil", []string{"event.nil"}, returnNilHandler{}, time.Millisecond, nil) //nolint:errcheck
+}
+
+// TestRunWorker_PoisonPill_MovesToDLQ verifies that an event whose handler
+// fails repeatedly is moved to dead_letter_events once retry_count exceeds
+// maxRetries — the poison-pill barrier required by architecture.md § 4.10.
+//
+// Without this barrier, a malformed payload or persistent module bug would
+// loop forever in the queue and block the pipeline.
+func TestRunWorker_PoisonPill_MovesToDLQ(t *testing.T) {
+	// Arrange: same event repeated until DLQ takes it.
+	const maxRetries = 2
+	evt := &database.Event{
+		EventID:       "evt-poison",
+		EventType:     "event.dlq",
+		TraceID:       "t-dlq",
+		CorrelationID: "c-dlq",
+		VersionID:     "v-dlq",
+		Payload:       []byte(`{"poison":true}`),
+	}
+	// Re-deliver the same event 5 times — exceeds maxRetries=2.
+	adapter := newWorkerAdapter(evt, evt, evt, evt, evt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	handler := errorHandler{err: errors.New("permanent failure")}
+
+	// Act
+	orchestrator.RunWorker(ctx, adapter, "group-dlq", []string{"event.dlq"}, handler, time.Millisecond, nil, maxRetries) //nolint:errcheck
+
+	// Assert: at least one DLQ entry recorded.
+	if len(adapter.dlqEntries) == 0 {
+		t.Fatal("expected MoveToDLQ to be called once retry_count > maxRetries")
+	}
+	got := adapter.dlqEntries[0]
+	if got.EventID != "evt-poison" {
+		t.Errorf("expected DLQ EventID=evt-poison, got %q", got.EventID)
+	}
+	if got.Consumer != "group-dlq" {
+		t.Errorf("expected DLQ Consumer=group-dlq, got %q", got.Consumer)
+	}
+	if got.Reason != "transient_exceeded" {
+		t.Errorf("expected DLQ Reason=transient_exceeded, got %q", got.Reason)
+	}
+	if got.RetryCount <= maxRetries {
+		t.Errorf("expected DLQ RetryCount > %d, got %d", maxRetries, got.RetryCount)
+	}
+	if got.ErrorMessage == "" {
+		t.Error("expected DLQ ErrorMessage to be populated")
+	}
+	// MarkEventProcessed must NOT be called — MoveToDLQ handles that internally
+	// inside the postgres adapter (UPDATE events SET processed=TRUE).
+	if len(adapter.marked) != 0 {
+		t.Errorf("expected MarkEventProcessed NOT to be called by RunWorker on DLQ path, got %v", adapter.marked)
+	}
+}
+
+// TestRunWorker_TransientFailure_ReleasesClaim_NotDLQ verifies that a single
+// handler failure (count <= maxRetries) re-releases the claim instead of
+// moving to DLQ. This guards against the regression where the new retry
+// counter would prematurely DLQ events on the very first failure.
+func TestRunWorker_TransientFailure_ReleasesClaim_NotDLQ(t *testing.T) {
+	// Arrange
+	evt := &database.Event{EventID: "evt-transient", EventType: "event.t", TraceID: "tt", CorrelationID: "ct", VersionID: "vt"}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	adapter := newWorkerAdapter(evt) // single delivery; loop will sleep on subsequent calls
+	handler := errorHandler{err: errors.New("blip")}
+
+	// Act: maxRetries=5 (default-ish); a single failure must NOT DLQ.
+	orchestrator.RunWorker(ctx, adapter, "group-trans", []string{"event.t"}, handler, time.Millisecond, nil, 5) //nolint:errcheck
+
+	// Assert
+	if len(adapter.dlqEntries) != 0 {
+		t.Errorf("expected no DLQ entries on first failure, got %d", len(adapter.dlqEntries))
+	}
+	if len(adapter.released) == 0 {
+		t.Fatal("expected ReleaseEventClaim on transient failure")
+	}
 }

@@ -87,7 +87,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			if idleBackoff == 0 {
 				idleBackoff = 100 * time.Millisecond
 			}
-			err := RunWorker(ctx, o.db, entry.Group, entry.EventTypes, entry.Handler, idleBackoff, o.logger)
+			err := RunWorker(ctx, o.db, entry.Group, entry.EventTypes, entry.Handler, idleBackoff, o.logger, o.cfg.Worker.MaxRetryCount)
 			if err != nil && err != ctx.Err() {
 				errCh <- fmt.Errorf("worker %s: %w", entry.Group, err)
 			}
