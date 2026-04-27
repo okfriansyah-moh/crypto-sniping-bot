@@ -31,7 +31,7 @@
 | 6     | Observability & Risk       | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
 | —     | Production Hardening       | completed   | 0           | 8 critical/significant/moderate fixes: C4 CAS bypass, C2 circuit-breaker wiring, C3 hardcoded ETH price, S4 hardcoded gas limit, S6 hardcoded poll timeouts, C1 wallet sharding, S3 double MarkEventProcessed, M1 unstructured logging. Build/vet/all-30-packages clean.  |
 | 7     | Solana Market              | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
-| 8     | Final Production Hardening | not-started | 0           | Migration 000013 (DLQ, ordering, exactly-once, reconciliation, latency feedback, reorg handling, evaluation invariant, backpressure); new adapter methods; reconciliation + replay-validation workers. Mandatory before mainnet.                                          |
+| 8     | Final Production Hardening | completed   | 0           | Migration 000013 (DLQ, ordering, exactly-once, reconciliation, latency feedback, reorg handling, evaluation invariant, backpressure); 33 new adapter methods; postgres/hardening.go; HardeningConfig; reconciliation worker; 14 unit tests. All 30 packages pass.          |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 
@@ -117,3 +117,4 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 | 2026-04-26 | manual hardening  | —      | multi-session | —           | PRODUCTION READY — 8 fixes (C4, C2, C3, S4, S6, C1, S3, M1); all 30 packages pass                    |
 | 2026-04-26 | copilot phase-7   | 7      | —             | —           | Solana market extension: ingestion_solana + execution_solana + router + worker; all 31 packages pass |
 | 2026-04-26 | mode-2            | 7      | —             | —           | completed                                                                                            |
+| 2026-04-27 | copilot phase-8   | 8      | —             | —           | Final production hardening: 33 adapter methods, migration 000013, reconciliation worker, 14 tests; all 30 packages pass |
