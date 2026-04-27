@@ -394,3 +394,77 @@ func (m *mockAdapter) GetSolanaIngestionWatermark(_ context.Context, _ string) (
 func (m *mockAdapter) UpsertSolanaIngestionWatermark(_ context.Context, _ string, _ uint64) error {
 	return nil
 }
+
+// ── Phase 8: Production Hardening stubs ──────────────────────────────────────
+
+func (m *mockAdapter) ClaimNextEvents(_ context.Context, _ database.EventClaimQuery) ([]contracts.EventEnvelope, error) {
+	return nil, nil
+}
+func (m *mockAdapter) IncrementEventRetry(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
+func (m *mockAdapter) MoveToDLQ(_ context.Context, _ database.DLQEntry) error { return nil }
+func (m *mockAdapter) RequeueFromDLQ(_ context.Context, _ string) error       { return nil }
+func (m *mockAdapter) ListDLQ(_ context.Context, _ database.DLQFilter) ([]database.DLQEntry, error) {
+	return nil, nil
+}
+func (m *mockAdapter) ClaimExecution(_ context.Context, _ contracts.AllocationDTO) (bool, error) {
+	return true, nil
+}
+func (m *mockAdapter) UpsertPositionFromExecution(_ context.Context, _ contracts.PositionStateDTO) (bool, error) {
+	return true, nil
+}
+func (m *mockAdapter) ListOpenPositionsForReconciliation(_ context.Context) ([]database.ReconciliationPosition, error) {
+	return nil, nil
+}
+func (m *mockAdapter) AdjustPositionAmount(_ context.Context, _, _, _ string) error { return nil }
+func (m *mockAdapter) ClosePositionForced(_ context.Context, _, _ string) error     { return nil }
+func (m *mockAdapter) InsertLatencyEvent(_ context.Context, _ database.LatencyEvent) error {
+	return nil
+}
+func (m *mockAdapter) GetLatencyProfile(_ context.Context, _, _, _ string, _ int) (contracts.LatencyProfileDTO, error) {
+	return contracts.LatencyProfileDTO{}, nil
+}
+func (m *mockAdapter) PromoteStrategyVersion(_ context.Context, _ string, _ int) error { return nil }
+func (m *mockAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool, error) {
+	return true, nil
+}
+func (m *mockAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error { return nil }
+func (m *mockAdapter) IsSystemHalted(_ context.Context) (bool, string, error)     { return false, "", nil }
+func (m *mockAdapter) ComputeStateHash(_ context.Context) (string, error)          { return "", nil }
+func (m *mockAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
+	return nil, nil
+}
+func (m *mockAdapter) RenewPartitions(_ context.Context, _, _, _ string) error   { return nil }
+func (m *mockAdapter) ReleasePartitions(_ context.Context, _, _, _ string) error { return nil }
+func (m *mockAdapter) ListInFlightExecutions(_ context.Context) ([]database.InFlightExecution, error) {
+	return nil, nil
+}
+func (m *mockAdapter) FinalizeExecution(_ context.Context, _ string, _ database.ExecutionReceipt) error {
+	return nil
+}
+func (m *mockAdapter) AbortReservedExecution(_ context.Context, _, _ string) error { return nil }
+func (m *mockAdapter) MarkExecutionLost(_ context.Context, _, _ string) error      { return nil }
+func (m *mockAdapter) RecordReorg(_ context.Context, _ string, _, _ int64, _ int) error {
+	return nil
+}
+func (m *mockAdapter) InvalidateBlockRange(_ context.Context, _ string, _, _ int64) (int, error) {
+	return 0, nil
+}
+func (m *mockAdapter) MarkPositionsUncertain(_ context.Context, _ string, _ int64, _ string) error {
+	return nil
+}
+func (m *mockAdapter) ReResolveExecutionAfterReorg(_ context.Context, _, _ string, _ database.ReorgOutcome) error {
+	return nil
+}
+func (m *mockAdapter) RecordExecutionForEvaluation(_ context.Context, _ string, _ int) error {
+	return nil
+}
+func (m *mockAdapter) MarkEvaluationDone(_ context.Context, _ string) error { return nil }
+func (m *mockAdapter) ListMissingEvaluations(_ context.Context) ([]database.MissingEvaluation, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+func (m *mockAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }

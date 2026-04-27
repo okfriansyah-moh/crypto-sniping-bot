@@ -153,3 +153,18 @@ learning:
   observation_window_seconds: 3600 # how long to track a rejected token's return
   fn_gain_threshold_pct: 0.10 # minimum return to classify rejected trade as FN
   rollback_check_interval_seconds: 300 # how often the rollback watchdog runs
+
+# ── Phase 8: Production Hardening Configuration ───────────────────────────────
+
+hardening:
+  reconciliation_interval_ms: 30000       # 30 seconds between reconciliation cycles
+  reconciliation_tolerance_bps: 50        # 0.5% on-chain vs DB discrepancy tolerance
+  partition_lease_ttl_sec: 60             # how long a partition lease is valid
+  partition_renew_interval_sec: 30        # how often workers renew leases
+  max_transient_retries: 5               # DLQ: max retries for transient errors
+  max_application_retries: 3             # DLQ: max retries for application errors
+  event_claim_batch_size: 10             # ClaimNextEvents batch size per call
+  drain_timeout_sec: 60                  # PromoteStrategyVersion drain timeout
+  evaluation_deadline_sec: 3600          # seconds after execution before eval overdue
+  recovery_grace_sec: 300                # seconds before marking a tx as lost
+  max_reorg_depth: 12                    # EVM max safe reorg depth before halt

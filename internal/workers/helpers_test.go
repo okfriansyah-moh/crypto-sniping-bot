@@ -219,7 +219,79 @@ func (s *stubAdapter) UpsertSolanaIngestionWatermark(_ context.Context, _ string
 	return nil
 }
 
-// ── makeOutputEvent ───────────────────────────────────────────────────────────
+// ── Phase 8: Production Hardening stubs ──────────────────────────────────────
+
+func (s *stubAdapter) ClaimNextEvents(_ context.Context, _ database.EventClaimQuery) ([]contracts.EventEnvelope, error) {
+	return nil, nil
+}
+func (s *stubAdapter) IncrementEventRetry(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
+func (s *stubAdapter) MoveToDLQ(_ context.Context, _ database.DLQEntry) error { return nil }
+func (s *stubAdapter) RequeueFromDLQ(_ context.Context, _ string) error       { return nil }
+func (s *stubAdapter) ListDLQ(_ context.Context, _ database.DLQFilter) ([]database.DLQEntry, error) {
+	return nil, nil
+}
+func (s *stubAdapter) ClaimExecution(_ context.Context, _ contracts.AllocationDTO) (bool, error) {
+	return true, nil
+}
+func (s *stubAdapter) UpsertPositionFromExecution(_ context.Context, _ contracts.PositionStateDTO) (bool, error) {
+	return true, nil
+}
+func (s *stubAdapter) ListOpenPositionsForReconciliation(_ context.Context) ([]database.ReconciliationPosition, error) {
+	return nil, nil
+}
+func (s *stubAdapter) AdjustPositionAmount(_ context.Context, _, _, _ string) error { return nil }
+func (s *stubAdapter) ClosePositionForced(_ context.Context, _, _ string) error     { return nil }
+func (s *stubAdapter) InsertLatencyEvent(_ context.Context, _ database.LatencyEvent) error {
+	return nil
+}
+func (s *stubAdapter) GetLatencyProfile(_ context.Context, _, _, _ string, _ int) (contracts.LatencyProfileDTO, error) {
+	return contracts.LatencyProfileDTO{}, nil
+}
+func (s *stubAdapter) PromoteStrategyVersion(_ context.Context, _ string, _ int) error { return nil }
+func (s *stubAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool, error) {
+	return true, nil
+}
+func (s *stubAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error { return nil }
+func (s *stubAdapter) IsSystemHalted(_ context.Context) (bool, string, error)     { return false, "", nil }
+func (s *stubAdapter) ComputeStateHash(_ context.Context) (string, error)          { return "", nil }
+func (s *stubAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
+	return nil, nil
+}
+func (s *stubAdapter) RenewPartitions(_ context.Context, _, _, _ string) error   { return nil }
+func (s *stubAdapter) ReleasePartitions(_ context.Context, _, _, _ string) error { return nil }
+func (s *stubAdapter) ListInFlightExecutions(_ context.Context) ([]database.InFlightExecution, error) {
+	return nil, nil
+}
+func (s *stubAdapter) FinalizeExecution(_ context.Context, _ string, _ database.ExecutionReceipt) error {
+	return nil
+}
+func (s *stubAdapter) AbortReservedExecution(_ context.Context, _, _ string) error { return nil }
+func (s *stubAdapter) MarkExecutionLost(_ context.Context, _, _ string) error      { return nil }
+func (s *stubAdapter) RecordReorg(_ context.Context, _ string, _, _ int64, _ int) error {
+	return nil
+}
+func (s *stubAdapter) InvalidateBlockRange(_ context.Context, _ string, _, _ int64) (int, error) {
+	return 0, nil
+}
+func (s *stubAdapter) MarkPositionsUncertain(_ context.Context, _ string, _ int64, _ string) error {
+	return nil
+}
+func (s *stubAdapter) ReResolveExecutionAfterReorg(_ context.Context, _, _ string, _ database.ReorgOutcome) error {
+	return nil
+}
+func (s *stubAdapter) RecordExecutionForEvaluation(_ context.Context, _ string, _ int) error {
+	return nil
+}
+func (s *stubAdapter) MarkEvaluationDone(_ context.Context, _ string) error { return nil }
+func (s *stubAdapter) ListMissingEvaluations(_ context.Context) ([]database.MissingEvaluation, error) {
+	return nil, nil
+}
+func (s *stubAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+func (s *stubAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }
 
 func TestMakeOutputEvent_HappyPath(t *testing.T) {
 	// Arrange

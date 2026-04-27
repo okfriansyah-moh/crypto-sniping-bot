@@ -57,3 +57,11 @@ var ErrNonceGap = errors.New("database: nonce gap detected")
 // Distinct from context.DeadlineExceeded so metrics and alerting can
 // distinguish panics from timeouts.
 var ErrStagePanic = errors.New("orchestrator: stage handler panicked")
+
+// ErrDrainTimeout is returned by PromoteStrategyVersion when the pipeline
+// does not reach idle within drainTimeoutSec.
+var ErrDrainTimeout = errors.New("database: drain timeout — pipeline not idle")
+
+// ErrAlreadyClaimed is returned by ClaimExecution when another worker has
+// already reserved the execution_id.
+var ErrAlreadyClaimed = errors.New("database: execution already claimed by another worker")
