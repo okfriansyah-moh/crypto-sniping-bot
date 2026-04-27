@@ -167,6 +167,16 @@ func runServer() {
 		}
 	}()
 
+	// Solana ingestion — subscribes to Raydium v4 + PumpFun program logs and
+	// emits market_data_event DTOs into the shared pipeline.
+	// Gracefully noops when cfg.Solana.Programs is empty (Solana not configured)
+	// or when no RPC client is injected (nil = no-op until a client is wired).
+	go func() {
+		if err := workers.RunIngestionSolana(ctx, db, cfg, nil, logger); err != nil && err != ctx.Err() {
+			logger.Error("solana_ingestion_failed", "error", err)
+		}
+	}()
+
 	logger.Info("orchestrator_ready", "version_id", orch.VersionID())
 
 	// Start HTTP health server with read/write/idle timeouts to prevent
