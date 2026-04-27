@@ -397,19 +397,79 @@ BSC_WS_1=wss://bsc-ws-node.nariox.org
 
 #### RPC Provider Summary for Jakarta/Indonesia Users
 
-| Provider   | Price (Free)     | SEA Server?  | Recommended Use            |
-| ---------- | ---------------- | ------------ | -------------------------- |
-| Infura     | 100K req/day     | No (US/EU)   | Backup/testing only        |
-| Alchemy    | 300M CU/month    | No (US/EU)   | Backup/testing only        |
-| QuickNode  | 8M credits/month | ✅ Singapore | **Primary — best latency** |
-| Public BSC | Unlimited        | ✅ Various   | BSC only, production risky |
-| Ankr       | 500 req/sec free | ✅ Singapore | Alternative to QuickNode   |
+| Provider   | Free Allowance   | SEA Server?  | HTTP RTT from JKT | HTTP RTT SGP VPS | Recommended Use                   |
+| ---------- | ---------------- | ------------ | ----------------- | ---------------- | --------------------------------- |
+| Infura     | 100K req/day     | ❌ US/EU     | ~175–200ms        | ~170–185ms       | Backup/testing only               |
+| Alchemy    | 300M CU/month    | ❌ US/EU     | ~175–200ms        | ~170–185ms       | Backup/testing only               |
+| QuickNode  | 8M credits/month | ✅ Singapore | ~20–40ms          | ~1–5ms           | **Primary — best latency**        |
+| Ankr       | 500 req/sec free | ✅ Singapore | ~20–40ms          | ~2–8ms           | Alternative to QuickNode          |
+| Public BSC | Unlimited        | ✅ Various   | ~25–60ms          | ~5–20ms          | BSC only — rate-limited, not prod |
+
+##### Per-Operation Credit Cost (ETH — Uniswap v2/v3, BSC — PancakeSwap)
+
+The bot's ingestion and execution modules perform these operations per pipeline cycle:
+
+| Operation                                  | When                  | QuickNode Credits | Alchemy CU  | Infura Req |
+| ------------------------------------------ | --------------------- | ----------------- | ----------- | ---------- |
+| `eth_subscribe` (WebSocket, keep-alive)    | Once (persistent WS)  | 0                 | 0           | 0          |
+| New pair event notify (WebSocket push)     | Per new pair detected | ~2                | ~10 CU      | 1          |
+| `eth_getTransactionReceipt` (parse pair)   | Per new pair          | ~5                | ~15 CU      | 1          |
+| `eth_call` (token checks, honeypot sim)    | Per pair, 3–5 calls   | ~3 each           | ~26 CU ea   | 1 each     |
+| `eth_gasPrice` / `eth_maxFeePerGas`        | Per trade attempt     | ~2                | ~10 CU      | 1          |
+| `eth_sendRawTransaction` (swap submission) | Per trade             | ~5                | ~250 CU     | 1          |
+| `eth_getTransactionReceipt` (confirmation) | 2–3 polls per trade   | ~5 each           | ~15 CU ea   | 1 each     |
+| **Total per completed trade (ETH/BSC)**    |                       | **~35–45**        | **~380 CU** | **~10**    |
+| **Total per detected pair (no trade)**     |                       | **~12–20**        | **~95 CU**  | **~6**     |
+
+##### Free Tier Projection — ETH (Uniswap v2) and BSC (PancakeSwap)
+
+Assumptions: Uniswap v2 creates ~50–150 new pairs/day; PancakeSwap v2 ~80–200/day.
+DQ filter rejection rate: ~95% (aggressive Layer 1). Trade attempts: ~5–10/day canary.
+
+| Scenario                      | QuickNode/month   | Alchemy/month      | Infura/month  |
+| ----------------------------- | ----------------- | ------------------ | ------------- |
+| Idle (WS connected, 0 events) | ~0                | ~0                 | ~0            |
+| **Canary — 8 trades/day ETH** | **~42,000**       | **~375,000 CU**    | **~2,400**    |
+| Active — 30 trades/day ETH    | ~140,000          | ~1.3M CU           | ~9,000        |
+| Aggressive — 80 trades/day    | ~350,000          | ~3.3M CU           | ~24,000       |
+| **Free tier capacity**        | **8,000,000**     | **300,000,000 CU** | **3,000,000** |
+| **Headroom at canary volume** | **190×**          | **800×**           | **1,250×**    |
+| **Limit reached at**          | ~1,800 trades/day | ~63,000 trades/day | ~2,400/day    |
+
+Free tier runway at canary volume:
+
+```
+QuickNode  8M credits/month:
+  Canary  (8 trades/day):   █░░░░░░░░░  0.5% used → 190× headroom
+  Active  (30 trades/day):  ██░░░░░░░░  1.7% used →  57× headroom
+  Aggr.   (80 trades/day):  ████░░░░░░  4.4% used →  23× headroom
+  Limit   (~1800/day):      ██████████ 100% used  →  upgrade needed
+
+Alchemy  300M CU/month:
+  Canary  (8 trades/day):   ░░░░░░░░░░  0.1% used → 800× headroom
+  Active  (30 trades/day):  ░░░░░░░░░░  0.4% used → 231× headroom
+  Aggr.   (80 trades/day):  █░░░░░░░░░  1.1% used →  91× headroom
+  Limit   (~63000/day):     ██████████ 100% used  →  upgrade needed
+
+Infura  3M req/month:
+  Canary  (8 trades/day):   ░░░░░░░░░░  0.08% used → 1250× headroom
+  Active  (30 trades/day):  ░░░░░░░░░░  0.3%  used →  333× headroom
+  Aggr.   (80 trades/day):  █░░░░░░░░░  0.8%  used →  125× headroom
+  Limit   (~2400/day):      ██████████ 100%  used  →  upgrade needed
+```
+
+> **Key finding:** All three providers have **massive headroom** at canary volume for ETH/BSC.
+> The deciding factor is **latency, not credits** — and QuickNode Singapore wins on latency.
 
 **Recommended setup for Jakarta users:**
 
-- Primary ETH: QuickNode Singapore
-- Fallback ETH: Alchemy
-- Primary BSC: QuickNode Singapore BSC or Public endpoints
+- Primary ETH: QuickNode Singapore — lowest latency, 8M credits/month
+- Fallback ETH: Alchemy — 300M CU/month backup, automatically tried on QuickNode failure
+- Primary BSC: QuickNode Singapore BSC — same Singapore PoP
+- Fallback BSC: Public Binance endpoints — free, acceptable for low-frequency BSC canary
+
+> **Cost to upgrade when ready:** QuickNode $49/month Starter (50M credits). At 1,800+ trades/day
+> you are already profitable — the upgrade pays for itself in well under one trading day.
 
 ---
 
@@ -608,19 +668,116 @@ SOLANA_WS_1=wss://api.mainnet-beta.solana.com
 
 ---
 
-#### Solana RPC Provider Summary for Jakarta Users
+#### Solana RPC Provider Comparison for Jakarta Users
 
-| Provider   | Price (Free)       | SEA Server?  | Recommended Use                     |
-| ---------- | ------------------ | ------------ | ----------------------------------- |
-| Helius     | 1M credits/month   | No (US-East) | Best free tier, backup for prod     |
-| QuickNode  | 8M credits/month   | ✅ Singapore | **Primary — best latency from SGP** |
-| Triton One | Paid only (~$100+) | Yes          | Production HFT, dedicated           |
-| Public API | Rate-limited free  | No           | Testing setup only                  |
+| Provider   | Free Allowance        | SEA Server?  | HTTP RTT from JKT | HTTP RTT SGP VPS | Notes                                 |
+| ---------- | --------------------- | ------------ | ----------------- | ---------------- | ------------------------------------- |
+| Helius     | 1M credits/month      | ❌ US-East   | ~170–185ms        | ~175–180ms       | Best Solana docs + DAS APIs           |
+| QuickNode  | 10M credits/month     | ✅ Singapore | ~18–25ms          | ~1–5ms           | **Best latency from Jakarta/SGP VPS** |
+| Triton One | Paid only (~$100+/mo) | ✅ Yes       | Varies            | ~1–10ms          | Dedicated, HFT production             |
+| Public API | Rate-limited free     | ❌ US        | ~170ms+           | ~175ms+          | Testing setup only, 100 req/s cap     |
 
-**Recommended setup for Jakarta users:**
+> **Latency matters more on Solana than on EVM.** A Solana block is ~400ms. The ~150ms
+> round-trip difference between QuickNode Singapore and Helius US-East means Helius delivers
+> your `sendTransaction` roughly **half a block later** — often the difference between getting
+> filled at the open price and chasing a token already up 20%.
 
-- Primary Solana: QuickNode Singapore
-- Fallback: Helius
+##### Per-Operation Credit Cost (Solana — Raydium v4 + PumpFun)
+
+Your `ingestion_solana` module uses `logsSubscribe` WebSocket; `execution_solana` signs and
+submits swaps. These are the operations per pipeline cycle:
+
+| Operation                                        | When                  | Helius Credits | QuickNode Credits |
+| ------------------------------------------------ | --------------------- | -------------- | ----------------- |
+| `logsSubscribe` WebSocket (keep-alive)           | Once (persistent WS)  | 0              | 0                 |
+| New pool log notification (WebSocket push)       | Per new pool detected | ~1             | ~2                |
+| `getTransaction` (parse pool details)            | Per new pool          | ~5             | ~10               |
+| `getLatestBlockhash` (before each swap)          | Per trade attempt     | ~1             | ~2                |
+| `sendTransaction` (swap submission)              | Per trade             | ~10            | ~25               |
+| `sendTransaction` retry (0–2 retries)            | Per stuck/dropped tx  | ~10 each       | ~25 each          |
+| `getSignatureStatuses` poll (confirmation)       | 2–3 polls per trade   | ~5 each        | ~10 each          |
+| **Total per completed trade**                    |                       | **~36–41**     | **~72–82**        |
+| **Total per detected pool (rejected, no trade)** |                       | **~6**         | **~12**           |
+
+##### Free Tier Projection Analytics — Solana (PumpFun + Raydium v4)
+
+Assumptions: PumpFun + Raydium combined ~300 new pools/day (realistic mainnet average).
+DQ filter rejection rate: ~95%. Trade attempts: ~15/day at canary volume.
+
+| Scenario                                  | Helius/month  | QuickNode/month |
+| ----------------------------------------- | ------------- | --------------- |
+| Idle (WS connected, 0 pools)              | ~0            | ~0              |
+| **Canary — 15 trades/day, 300 pools/day** | **~69,750**   | **~139,500**    |
+| Active — 50 trades/day, 500 pools/day     | ~142,500      | ~285,000        |
+| Aggressive — 100 trades/day, 800/day      | ~354,000      | ~708,000        |
+| **Free tier total capacity**              | **1,000,000** | **10,000,000**  |
+| **Headroom at canary volume**             | **14×**       | **72×**         |
+| **Free limit reached at ~N trades/day**   | **~800**      | **~3,700**      |
+
+Free tier runway visualization:
+
+```
+Helius  1M credits/month:
+  Canary  (15 trades/day):  ██░░░░░░░░   7% used →  14× headroom
+  Active  (50 trades/day):  █████░░░░░  14% used →   7× headroom
+  Aggr.  (100 trades/day):  ███████░░░  35% used →   3× headroom
+  Limit  (~800 trades/day): ██████████ 100% used →  upgrade needed
+
+QuickNode  10M credits/month:
+  Canary  (15 trades/day):  █░░░░░░░░░   1.4% used →  72× headroom
+  Active  (50 trades/day):  ██░░░░░░░░   2.9% used →  35× headroom
+  Aggr.  (100 trades/day):  ████░░░░░░   7.1% used →  14× headroom
+  Limit (~3700 trades/day): ██████████ 100%  used →  upgrade needed
+```
+
+##### Head-to-Head Decision Matrix
+
+| Factor                          | Helius      | QuickNode  | Winner        |
+| ------------------------------- | ----------- | ---------- | ------------- |
+| Latency from Jakarta (home)     | ~170ms      | ~20ms      | **QuickNode** |
+| Latency from Singapore VPS      | ~178ms      | ~3ms       | **QuickNode** |
+| Free credits/month              | 1M          | 10M        | **QuickNode** |
+| Free tier headroom (canary vol) | 14×         | 72×        | **QuickNode** |
+| Rate limit (free, req/s)        | ~10         | ~25        | **QuickNode** |
+| Solana docs + DAS APIs          | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐   | **Helius**    |
+| PumpFun-native event parsing    | ✅ Built-in | Manual     | **Helius**    |
+| Jito bundle support             | Paid only   | Paid only  | Tie           |
+| WebSocket stability             | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐⭐ | Tie           |
+| Price to upgrade                | $49/mo      | $49/mo     | Tie           |
+
+**Recommended setup for Jakarta users (use both):**
+
+```yaml
+# config/chains.yaml — Solana RPC block
+solana:
+  rpc:
+    - url: "${SOLANA_RPC_HTTP_1}" # QuickNode Singapore — primary HTTP
+      priority: 1
+      kind: http
+      region: ap-southeast-1
+    - url: "${SOLANA_RPC_HTTP_2}" # Helius US-East — fallback HTTP
+      priority: 2
+      kind: http
+      region: us-east
+    - url: "${SOLANA_WS_1}" # QuickNode Singapore WebSocket
+      priority: 1
+      kind: ws
+      region: ap-southeast-1
+```
+
+Set in `.env`:
+
+```bash
+SOLANA_RPC_HTTP_1=https://YOUR-ENDPOINT.solana-mainnet.quiknode.pro/YOUR_KEY/
+SOLANA_RPC_HTTP_2=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
+SOLANA_WS_1=wss://YOUR-ENDPOINT.solana-mainnet.quiknode.pro/YOUR_KEY/
+```
+
+The circuit breaker in `internal/rpc/` handles automatic failover to Helius if QuickNode has
+an outage. Combined free allowance: ~11M credits/month before you pay anything.
+
+> **When to upgrade:** When consistently above ~100 trades/day and positive expectancy is proven
+> by 50+ trades. Both providers charge $49/month for the next tier — one profitable trade covers it.
 
 ---
 
