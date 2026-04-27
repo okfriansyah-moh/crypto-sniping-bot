@@ -94,6 +94,79 @@ func runServer() {
 		}
 	}()
 
+	// Risk controller — monitors drawdown; transitions system mode (BALANCED/DEGRADED/HALTED).
+	go func() {
+		if err := workers.RunRiskController(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+			logger.Error("risk_controller_failed", "error", err)
+		}
+	}()
+
+	// Rollback watchdog — compares promoted strategy vs baseline; rolls back on degradation.
+	go func() {
+		interval := time.Duration(cfg.Learning.RollbackCheckIntervalSeconds) * time.Second
+		if interval <= 0 {
+			interval = 5 * time.Minute
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := workers.RunRollbackWatchdog(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+					logger.Error("rollback_watchdog_failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// Evaluator — aggregates learning records into windowed evaluation_events.
+	go func() {
+		interval := time.Duration(cfg.Learning.EvalWindowMinutes) * time.Minute
+		if interval <= 0 {
+			interval = 60 * time.Minute
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := workers.RunEvaluator(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+					logger.Error("evaluator_failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// Updater — consumes evaluation_events; proposes new strategy version candidates.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := workers.RunUpdater(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+				logger.Error("updater_failed", "error", err)
+			}
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Archive worker — moves aged processed events to events_archive.
+	go func() {
+		if err := workers.RunArchive(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+			logger.Error("archive_worker_failed", "error", err)
+		}
+	}()
+
 	logger.Info("orchestrator_ready", "version_id", orch.VersionID())
 
 	// Start HTTP health server with read/write/idle timeouts to prevent
