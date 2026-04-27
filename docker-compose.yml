@@ -80,7 +80,8 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      # /app/healthcheck is compiled into the distroless image (no shell/wget available).
+      test: ["CMD", "/app/healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 3
