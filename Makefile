@@ -59,6 +59,33 @@ migrate-down:
 clean:
 	rm -rf bin/ coverage.out coverage.html
 
+# ── Docker targets ────────────────────────────────────────────────────────────
+
+# Build the Docker image (does not start any services).
+.PHONY: docker-build
+docker-build:
+	docker compose build
+
+# Build and start all services in detached mode.
+.PHONY: docker-up
+docker-up:
+	docker compose up --build -d
+
+# Stop all services (data volume is preserved).
+.PHONY: docker-down
+docker-down:
+	docker compose down
+
+# Stop all services and delete the database volume.
+.PHONY: docker-clean
+docker-clean:
+	docker compose down -v
+
+# Tail bot logs.
+.PHONY: docker-logs
+docker-logs:
+	docker compose logs -f bot
+
 # All quality gates
 .PHONY: quality
 quality: vet lint test

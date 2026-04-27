@@ -1131,7 +1131,9 @@ Press `Ctrl+C` in the terminal where the bot is running. It will shut down grace
 
 ## 8. Run with Docker
 
-Docker lets you run the bot in an isolated container without installing Go on your machine directly.
+Docker lets you run the bot in an isolated container without installing Go on your machine.
+The repository ships with a production-ready `Dockerfile`, `docker-compose.yml`, and
+`.dockerignore` at the project root — no manual file creation required.
 
 ### Step 1 — Install Docker
 
@@ -1149,133 +1151,81 @@ sudo usermod -aG docker $USER  # Allow running Docker without sudo (requires log
 
 **Windows:** Download Docker Desktop from [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/) and install it. Enable WSL 2 backend when prompted.
 
-### Step 2 — Create a Dockerfile
+### Step 2 — Create your .env file
 
-The repository does not include a Dockerfile yet. Create one in the project root:
-
-```bash
-cat > Dockerfile << 'EOF'
-# Build stage
-FROM golang:1.25-alpine AS builder
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN go build -o /sniper ./cmd/
-
-# Runtime stage
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /sniper /app/sniper
-COPY config/ /app/config/
-EXPOSE 8080
-ENTRYPOINT ["/app/sniper", "serve"]
-EOF
-```
-
-### Step 3 — Create a docker-compose.yml
+The repository includes `.env.example` with every supported variable. Copy it and fill in your
+secrets — Docker Compose reads `.env` automatically if placed in the project root.
 
 ```bash
-cat > docker-compose.yml << 'EOF'
-version: "3.9"
-
-services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: sniper
-      POSTGRES_PASSWORD: ${SNIPER_DB_PASSWORD}
-      POSTGRES_DB: sniper
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sniper"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  migrate:
-    build: .
-    command: ["/app/sniper", "migrate", "up"]
-    environment:
-      SNIPER_DB_HOST: db
-      SNIPER_DB_NAME: sniper
-      SNIPER_DB_USER: sniper
-      SNIPER_DB_PASSWORD: ${SNIPER_DB_PASSWORD}
-      SNIPER_DB_SSL_MODE: disable
-      CONFIG_PATH: /app/config/pipeline.yaml
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: on-failure
-
-  bot:
-    build: .
-    environment:
-      SNIPER_DB_HOST: db
-      SNIPER_DB_NAME: sniper
-      SNIPER_DB_USER: sniper
-      SNIPER_DB_PASSWORD: ${SNIPER_DB_PASSWORD}
-      SNIPER_DB_SSL_MODE: disable
-      ETH_RPC_1: ${ETH_RPC_1}
-      ETH_RPC_2: ${ETH_RPC_2}
-      ETH_WS_1: ${ETH_WS_1}
-      BSC_RPC_1: ${BSC_RPC_1}
-      BSC_RPC_2: ${BSC_RPC_2}
-      BSC_WS_1: ${BSC_WS_1}
-      SNIPER_WALLET_ADDRESS: ${SNIPER_WALLET_ADDRESS}
-      SNIPER_WALLET_KEY: ${SNIPER_WALLET_KEY}
-      SNIPER_TELEGRAM_BOT_TOKEN: ${SNIPER_TELEGRAM_BOT_TOKEN}
-      SNIPER_TELEGRAM_CHAT_ID: ${SNIPER_TELEGRAM_CHAT_ID}
-      # Solana (Phase 7) - only required if using Solana chain
-      SOLANA_RPC_HTTP_1: ${SOLANA_RPC_HTTP_1:-}
-      SOLANA_WS_1: ${SOLANA_WS_1:-}
-      # SOLANA_WALLET_KEY_1 points to the keypair file inside the container.
-      # The file is mounted via the volume below.
-      SOLANA_WALLET_KEY_1: /keys/solana-wallet-1.json
-      PORT: 8080
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      CONFIG_PATH: /app/config/pipeline.yaml
-    volumes:
-      # Mount your Solana keypair directory into the container.
-      # Only needed if SOLANA_WS_1 is set (i.e. Solana chain enabled).
-      # Replace the left side with the actual path on your host machine.
-      - /home/your_username/.config/sniper/keys:/keys:ro
-    ports:
-      - "8080:8080"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-volumes:
-  pgdata:
-EOF
+cp .env.example .env
+nano .env   # or your preferred editor
 ```
+
+**Required variables (bot will not start without these):**
+
+| Variable                | Description                                           |
+| ----------------------- | ----------------------------------------------------- |
+| `SNIPER_DB_PASSWORD`    | Strong PostgreSQL password                            |
+| `ETH_RPC_1`             | Ethereum HTTP RPC URL (e.g. Infura/Alchemy/QuickNode) |
+| `ETH_WS_1`              | Ethereum WebSocket URL                                |
+| `SNIPER_WALLET_ADDRESS` | Your EVM wallet address                               |
+| `SNIPER_WALLET_KEY`     | Your EVM private key (hex, no 0x prefix)              |
+
+**Solana (Phase 7) — only required if using Solana chain:**
+
+```bash
+# In .env, also set:
+SOLANA_RPC_HTTP_1=https://api.mainnet-beta.solana.com
+SOLANA_WS_1=wss://api.mainnet-beta.solana.com
+
+# Set SOLANA_KEYS_DIR to the directory on your HOST machine that contains
+# your Solana keypair JSON file (named solana-wallet-1.json).
+# docker-compose.yml mounts this directory read-only at /keys inside the container.
+SOLANA_KEYS_DIR=/home/your_username/.config/sniper/keys
+```
+
+> **Security:** `.env` is listed in `.gitignore` and must never be committed to version control.
+
+### Step 3 — Docker files in the repository
+
+The following files are already present in the project root:
+
+| File                 | Purpose                                                                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `Dockerfile`         | Multi-stage build: `golang:1.25-alpine` (builder) → `alpine:3.21` (runtime). CGO enabled for go-ethereum. Runs as non-root `sniper` user. |
+| `docker-compose.yml` | Three services: `db` (PostgreSQL 16), `migrate` (one-shot migration runner), `bot` (trading daemon).                                      |
+| `.dockerignore`      | Excludes source artifacts, secrets, docs, and tests from the build context.                                                               |
+| `.env.example`       | Template for all supported environment variables.                                                                                         |
 
 ### Step 4 — Run with Docker Compose
 
 ```bash
-# Load your .env file (Docker Compose reads it automatically if named .env)
-# Just ensure your .env file is in the project root.
-
-# Build and start everything (database + migrations + bot)
+# Build the image and start all three services (db → migrate → bot)
 docker compose up --build
 
-# To run in the background (detached mode):
+# Run in the background (detached mode)
 docker compose up --build -d
 
-# View logs:
+# View live logs from the bot
 docker compose logs -f bot
 
-# Stop everything:
+# Rebuild after code changes
+docker compose up --build -d bot
+
+# Stop all services (data is preserved)
 docker compose down
 
-# Stop and delete all data (including database):
+# Stop and delete all data including the database volume
 docker compose down -v
+```
+
+Or use the Makefile shortcuts:
+
+```bash
+make docker-build   # Build the image only
+make docker-up      # Start all services (detached)
+make docker-down    # Stop all services
+make docker-logs    # Tail bot logs
 ```
 
 ### Step 5 — Verify
@@ -1283,6 +1233,40 @@ docker compose down -v
 ```bash
 curl http://localhost:8080/health
 # Should return: {"status":"ok"}
+```
+
+### Step 6 — Troubleshooting Docker
+
+**`migrate` exits non-zero / bot never starts:**
+
+The `bot` service depends on `migrate` completing successfully (`service_completed_successfully`).
+If migrations fail, check the migrate logs:
+
+```bash
+docker compose logs migrate
+```
+
+**`db` is not ready yet / migrate retries:**
+
+The `migrate` service uses `depends_on: db: condition: service_healthy`. PostgreSQL starts quickly
+but the healthcheck (pg_isready) must pass before migrations run. This is automatic — wait a few
+seconds and the migrate service will retry.
+
+**Image not rebuilt after code changes:**
+
+Always pass `--build` when you want a fresh image:
+
+```bash
+docker compose up --build -d
+```
+
+**Solana keypair not found inside container:**
+
+Ensure `SOLANA_KEYS_DIR` in your `.env` points to the correct **host** directory and the file
+is named exactly `solana-wallet-1.json`:
+
+```bash
+ls -la $SOLANA_KEYS_DIR/solana-wallet-1.json
 ```
 
 ---

@@ -1,0 +1,91 @@
+# crypto-sniping-bot — Docker Compose
+# Usage: docker compose up --build
+#
+# Prerequisites:
+#   1. Copy .env.example to .env and fill in all required values.
+#   2. If using Solana, set SOLANA_KEYS_DIR to the host directory containing
+#      your Solana keypair JSON file(s).
+#
+# Services:
+#   db      — PostgreSQL 16 (persistent volume)
+#   migrate — One-shot migration runner (exits 0 on success)
+#   bot     — Main trading daemon (port 8080)
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sniper
+      POSTGRES_PASSWORD: ${SNIPER_DB_PASSWORD}
+      POSTGRES_DB: sniper
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sniper"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ── Migration runner (one-shot) ───────────────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-sniping-bot:local
+    command: ["migrate", "up"]
+    env_file:
+      - .env
+    environment:
+      # Overrides to use the in-compose service hostnames.
+      SNIPER_DB_HOST: db
+      SNIPER_DB_SSL_MODE: disable
+      CONFIG_PATH: /app/config/pipeline.yaml
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── Trading bot ───────────────────────────────────────────────────────────────
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-sniping-bot:local
+    env_file:
+      - .env
+    environment:
+      # Overrides to use the in-compose service hostnames.
+      SNIPER_DB_HOST: db
+      SNIPER_DB_SSL_MODE: disable
+      CONFIG_PATH: /app/config/pipeline.yaml
+      # Solana keypair path inside the container (file is bind-mounted below).
+      SOLANA_WALLET_KEY_1: /keys/solana-wallet-1.json
+    volumes:
+      # Solana keypair directory (bind-mount, read-only).
+      # Set SOLANA_KEYS_DIR in .env to your host keypair directory.
+      # If not using Solana, leave SOLANA_KEYS_DIR unset; /tmp/sniper-keys is used as
+      # a harmless fallback (the bot will not load the keypair unless SOLANA_RPC_HTTP_1
+      # is set in .env).
+      - ${SOLANA_KEYS_DIR:-/tmp/sniper-keys}:/keys:ro
+    ports:
+      - "${PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  pgdata:
+    name: crypto-sniping-bot_pgdata

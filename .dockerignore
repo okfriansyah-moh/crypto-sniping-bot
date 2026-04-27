@@ -1,0 +1,40 @@
+# ── Version control ────────────────────────────────────────────────────────────
+.git/
+.github/
+.gitignore
+
+# ── IDE / local tooling ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+.parallel-dev/
+
+# ── Build outputs (not needed — binary is built inside Docker) ─────────────────
+bin/
+dist/
+output/
+coverage.out
+coverage.html
+*.out
+*.test
+
+# ── Secrets and key files (must never enter the image) ────────────────────────
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+
+# ── Test and documentation (not needed at runtime) ────────────────────────────
+tests/
+docs/
+scripts/
+README.md
+Makefile
+
+# ── Go toolchain artifacts ─────────────────────────────────────────────────────
+vendor/
+go.sum.bak
