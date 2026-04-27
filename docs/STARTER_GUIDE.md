@@ -1776,3 +1776,660 @@ through the PostgreSQL event bus \u2014 modules never call Telegram directly.
 > **Note:** `/kill` and `/resume` are destructive commands. They are logged with timestamp and
 > require confirmation. The kill switch also fires automatically when daily drawdown exceeds the
 > `halt_drawdown_pct` threshold (default: 10%).
+
+---
+
+## 14. Scenario Testing: Local Docker → VPS → Mainnet
+
+This section walks you through a **staged validation path** — from running the bot in a fully
+isolated local environment, to a live VPS deployment, to a final production-readiness checklist
+before you commit real money on mainnet.
+
+**Do not skip stages.** Every stage catches a different class of problem. Real capital losses
+happen when people skip directly from "it builds" to "go live".
+
+---
+
+### 14.1 Stage 1 — Local Docker Scenario Testing (No Real Trades)
+
+**Goal:** Confirm that all services start correctly, the pipeline fires, and the bot is definitely
+not submitting real on-chain transactions.
+
+#### What "simulated" means
+
+When no real RPC client or wallet is wired, the execution engine logs `"simulated":true` for
+every trade attempt. This is not a configuration flag — it is the default behavior of the
+execution worker when RPC endpoints return errors or are unreachable. During local Docker testing
+with placeholder credentials, every "execution" is a simulated no-op that writes a result to the
+database but sends nothing to any blockchain.
+
+You can verify this in the logs:
+
+```json
+{
+  "level": "INFO",
+  "msg": "execution_result",
+  "token": "0xABC...",
+  "chain": "eth",
+  "simulated": true,
+  "size_usd": 50.0
+}
+```
+
+If you ever see `"simulated":false`, a real transaction was attempted. **Never run with real
+wallet keys until you have completed all stages below.**
+
+#### Step 1 — Use test/placeholder credentials
+
+For Stage 1, fill `.env` with real DB password and Telegram credentials, but use **placeholder
+values** for all wallet keys and RPC endpoints. The bot will start, ingest nothing real, and
+all executions will be simulated.
+
+```bash
+# .env for Stage 1 (local Docker testing — no real trades possible)
+SNIPER_DB_PASSWORD=localtest123
+
+# Placeholder RPC — bot starts but no real market data flows in
+ETH_RPC_1=https://mainnet.infura.io/v3/PLACEHOLDER
+ETH_WS_1=wss://mainnet.infura.io/ws/v3/PLACEHOLDER
+
+# Placeholder wallet — no real transactions can be signed
+SNIPER_WALLET_ADDRESS=0x0000000000000000000000000000000000000001
+SNIPER_WALLET_KEY=0000000000000000000000000000000000000000000000000000000000000001
+
+# Telegram — use real values so you receive test alerts
+SNIPER_TELEGRAM_BOT_TOKEN=YOUR_REAL_TOKEN
+SNIPER_TELEGRAM_CHAT_ID=YOUR_REAL_CHAT_ID
+
+PORT=8080
+LOG_LEVEL=debug
+```
+
+#### Step 2 — Start the full Docker stack
+
+```bash
+make docker-up
+# OR
+docker compose up --build
+```
+
+Watch the output. You should see three services start in order: `db → migrate → bot`.
+
+#### Step 3 — Verify service startup
+
+Check each service passes its health gate:
+
+```bash
+# Bot health endpoint
+curl http://localhost:8080/health
+# Expected: {"status":"ok"}
+
+# Database is up and migrations applied
+docker compose logs migrate | tail -5
+# Expected: "All N migrations applied successfully"
+
+# Bot pipeline is running
+docker compose logs bot | grep -E "orchestrator_ready|ingestion_started|solana"
+# Expected: lines showing workers started
+```
+
+#### Step 4 — Verify pipeline fires (no real events needed)
+
+The pipeline starts even with placeholder RPC credentials — it attempts to subscribe and will
+log connection errors, but continues running. The key check is that all workers started:
+
+```bash
+docker compose logs bot | grep -E '"msg"' | head -30
+```
+
+Look for these messages (order may vary):
+
+```
+"orchestrator_ready"
+"ingestion_worker_started"
+"execution_worker_started"
+"position_worker_started"
+"telegram_dispatcher_started"
+```
+
+If any worker is missing from the logs, check the full logs for the error:
+
+```bash
+docker compose logs bot 2>&1 | grep -i error
+```
+
+#### Step 5 — Verify kill switch works
+
+Send `/kill` from your Telegram chat to the bot. You should receive a confirmation reply within
+a few seconds. Then check the logs:
+
+```bash
+docker compose logs bot | grep kill_switch
+# Expected: {"msg":"kill_switch_activated","source":"telegram"}
+```
+
+Send `/resume` to re-enable. Confirm you get a reply.
+
+#### Step 6 — Verify no real transactions were submitted
+
+```bash
+# Check the database for any execution_result events with simulated=false
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT COUNT(*) FROM events WHERE event_type='execution_result' AND payload->>'simulated'='false';"
+# Expected: 0
+```
+
+If this returns > 0, you have a real RPC endpoint configured and the bot attempted real trades.
+Stop immediately and fix your `.env`.
+
+#### Stage 1 Pass Criteria
+
+- [ ] All three Docker services start without error
+- [ ] Health endpoint returns `{"status":"ok"}`
+- [ ] All workers appear in logs as started
+- [ ] `/kill` Telegram command works and shows in logs
+- [ ] Zero rows with `simulated=false` in events table
+- [ ] `docker compose down` stops all services cleanly
+
+---
+
+### 14.2 Stage 2 — VPS Staging Deployment (Still No Real Trades)
+
+**Goal:** Replicate Stage 1 exactly on your VPS, confirm the same pass criteria hold, and verify
+the network path from VPS → RPC endpoints works.
+
+#### Step 1 — Set up VPS and deploy
+
+Follow Section 9.2 steps 1–7. Use **the same `.env` from Stage 1** (with placeholder wallet keys
+and placeholder RPC endpoints) on the VPS. The goal is to prove the deployment process works, not
+to test live connectivity yet.
+
+```bash
+# On your LOCAL machine — copy the test .env to the VPS
+scp .env root@YOUR_VPS_IP:/opt/crypto-sniping-bot/.env
+
+# On the VPS — start with Docker (simpler for this stage)
+cd /opt/crypto-sniping-bot
+docker compose up --build -d
+```
+
+#### Step 2 — Repeat all Stage 1 checks remotely
+
+```bash
+# Health check from your local machine (replace with your VPS IP)
+curl http://YOUR_VPS_IP:8080/health
+# Expected: {"status":"ok"}
+
+# Tail logs remotely
+ssh root@YOUR_VPS_IP "docker compose -C /opt/crypto-sniping-bot logs -f bot"
+```
+
+Run all the same `docker compose logs` checks from Stage 1, but against the VPS.
+
+#### Step 3 — Test RPC connectivity from VPS
+
+Now test that your **real** RPC endpoints (QuickNode Singapore, Helius, etc.) are reachable from
+the VPS. This does not start trading — it only checks network connectivity:
+
+```bash
+ssh root@YOUR_VPS_IP
+
+# Test HTTP RPC
+curl -s -X POST YOUR_REAL_ETH_RPC_1 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | python3 -m json.tool
+# Expected: {"result": "0x..."}  (a block number in hex)
+
+# Test Solana RPC (if using Solana)
+curl -s -X POST YOUR_REAL_SOLANA_RPC_HTTP_1 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getSlot","params":[]}' | python3 -m json.tool
+# Expected: {"result": 12345678}  (a slot number)
+```
+
+If these fail, fix the RPC URLs or check your VPS firewall before proceeding.
+
+#### Step 4 — Test Telegram latency
+
+From the VPS, send a test message to your Telegram bot API to confirm the bot can reach Telegram:
+
+```bash
+ssh root@YOUR_VPS_IP
+curl -s "https://api.telegram.org/botYOUR_TOKEN/sendMessage?chat_id=YOUR_CHAT_ID&text=VPS+connectivity+test"
+# Expected: {"ok":true,...}
+```
+
+#### Step 5 — Measure RPC latency from VPS
+
+Run latency tests to your actual RPC endpoints from the VPS to confirm you are getting the
+low-latency numbers you expect:
+
+```bash
+# HTTP latency to your primary RPC (repeat 5x, look at avg)
+for i in 1 2 3 4 5; do
+  curl -o /dev/null -s -w "%{time_total}s\n" -X POST YOUR_REAL_ETH_RPC_1 \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+done
+# Expected from Singapore VPS to QuickNode Singapore: ~0.003–0.010s
+# Expected from Singapore VPS to Infura US-East: ~0.160–0.200s
+```
+
+These numbers tell you whether your VPS + RPC combination will be competitive.
+
+#### Stage 2 Pass Criteria
+
+- [ ] All Stage 1 checks pass on the VPS
+- [ ] Health endpoint accessible remotely
+- [ ] Real RPC endpoints respond correctly from VPS
+- [ ] Telegram API reachable from VPS
+- [ ] RPC latency within acceptable range for your strategy
+- [ ] Solana RPC responds (if Solana is enabled)
+
+---
+
+### 14.3 Stage 3 — Real RPC, Still Placeholder Wallet (Live Data, No Trades)
+
+**Goal:** Switch to your real RPC credentials on the VPS so market data flows in, but keep a
+placeholder wallet so no real transactions can be signed. This lets you see the full pipeline
+processing real market events without any financial risk.
+
+#### Step 1 — Update .env with real RPC endpoints, keep placeholder wallet
+
+```bash
+# On the VPS, edit .env
+nano /opt/crypto-sniping-bot/.env
+```
+
+Change RPC endpoints to your real values. Leave wallet keys as placeholders:
+
+```bash
+# REAL RPC endpoints now
+ETH_RPC_1=https://YOUR_REAL_QUICKNODE.quiknode.pro/YOUR_KEY/
+ETH_WS_1=wss://YOUR_REAL_QUICKNODE.quiknode.pro/YOUR_KEY/
+SOLANA_RPC_HTTP_1=https://mainnet.helius-rpc.com/?api-key=YOUR_REAL_HELIUS_KEY
+SOLANA_WS_1=wss://mainnet.helius-rpc.com/?api-key=YOUR_REAL_HELIUS_KEY
+
+# STILL placeholder wallet — cannot sign real transactions
+SNIPER_WALLET_ADDRESS=0x0000000000000000000000000000000000000001
+SNIPER_WALLET_KEY=0000000000000000000000000000000000000000000000000000000000000001
+```
+
+#### Step 2 — Restart and observe live market data
+
+```bash
+docker compose down && docker compose up --build -d
+docker compose logs -f bot
+```
+
+You should now see real market events being ingested and processed through the pipeline:
+
+```json
+{"msg":"market_data_ingested","chain":"eth","pair":"0xABC...","price_usd":0.00042}
+{"msg":"data_quality_pass","token":"0xABC...","score":0.87}
+{"msg":"edge_detected","token":"0xABC...","edge_type":"NEW_LAUNCH_EDGE"}
+{"msg":"execution_result","token":"0xABC...","simulated":true,"reason":"wallet_not_configured"}
+```
+
+The pipeline runs fully — Data Quality → Features → Edge → Probability → Selection → Capital →
+Execution — but execution always produces `simulated:true` because the placeholder wallet cannot
+sign a valid transaction.
+
+#### Step 3 — Observe for 1–4 hours
+
+Let the bot run with real market data and a placeholder wallet for at least 1 hour (ideally
+4 hours across different times of day). During this time:
+
+- Verify the pipeline processes events without errors or panics
+- Confirm Telegram alerts fire for detected opportunities
+- Check that `simulated:true` appears on every execution result
+- Monitor resource usage: `docker stats` — the bot should use < 200 MB RAM steadily
+
+```bash
+# Count simulated vs real executions (all should be simulated)
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT payload->>'simulated' AS simulated, COUNT(*) FROM events
+   WHERE event_type='execution_result' GROUP BY 1;"
+# Expected: only "true" rows, zero "false" rows
+```
+
+#### Stage 3 Pass Criteria
+
+- [ ] Real market events flow through the full pipeline
+- [ ] Telegram alerts fire for edge detections
+- [ ] Zero `simulated=false` executions
+- [ ] No panics or unrecoverable errors in logs over 1+ hours
+- [ ] Memory and CPU usage stable (no leak)
+- [ ] `/kill` and `/resume` Telegram commands still work correctly
+
+---
+
+### 14.4 Stage 4 — Pre-Mainnet Production Readiness Checklist
+
+Complete **every item** in this checklist before setting a real wallet key. This checklist is
+not optional. Each item prevents a specific class of capital loss.
+
+#### 4.1 — Environment Variables
+
+```bash
+# Run this script to check for any remaining placeholder values
+grep -E 'PLACEHOLDER|YOUR_KEY|YOUR_TOKEN|0000000000000000' /opt/crypto-sniping-bot/.env
+# Expected output: EMPTY (no lines printed)
+```
+
+Manually verify each critical variable:
+
+- [ ] `SNIPER_DB_PASSWORD` — a strong, unique password (not "localtest123")
+- [ ] `ETH_RPC_1` — real QuickNode/Alchemy URL responding correctly (tested in Stage 2)
+- [ ] `ETH_WS_1` — real WebSocket URL (same provider as `ETH_RPC_1`)
+- [ ] `SNIPER_TELEGRAM_BOT_TOKEN` — your real bot token (you received alerts in Stage 3)
+- [ ] `SNIPER_TELEGRAM_CHAT_ID` — your real chat ID
+- [ ] `SOLANA_RPC_HTTP_1` — real Helius/QuickNode URL (if Solana enabled)
+- [ ] `SOLANA_WS_1` — real WebSocket URL (if Solana enabled)
+
+#### 4.2 — Risk Limits in config/pipeline.yaml
+
+Open `config/pipeline.yaml` and confirm these values are set conservatively for your first
+live run. Do not go live with the default maximums:
+
+```yaml
+capital:
+  # Start with a small fixed entry size — you can raise this after 50+ profitable trades
+  fixed_entry_size_usd: 10.0 # Recommended: 10–25 USD for first week
+
+  # Total portfolio exposure limit — never exceed what you can afford to lose entirely
+  max_total_exposure_usd: 100.0 # Recommended: 2–5x your entry size for first week
+
+  # Concurrent positions — start with 1, increase only after validating single-position behavior
+  max_concurrent_positions: 1 # Recommended: 1 for first week
+
+position:
+  # Stop-loss — do not widen this on your first run
+  sl_bps: 1500 # 15% max loss per trade (default — do not increase)
+
+  # Max hold time — set conservatively
+  max_hold_seconds: 1800 # 30 minutes maximum (reduce if you see many stale positions)
+```
+
+- [ ] `fixed_entry_size_usd` ≤ 25 USD for the first week
+- [ ] `max_total_exposure_usd` ≤ 5× your entry size
+- [ ] `max_concurrent_positions` = 1 for the first week
+- [ ] `sl_bps` not wider than 1500 (15%)
+- [ ] `halt_drawdown_pct` set to 10% (the daily loss % that auto-fires the kill switch)
+
+#### 4.3 — Kill Switch Functional
+
+This must work before any real money is involved. Test it one more time now:
+
+```bash
+# 1. Send /kill from Telegram
+# 2. Verify log entry appears within 5 seconds:
+docker compose logs bot | grep kill_switch
+# Expected: {"msg":"kill_switch_activated"}
+
+# 3. Verify database records it:
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT COUNT(*) FROM events WHERE event_type='kill_switch_activated';"
+# Expected: >= 1
+
+# 4. Send /resume and verify trading resumes
+```
+
+- [ ] `/kill` activates and appears in both logs and database
+- [ ] `/resume` works and restores trading state
+- [ ] Automatic drawdown kill switch threshold is configured
+
+#### 4.4 — Database State Is Clean
+
+Before going live, ensure the database has no leftover test data from earlier stages:
+
+```bash
+# Check for stuck positions from simulated runs
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT COUNT(*) FROM positions WHERE status NOT IN ('closed','exited');"
+# If > 0, review and close them manually or reset the database
+
+# Verify strategy version is initialized
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT id, version, created_at FROM strategy_versions ORDER BY created_at DESC LIMIT 1;"
+# Expected: 1 row with a valid version number
+```
+
+Option to reset the database for a clean slate before going live:
+
+```bash
+# WARNING: This deletes ALL data including position history and learning records
+docker compose down -v   # removes database volume
+docker compose up --build -d  # recreates fresh database with migrations
+```
+
+- [ ] No stuck open positions from test runs
+- [ ] Strategy version initialized in database
+- [ ] Migration count matches expected (`make migrate-up` output shows all 14 applied)
+
+#### 4.5 — Wallet Security
+
+- [ ] Real wallet key is in `.env` only — never in any YAML, README, or committed file
+- [ ] `.gitignore` includes `.env` — verify with `git check-ignore -v .env` (should print a match)
+- [ ] VPS `.env` file permissions are `600`: `ls -la /opt/crypto-sniping-bot/.env` → `-rw-------`
+- [ ] Solana keypair file permissions are `600`: `ls -la /etc/sniper/keys/solana-wallet-1.json` (if Solana)
+- [ ] Wallet is funded with **only the amount you are willing to lose completely**
+- [ ] The wallet used for trading has **no other assets** (no NFTs, no other tokens, no staking)
+
+Set file permissions:
+
+```bash
+chmod 600 /opt/crypto-sniping-bot/.env
+chmod 600 /etc/sniper/keys/solana-wallet-1.json  # if Solana enabled
+```
+
+#### 4.6 — RPC Redundancy
+
+- [ ] At least 2 HTTP RPC endpoints configured per chain (`ETH_RPC_1` + `ETH_RPC_2`)
+- [ ] WebSocket endpoint configured (`ETH_WS_1`)
+- [ ] RPC circuit breaker is enabled (it is by default — verify in `config/pipeline.yaml` under `rpc`)
+- [ ] RPC latency from VPS tested and acceptable (done in Stage 2 Step 5)
+
+#### 4.7 — Telegram Alerts Working End-to-End
+
+During Stage 3 you should have received real Telegram alerts. Confirm:
+
+- [ ] You received at least one opportunity alert during Stage 3 observation period
+- [ ] Alert messages contain chain name, token address, and edge score
+- [ ] `/status` command returns current mode and position count
+- [ ] `/pnl` command returns a response (even if it shows `0 trades today`)
+
+#### 4.8 — Server Stability
+
+- [ ] VPS has been running for > 24 hours without restart (Stage 3 observation)
+- [ ] Memory usage is stable: `docker stats` shows bot container < 300 MB
+- [ ] CPU usage is normal: < 20% during typical operation
+- [ ] Disk space has > 5 GB free: `df -h /` — database grows over time
+- [ ] System time is synchronized: `timedatectl` shows `System clock synchronized: yes`
+
+```bash
+# Check all of the above at once:
+ssh root@YOUR_VPS_IP "
+echo '=== Memory ===' && docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}'
+echo '=== Disk ===' && df -h /
+echo '=== Time sync ===' && timedatectl | grep synchronized
+echo '=== Uptime ===' && uptime
+"
+```
+
+---
+
+### 14.5 Stage 5 — Shadow Run: Real Wallet, Zero Capital (Optional but Recommended)
+
+**Goal:** Before depositing trading capital, verify that the wallet key works for signing without
+any funds in the wallet. The bot will attempt to submit transactions, they will fail with
+`insufficient funds`, but you confirm the signing path works correctly.
+
+#### Step 1 — Add your real wallet key with zero balance
+
+Update `.env` with your real wallet private key. **Do not deposit any ETH/BNB/SOL yet.**
+
+```bash
+# In /opt/crypto-sniping-bot/.env:
+SNIPER_WALLET_ADDRESS=0xYourRealWalletAddress
+SNIPER_WALLET_KEY=yourRealPrivateKeyHere
+```
+
+```bash
+docker compose down && docker compose up --build -d
+```
+
+#### Step 2 — Observe signing behavior
+
+With a real key but empty wallet, you should see logs like:
+
+```json
+{
+  "msg": "execution_attempted",
+  "chain": "eth",
+  "simulated": false,
+  "tx_hash": null,
+  "error": "insufficient funds for gas * price + value"
+}
+```
+
+This confirms:
+
+- `simulated:false` — the bot tried to submit a real transaction (key is wired correctly)
+- `error` contains `insufficient funds` — transaction failed at the chain level, not at the bot level
+- No funds were spent (the transaction was rejected before broadcast or at broadcast)
+
+- [ ] Logs show `simulated:false` (signing path works)
+- [ ] Error is `insufficient funds` (not a signing error or key format error)
+- [ ] No unexpected errors or panics
+
+#### Step 3 — Back to placeholder wallet if not ready
+
+If you are not proceeding to mainnet immediately, swap back to a placeholder wallet key. Do not
+leave a real private key in `.env` on a server you are not actively monitoring.
+
+---
+
+### 14.6 Stage 6 — Mainnet Go-Live: Canary Funding
+
+**Goal:** Fund the wallet with a small canary amount and run live for 48–72 hours before
+increasing capital. This is your final validation with skin in the game.
+
+> ⚠️ **Last warning:** Only proceed if all Stages 1–4 passed and you have completed the Stage 4
+> checklist. Capital loss at this stage is real. Start with the minimum amount you are comfortable
+> losing entirely.
+
+#### Step 1 — Fund the wallet with canary capital
+
+Transfer the minimum canary amount to your trading wallet:
+
+| Chain  | Canary Amount | What this covers              |
+| ------ | ------------- | ----------------------------- |
+| ETH    | 0.01–0.02 ETH | 1–2 trades at $10 entry + gas |
+| BSC    | 0.05–0.1 BNB  | 2–3 trades at $10 entry + gas |
+| Solana | 0.05–0.1 SOL  | 2–3 trades + gas (lamports)   |
+
+Keep `fixed_entry_size_usd: 10.0` in `config/pipeline.yaml`. You should have enough for 1–2 trades
+before running out of capital, which limits maximum loss during canary validation.
+
+#### Step 2 — Confirm wallet is funded and ready
+
+```bash
+# Verify wallet shows funded in logs at startup
+docker compose down && docker compose up --build -d
+docker compose logs bot | grep -E '"wallet"|"balance"'
+```
+
+#### Step 3 — Monitor the first 24 hours intensively
+
+For the first 24 hours with real capital, check every 2–4 hours:
+
+```bash
+# Real-time log tail (run this in a persistent tmux/screen session)
+ssh root@YOUR_VPS_IP "cd /opt/crypto-sniping-bot && docker compose logs -f bot"
+```
+
+Check Telegram for:
+
+- Trade execution alerts (first real trade will appear here)
+- Any error alerts
+- PnL summary (send `/pnl` every few hours)
+
+Check the database:
+
+```bash
+# Count real trades vs simulated
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT payload->>'simulated', COUNT(*), SUM((payload->>'size_usd')::float) AS total_usd
+   FROM events WHERE event_type='execution_result' GROUP BY 1;"
+
+# Check current open positions
+docker compose exec db psql -U sniper -d sniper -c \
+  "SELECT token_address, chain, entry_price_usd, size_usd, status, created_at
+   FROM positions WHERE status='open' ORDER BY created_at DESC;"
+```
+
+#### Step 4 — After 48–72 hours: evaluate and decide
+
+After the canary period, evaluate:
+
+| Metric                 | Acceptable for scaling up  | Flag for review                  |
+| ---------------------- | -------------------------- | -------------------------------- |
+| Win rate               | > 40%                      | < 25% — pause and check edge     |
+| Average trade return   | Positive or small negative | > -10% average — stop loss issue |
+| Execution success rate | > 90% of attempts succeed  | < 70% — RPC or gas issue         |
+| Kill switch triggers   | 0 auto-triggers            | Any auto-trigger — investigate   |
+| Bot uptime             | 100%                       | Any crash — fix before scaling   |
+
+**If metrics are acceptable:** Gradually increase `fixed_entry_size_usd` and
+`max_total_exposure_usd` — no more than doubling per week. Never increase both at the same time.
+
+**If any metric flags:** Stop new trades (`/kill`), investigate root cause in logs and database,
+do not increase capital until resolved.
+
+#### Step 5 — Scaling capital responsibly
+
+```yaml
+# Week 1 canary (do not change until metrics pass)
+fixed_entry_size_usd: 10.0
+max_total_exposure_usd: 50.0
+max_concurrent_positions: 1
+
+# Week 2 (only if week 1 metrics passed)
+fixed_entry_size_usd: 25.0
+max_total_exposure_usd: 150.0
+max_concurrent_positions: 2
+
+# Week 3+ (gradual increase based on actual performance)
+# Rule: never increase total exposure by more than 2x per week
+```
+
+To apply config changes without downtime:
+
+```bash
+# Edit config/pipeline.yaml
+nano /opt/crypto-sniping-bot/config/pipeline.yaml
+
+# Restart bot (the DB and positions are preserved — only the bot process restarts)
+docker compose restart bot
+
+# Verify new config loaded
+docker compose logs bot | grep '"msg":"Config loaded"'
+```
+
+---
+
+### 14.7 Summary: Stage-by-Stage Gate Table
+
+| Stage | Environment    | Wallet Key  | RPC Endpoints | Capital   | Gate to Pass Before Next Stage               |
+| ----- | -------------- | ----------- | ------------- | --------- | -------------------------------------------- |
+| 1     | Local Docker   | Placeholder | Placeholder   | None      | All services start, kill switch works        |
+| 2     | VPS Docker     | Placeholder | Placeholder   | None      | Same as Stage 1, from remote VPS             |
+| 3     | VPS Docker     | Placeholder | **Real**      | None      | Real events flow, zero `simulated=false`     |
+| 4     | Checklist      | —           | —             | —         | Every item in Section 14.4 checked off       |
+| 5     | VPS (optional) | **Real**    | Real          | None      | `simulated=false` logs, `insufficient funds` |
+| 6     | VPS Mainnet    | **Real**    | Real          | 0.01 ETH  | 48–72h canary — metrics pass                 |
+| 7+    | VPS Mainnet    | **Real**    | Real          | Scaled up | Gradual scaling, never 2× in one step        |
+
+> **Remember:** The bot's profit formula is `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality`. Rushing to mainnet before validating execution and data quality
+> sets two of those factors to near-zero — and the product of any factor near zero is near zero.
