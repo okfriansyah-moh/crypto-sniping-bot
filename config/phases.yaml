@@ -35,6 +35,7 @@
 #   Group B — SAFE PARALLEL:    Phases 3-5 (evaluation, models, learning)
 #   Group C — CONTROL LAYER:    Phase 6 (observability, scaling) — after all B
 #   Group D — MARKET EXTENSION: Phase 7 (Solana market) — isolated, after Phase 6
+#   Group E — FINAL HARDENING:  Phase 8 (final production hardening) — mandatory before mainnet, after Phase 7
 # ─────────────────────────────────────────────────────────────────────────────
 
 phases:
@@ -78,3 +79,8 @@ phases:
     complexity: 9
     group: "D"
     skills: "event-bus, rpc-management, dex-scanning, execution-engine, determinism, dto, modularity, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, observability"
+  8:
+    name: "final-production-hardening"
+    complexity: 10
+    group: "E"
+    skills: "event-bus, idempotency, determinism, failure, execution-engine, position-management, observability, rpc-management, database-portability, migration-management, replay-engine-pattern, dto, modularity, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development, security-audit"
