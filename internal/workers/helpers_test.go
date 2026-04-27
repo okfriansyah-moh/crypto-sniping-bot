@@ -192,6 +192,33 @@ func (s *stubAdapter) GetRun(_ context.Context, _ string) (*database.PipelineRun
 	return nil, database.ErrNotFound
 }
 
+// ── Solana stubs (Phase 7) ────────────────────────────────────────────────────
+
+func (s *stubAdapter) GetSolanaEndpointState(_ context.Context, _ string) (*database.SolanaEndpointState, error) {
+	return nil, nil
+}
+func (s *stubAdapter) UpsertSolanaEndpointState(_ context.Context, _ database.SolanaEndpointState) error {
+	return nil
+}
+func (s *stubAdapter) InsertSolanaSignature(_ context.Context, _ database.SolanaSignature) error {
+	return nil
+}
+func (s *stubAdapter) UpdateSolanaSignatureStatus(_ context.Context, _, _ string, _ int64, _ string) error {
+	return nil
+}
+func (s *stubAdapter) UpsertSolanaEndpointHealth(_ context.Context, _ database.SolanaEndpointHealth) error {
+	return nil
+}
+func (s *stubAdapter) ListSolanaEndpointsRanked(_ context.Context) ([]database.SolanaEndpointHealth, error) {
+	return nil, nil
+}
+func (s *stubAdapter) GetSolanaIngestionWatermark(_ context.Context, _ string) (uint64, error) {
+	return 0, nil
+}
+func (s *stubAdapter) UpsertSolanaIngestionWatermark(_ context.Context, _ string, _ uint64) error {
+	return nil
+}
+
 // ── makeOutputEvent ───────────────────────────────────────────────────────────
 
 func TestMakeOutputEvent_HappyPath(t *testing.T) {

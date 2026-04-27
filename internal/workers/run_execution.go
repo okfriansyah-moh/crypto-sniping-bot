@@ -18,6 +18,8 @@ import (
 //
 // Phase 2 simplification: if no EVMClient is provided (nil), the worker
 // emits a Simulated execution result and skips actual on-chain submission.
+// Phase 7: when alloc.Chain == "solana" and solanaExecutor != nil, the
+// worker delegates directly to the Solana execution path via processSolanaAlloc.
 type ExecutionWorker struct {
 	adapter        database.Adapter
 	evmClient      execution.EVMClient
@@ -29,6 +31,7 @@ type ExecutionWorker struct {
 	circuitBreaker *execution.CircuitBreaker
 	rpcEndpoint    string                   // canonical endpoint label for circuit-breaker tracking
 	walletShards   []execution.WalletConfig // multi-wallet shards; nil means single-wallet mode
+	solanaExec     execution.SolanaExecutor // optional; nil disables Solana execution path
 }
 
 // NewExecutionWorker returns a new ExecutionWorker.
@@ -62,7 +65,8 @@ func NewExecutionWorker(
 
 	rpcEndpoint := "default"
 	if cfg != nil && len(cfg.Execution.PrivateEndpoints) > 0 {
-		rpcEndpoint = cfg.Execution.PrivateEndpoints[0]
+		// Sanitize before storing: private endpoint URLs may contain embedded API keys.
+		rpcEndpoint = sanitizeURL(cfg.Execution.PrivateEndpoints[0])
 	}
 
 	return &ExecutionWorker{
@@ -77,6 +81,13 @@ func NewExecutionWorker(
 		rpcEndpoint:    rpcEndpoint,
 		walletShards:   walletShards,
 	}
+}
+
+// WithSolanaExecutor wires in an optional Solana execution module.
+// When set, allocations with Chain=="solana" are routed to this executor.
+func (w *ExecutionWorker) WithSolanaExecutor(exec execution.SolanaExecutor) *ExecutionWorker {
+	w.solanaExec = exec
+	return w
 }
 
 func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
@@ -120,6 +131,9 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 
 	if alloc.Rejected {
 		result = rejectedExecResult(alloc, now)
+	} else if alloc.Chain == "solana" {
+		// Solana execution path (Phase 7).
+		result = w.processSolanaAlloc(ctx, alloc, now)
 	} else if w.evmClient == nil || w.privKey == "" {
 		result = simulatedExecResult(alloc, now)
 	} else {
@@ -204,6 +218,77 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		result.EventID, result, "execution_result_event",
 		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 	)
+}
+
+// processSolanaAlloc delegates to the Solana execution path.
+// If no SolanaExecutor is configured, falls back to simulated result.
+// On real execution the submitted signature is persisted via InsertSolanaSignature
+// so the solana_signatures table is the idempotency and observability record.
+func (w *ExecutionWorker) processSolanaAlloc(ctx context.Context, alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {
+	if w.solanaExec == nil {
+		w.logger.Info("execution_worker_solana_simulated",
+			"execution_id", alloc.ExecutionID,
+			"reason", "no_solana_executor_configured",
+		)
+		return simulatedExecResult(alloc, now)
+	}
+	result, err := w.solanaExec.Execute(ctx, alloc, "", "")
+	if err != nil {
+		w.logger.Error("execution_worker_solana_failed",
+			"execution_id", alloc.ExecutionID,
+			"error", err,
+		)
+		// Persist a failed signature record for observability / dedup.
+		sigRec := database.SolanaSignature{
+			ExecutionID: alloc.ExecutionID,
+			Signature:   "",
+			Status:      "failed",
+			ErrMsg:      err.Error(),
+			CreatedAt:   now,
+		}
+		if insErr := w.adapter.InsertSolanaSignature(ctx, sigRec); insErr != nil {
+			w.logger.Warn("execution_worker_solana_sig_persist_failed",
+				"execution_id", alloc.ExecutionID,
+				"error", insErr,
+			)
+		}
+		// Return a failed result rather than propagating — consistent with EVM path.
+		return contracts.ExecutionResultDTO{
+			EventID:          contracts.ContentIDFromString("exec-sol-err:" + alloc.EventID),
+			TraceID:          alloc.TraceID,
+			CorrelationID:    alloc.CorrelationID,
+			CausationID:      alloc.EventID,
+			VersionID:        alloc.VersionID,
+			TokenLifecycleID: alloc.TokenLifecycleID,
+			ExecutionID:      alloc.ExecutionID,
+			AllocationID:     alloc.EventID,
+			Status:           "failed",
+			Success:          false,
+			ErrorCode:        "SOLANA_EXECUTION_FAILED",
+			WalletAddress:    alloc.WalletAddress,
+			CompletedAt:      now,
+		}
+	}
+
+	// Persist the submitted signature for idempotency and confirmation tracking.
+	sigStatus := "confirmed"
+	if !result.Success {
+		sigStatus = "failed"
+	}
+	sigRec := database.SolanaSignature{
+		ExecutionID: alloc.ExecutionID,
+		Signature:   result.TxHash,
+		Status:      sigStatus,
+		Slot:        int64(result.BlockNumber),
+		CreatedAt:   now,
+	}
+	if insErr := w.adapter.InsertSolanaSignature(ctx, sigRec); insErr != nil {
+		w.logger.Warn("execution_worker_solana_sig_persist_failed",
+			"execution_id", alloc.ExecutionID,
+			"error", insErr,
+		)
+	}
+	return result
 }
 
 func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {

@@ -18,7 +18,8 @@ type Config struct {
 	Database     DatabaseConfig         `yaml:"database"`
 	Worker       WorkerConfig           `yaml:"worker"`
 	Logging      LoggingConfig          `yaml:"logging"`
-	Chains       map[string]ChainConfig `yaml:"chains"` // per-chain ingestion config
+	Chains       map[string]ChainConfig `yaml:"chains"` // per-chain EVM ingestion config
+	Solana       SolanaConfig           `yaml:"solana"` // Solana ingestion config (Phase 7)
 	Edge         EdgeConfig             `yaml:"edge"`
 	Validation   ValidationConfig       `yaml:"validation"`
 	Selection    SelectionConfig        `yaml:"selection"`
@@ -127,6 +128,17 @@ type PositionConfig struct {
 	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
 }
 
+// SolanaExecutionConfig holds Phase 7 Solana execution parameters.
+type SolanaExecutionConfig struct {
+	SlippageCapBps         int32  `yaml:"slippage_cap_bps"`
+	ConfirmTimeoutMs       int    `yaml:"confirm_timeout_ms"`
+	ReceiptPollIntervalMs  int    `yaml:"receipt_poll_interval_ms"`
+	MaxSendAttempts        int    `yaml:"max_send_attempts"`
+	WalletKeyPaths         []string `yaml:"wallet_key_paths"`
+	ComputeUnitLimitBuffer int    `yaml:"compute_unit_limit_buffer"`
+	PriorityFeeLamports    int64  `yaml:"priority_fee_lamports"`
+}
+
 // ExecutionConfig holds Phase 3+4 execution parameters: retry/replacement (Phase 3)
 // and private RPC routing (Phase 4).
 type ExecutionConfig struct {
@@ -144,7 +156,10 @@ type ExecutionConfig struct {
 	DefaultMaxSlippageBps  int32   `yaml:"default_max_slippage_bps"`
 	// Phase 4: private RPC routing
 	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
-	PrivateEndpoints         []string `yaml:"private_endpoints"`
+	// PrivateEndpoints may contain API keys embedded in URLs (e.g. Alchemy, Infura).
+	// json:"-" prevents them from being serialized into Config.Snapshot() and stored
+	// in the strategy_versions.config_snapshot column.
+	PrivateEndpoints         []string `yaml:"private_endpoints"         json:"-"`
 	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
 	// Gas: configurable gas limit for swap transactions.
 	// Override per-chain if different token contracts require more gas.
@@ -159,6 +174,8 @@ type ExecutionConfig struct {
 	// allocation amounts to wei. Update this when ETH price moves significantly.
 	// A future phase will replace this with a real-time price feed.
 	EthPriceUsd float64 `yaml:"eth_price_usd"`
+	// Phase 7: Solana execution parameters
+	Solana SolanaExecutionConfig `yaml:"solana"`
 }
 
 // EvaluationConfig holds Phase 3 evaluation engine parameters.
@@ -381,6 +398,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Database.User == "" {
 		missing = append(missing, "database.user")
+	}
+
+	switch c.Database.SSLMode {
+	case "", "disable", "require", "verify-ca", "verify-full":
+		// valid values
+	default:
+		return fmt.Errorf("config: invalid database.ssl_mode: %q (allowed: disable, require, verify-ca, verify-full)", c.Database.SSLMode)
 	}
 
 	if len(missing) > 0 {

@@ -62,3 +62,39 @@ chains:
 #   poll_interval_ms: 2000
 #   heartbeat_interval_ms: 10000
 #   heartbeat_timeout_ms: 30000
+
+# Phase 7: Solana ingestion configuration.
+solana:
+  chain_id: "solana"
+  confirmation_commitment: "confirmed"
+  blockhash_refresh_ms: 2000
+  ws_heartbeat_timeout_ms: 20000
+  gap_recovery_max_slots: 1000
+  publish_buffer_size: 256
+  preferred_region: "us-east"
+  providers_required: 1
+  rpc:
+    - url: "${SOLANA_RPC_HTTP_1}"
+      priority: 1
+      kind: http
+      region: us-east
+    - url: "${SOLANA_WS_1}"
+      priority: 1
+      kind: ws
+      region: us-east
+  programs:
+    - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+      family: raydium-v4
+    - program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+      family: pumpfun
+  ingestion_backoff:
+    initial_ms: 200
+    max_ms: 30000
+    multiplier: 2.0
+  health:
+    score_refresh_interval_ms: 5000
+    latency_normalizer_ms: 1000
+    latency_failover_threshold_ms: 3000
+    error_rate_failover_threshold: 0.1
+    consecutive_ws_failures_threshold: 3
+    circuit_open_cooldown_ms: 30000

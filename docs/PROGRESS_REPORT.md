@@ -7,14 +7,14 @@
 
 ## Summary
 
-| Metric           | Value                             |
-| ---------------- | --------------------------------- |
-| **Total Phases** | 8                                 |
-| **Completed**    | 8                                 |
-| **In Progress**  | 0                                 |
-| **Failed**       | 0                                 |
-| **Not Started**  | 0                                 |
-| **Last Updated** | 2026-04-26 (production hardening) |
+| Metric           | Value      |
+| ---------------- | ---------- |
+| **Total Phases** | 9          |
+| **Completed**    | 9          |
+| **In Progress**  | 0          |
+| **Failed**       | 0          |
+| **Not Started**  | 0          |
+| **Last Updated** | 2026-04-26 |
 
 ---
 
@@ -30,6 +30,7 @@
 | 5     | Learning Engine        | completed | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass.                                                                                                                           |
 | 6     | Observability & Risk   | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
 | —     | Production Hardening   | completed | 0           | 8 critical/significant/moderate fixes: C4 CAS bypass, C2 circuit-breaker wiring, C3 hardcoded ETH price, S4 hardcoded gas limit, S6 hardcoded poll timeouts, C1 wallet sharding, S3 double MarkEventProcessed, M1 unstructured logging. Build/vet/all-30-packages clean.  |
+| 7     | Solana Market          | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 
@@ -105,11 +106,13 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 
 ## Session History
 
-| Date       | Mode              | Phases | Duration      | Token Usage | Outcome                                                                           |
-| ---------- | ----------------- | ------ | ------------- | ----------- | --------------------------------------------------------------------------------- |
-| 2026-04-25 | manual (mode-2)   | 0      | multi-session | —           | completed                                                                         |
-| 2026-04-25 | mode-2            | 1      | —             | —           | completed                                                                         |
-| 2026-04-25 | mode-2            | 2      | —             | —           | completed                                                                         |
-| 2026-04-26 | integration-agent | 3      | —             | —           | integration-validated                                                             |
-| 2026-04-26 | mode-2            | 6      | —             | —           | completed                                                                         |
-| 2026-04-26 | manual hardening  | —      | multi-session | —           | PRODUCTION READY — 8 fixes (C4, C2, C3, S4, S6, C1, S3, M1); all 30 packages pass |
+| Date       | Mode              | Phases | Duration      | Token Usage | Outcome                                                                                              |
+| ---------- | ----------------- | ------ | ------------- | ----------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-04-25 | manual (mode-2)   | 0      | multi-session | —           | completed                                                                                            |
+| 2026-04-25 | mode-2            | 1      | —             | —           | completed                                                                                            |
+| 2026-04-25 | mode-2            | 2      | —             | —           | completed                                                                                            |
+| 2026-04-26 | integration-agent | 3      | —             | —           | integration-validated                                                                                |
+| 2026-04-26 | mode-2            | 6      | —             | —           | completed                                                                                            |
+| 2026-04-26 | manual hardening  | —      | multi-session | —           | PRODUCTION READY — 8 fixes (C4, C2, C3, S4, S6, C1, S3, M1); all 30 packages pass                    |
+| 2026-04-26 | copilot phase-7   | 7      | —             | —           | Solana market extension: ingestion_solana + execution_solana + router + worker; all 31 packages pass |
+| 2026-04-26 | mode-2            | 7      | —             | —           | completed                                                                                            |

@@ -8,11 +8,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 )
+
+// urlKeyPathRe matches API keys embedded as a path segment after /v<N>/.
+// Covers Infura  wss://mainnet.infura.io/ws/v3/<KEY>
+//         Alchemy  https://eth-mainnet.g.alchemy.com/v2/<KEY>
+var urlKeyPathRe = regexp.MustCompile(`(?i)(/v\d+/)([a-zA-Z0-9_\-]{20,})`)
+
+// urlKeyQueryRe matches API keys embedded as query parameters.
+var urlKeyQueryRe = regexp.MustCompile(`(?i)([?&](?:token|key|apikey|api_key)=)([a-zA-Z0-9_\-]+)`)
+
+// urlKeyTrailingRe matches QuickNode-style trailing-segment keys.
+var urlKeyTrailingRe = regexp.MustCompile(`(?i)(://[^/]+/)([a-zA-Z0-9]{32,})(/|$)`)
+
+// sanitizeURL masks API keys embedded in RPC endpoint URLs so they are safe
+// to include in log output and error messages without leaking credentials.
+func sanitizeURL(rawURL string) string {
+	s := urlKeyPathRe.ReplaceAllString(rawURL, "${1}[REDACTED]")
+	s = urlKeyQueryRe.ReplaceAllString(s, "${1}[REDACTED]")
+	s = urlKeyTrailingRe.ReplaceAllString(s, "${1}[REDACTED]${3}")
+	return s
+}
+
 
 // makeOutputEvent serialises dto into a downstream database.Event.
 // dtoEventID must already be computed by the module (content-addressable).

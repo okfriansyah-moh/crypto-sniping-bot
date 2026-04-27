@@ -367,3 +367,30 @@ return nil, nil
 func (m *mockAdapter) ComputeDrawdown(_ context.Context, _ int) (float64, error) {
 	return 0.0, nil
 }
+
+// ── Phase 7: Solana stubs ─────────────────────────────────────────────────────
+
+func (m *mockAdapter) GetSolanaEndpointState(_ context.Context, _ string) (*database.SolanaEndpointState, error) {
+	return nil, nil
+}
+func (m *mockAdapter) UpsertSolanaEndpointState(_ context.Context, _ database.SolanaEndpointState) error {
+	return nil
+}
+func (m *mockAdapter) InsertSolanaSignature(_ context.Context, _ database.SolanaSignature) error {
+	return nil
+}
+func (m *mockAdapter) UpdateSolanaSignatureStatus(_ context.Context, _, _ string, _ int64, _ string) error {
+	return nil
+}
+func (m *mockAdapter) UpsertSolanaEndpointHealth(_ context.Context, _ database.SolanaEndpointHealth) error {
+	return nil
+}
+func (m *mockAdapter) ListSolanaEndpointsRanked(_ context.Context) ([]database.SolanaEndpointHealth, error) {
+	return nil, nil
+}
+func (m *mockAdapter) GetSolanaIngestionWatermark(_ context.Context, _ string) (uint64, error) {
+	return 0, nil
+}
+func (m *mockAdapter) UpsertSolanaIngestionWatermark(_ context.Context, _ string, _ uint64) error {
+	return nil
+}
