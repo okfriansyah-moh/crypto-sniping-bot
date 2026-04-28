@@ -9,6 +9,8 @@
 -- 7. events_archive table for event archival
 -- All changes are additive/backward-compatible.
 
+BEGIN;
+
 -- ── 1. Event TTL and priority ──────────────────────────────────────────────────
 
 ALTER TABLE events
@@ -96,3 +98,5 @@ CREATE TABLE IF NOT EXISTS events_archive (
     priority       INTEGER     NOT NULL DEFAULT 0,
     expires_at     TIMESTAMP WITH TIME ZONE
 );
+
+COMMIT;

@@ -81,6 +81,15 @@ func (w *CapitalWorker) Process(ctx context.Context, evt *database.Event) (*data
 		)
 	}
 
+	w.logger.Info("capital_allocated",
+		"token", allocDTO.TokenAddress,
+		"size_usd", allocDTO.SizeUsd,
+		"chain", allocDTO.Chain,
+		"cohort_id", allocDTO.CohortID,
+		"rejected", allocDTO.Rejected,
+		"trace_id", allocDTO.TraceID,
+	)
+
 	if err := w.adapter.InsertAllocation(ctx, allocDTO); err != nil {
 		w.logger.Warn("capital_worker_persist_failed", "event_id", allocDTO.EventID, "error", err)
 	}

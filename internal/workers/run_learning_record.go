@@ -60,6 +60,15 @@ func RunLearningRecord(
 		return nil
 	}
 
+	logger.Info("learning_record_created",
+		"record_id", lrDTO.RecordID,
+		"outcome", lrDTO.Outcome,
+		"classification", lrDTO.Classification,
+		"pnl_pct", lrDTO.PnlPct,
+		"shadow", lrDTO.Shadow,
+		"trace_id", lrDTO.TraceID,
+	)
+
 	if err := adapter.InsertLearningRecord(ctx, lrDTO); err != nil {
 		logger.Error("learning_recorder_persist_failed", "event_id", evt.EventID, "error", err)
 		_ = adapter.ReleaseEventClaim(ctx, evt.EventID)

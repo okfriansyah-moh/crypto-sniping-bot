@@ -47,6 +47,12 @@ func (w *ProbabilityWorker) Process(ctx context.Context, evt *database.Event) (*
 		return nil, nil // skip (rejected upstream by validator if missing)
 	}
 
+	w.logger.Info("probability_scored",
+		"event_id", prob.EventID,
+		"probability", prob.Probability,
+		"trace_id", prob.TraceID,
+	)
+
 	if err := w.adapter.InsertProbabilityEstimate(ctx, prob); err != nil {
 		w.logger.Warn("probability_worker_persist_failed",
 			"event_id", prob.EventID, "error", err)

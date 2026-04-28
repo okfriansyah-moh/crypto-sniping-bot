@@ -7,6 +7,8 @@
 -- All SQL uses portable syntax (ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP).
 -- Never modify this file once committed — add a new migration instead.
 
+BEGIN;
+
 -- solana_rpc_endpoint_state: per-endpoint circuit breaker state.
 -- State machine: closed (normal) → open (failing) → half_open (probing).
 CREATE TABLE IF NOT EXISTS solana_rpc_endpoint_state (
@@ -52,3 +54,5 @@ CREATE TABLE IF NOT EXISTS solana_endpoint_health (
     failure_count         BIGINT      NOT NULL DEFAULT 0,
     updated_at            TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMIT;

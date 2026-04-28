@@ -16,7 +16,10 @@ import (
 	"crypto-sniping-bot/internal/app/logging"
 	"crypto-sniping-bot/internal/app/web"
 	"crypto-sniping-bot/internal/modules/execution"
+	"crypto-sniping-bot/internal/modules/execution_solana"
+	"crypto-sniping-bot/internal/modules/ingestion_solana"
 	"crypto-sniping-bot/internal/orchestrator"
+	"crypto-sniping-bot/internal/rpc"
 	"crypto-sniping-bot/internal/workers"
 )
 
@@ -56,6 +59,35 @@ func runServer() {
 		os.Exit(1)
 	}
 
+	// Build Solana RPC client (gracefully optional — noops when not configured).
+	// The concrete *rpc.SolanaClient satisfies both ingestion_solana.SolanaRPCClient
+	// and execution_solana.SolanaClient — the same transport is reused for both roles.
+	var solanaClient ingestion_solana.SolanaRPCClient // nil = noop mode
+	var solanaRPCClient *rpc.SolanaClient             // concrete ref for execution module
+	if len(cfg.Solana.RPCEndpoints) > 0 {
+		var scErr error
+		solanaRPCClient, scErr = rpc.NewSolanaClient(cfg.Solana, logger)
+		if scErr != nil {
+			logger.Warn("solana_client_build_failed", "error", scErr)
+		} else {
+			solanaClient = solanaRPCClient
+		}
+	}
+
+	// Wire Telegram dispatcher (event bus → outbound) and poller (inbound commands).
+	if dispatcher, poller := buildTelegramComponents(db, logger); dispatcher != nil {
+		go func() {
+			if err := dispatcher.Run(ctx); err != nil && err != ctx.Err() {
+				logger.Error("telegram_dispatcher_failed", "error", err)
+			}
+		}()
+		go func() {
+			if err := poller.Run(ctx); err != nil && err != ctx.Err() {
+				logger.Error("telegram_poller_failed", "error", err)
+			}
+		}()
+	}
+
 	// Register pipeline stage workers (Phase 2 baseline + Phase 3 evaluation gate).
 	orch.RegisterStage("dq_worker", workers.NewDataQualityWorker(db, cfg, logger), "market_data_event")
 	orch.RegisterStage("features_worker", workers.NewFeaturesWorker(db, cfg, logger), "data_quality_event")
@@ -70,10 +102,15 @@ func runServer() {
 	// config/pipeline.yaml capital.wallet_address / capital.wallet_private_key when no
 	// multi-wallet env vars are present.
 	walletShards := buildWalletShards(cfg)
-	orch.RegisterStage("execution_worker",
-		workers.NewExecutionWorker(db, cfg, nil, cfg.Capital.WalletPrivateKey, 1, "", walletShards, logger),
-		"allocation_event",
-	)
+	execWorker := workers.NewExecutionWorker(db, cfg, nil, cfg.Capital.WalletPrivateKey, 1, "", walletShards, logger)
+	// Wire Solana execution path when a concrete RPC client is available.
+	// Gracefully noops when solanaRPCClient is nil (Solana not configured).
+	if solanaRPCClient != nil {
+		if solanaExecMod := buildSolanaExecutionModule(solanaRPCClient, cfg, logger); solanaExecMod != nil {
+			execWorker.WithSolanaExecutor(solanaExecMod)
+		}
+	}
+	orch.RegisterStage("execution_worker", execWorker, "allocation_event")
 	orch.RegisterStage("position_open_worker", workers.NewPositionOpenWorker(db, cfg, logger), "execution_result_event")
 	// Phase 3: evaluation gate — mandatory pre-learning stage.
 	// Consumes position_state_event where Status=exited.
@@ -172,7 +209,7 @@ func runServer() {
 	// Gracefully noops when cfg.Solana.Programs is empty (Solana not configured)
 	// or when no RPC client is injected (nil = no-op until a client is wired).
 	go func() {
-		if err := workers.RunIngestionSolana(ctx, db, cfg, nil, logger); err != nil && err != ctx.Err() {
+		if err := workers.RunIngestionSolana(ctx, db, cfg, solanaClient, logger); err != nil && err != ctx.Err() {
 			logger.Error("solana_ingestion_failed", "error", err)
 		}
 	}()
@@ -211,6 +248,60 @@ func runServer() {
 	}
 
 	logger.Info("server_shutdown")
+}
+
+// buildSolanaExecutionModule constructs the Solana execution module from keypair files
+// listed in cfg.Execution.Solana.WalletKeyPaths (env-expanded at config load time).
+// Returns nil when no keypaths are configured or no valid keypairs can be loaded —
+// the execution worker then runs in EVM-only mode without error.
+func buildSolanaExecutionModule(sc *rpc.SolanaClient, cfg *config.Config, logger *slog.Logger) execution.SolanaExecutor {
+	paths := cfg.Execution.Solana.WalletKeyPaths
+	if len(paths) == 0 {
+		logger.Info("solana_execution_disabled", "reason", "no_wallet_key_paths")
+		return nil
+	}
+
+	var keypairs []*execution_solana.Keypair
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		kp, err := execution_solana.LoadKeypair(p)
+		if err != nil {
+			logger.Warn("solana_keypair_load_failed", "path", p, "error", err)
+			continue
+		}
+		keypairs = append(keypairs, kp)
+	}
+	if len(keypairs) == 0 {
+		logger.Warn("solana_execution_disabled", "reason", "no_valid_keypairs_loaded")
+		return nil
+	}
+
+	// Derive default market from the first Raydium program in cfg.Solana.Programs.
+	// Falls back to "solana-raydium-v4" when the programs list is empty.
+	defaultMarket := "solana-raydium-v4"
+	for _, prog := range cfg.Solana.Programs {
+		switch prog.Family {
+		case "raydium-v4", "raydium":
+			defaultMarket = "solana-raydium-v4"
+		case "pumpfun":
+			defaultMarket = "solana-pumpfun"
+		}
+		break // first program wins
+	}
+
+	mod, err := execution_solana.New(&cfg.Execution.Solana, sc, keypairs, defaultMarket, logger)
+	if err != nil {
+		logger.Error("solana_execution_module_init_failed", "error", err)
+		return nil
+	}
+
+	logger.Info("solana_execution_ready",
+		"keypair_count", len(keypairs),
+		"default_market", defaultMarket,
+	)
+	return mod
 }
 
 // buildWalletShards constructs the wallet shard slice for the execution worker.

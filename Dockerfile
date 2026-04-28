@@ -49,6 +49,9 @@ COPY --from=builder /build/healthcheck /app/healthcheck
 # YAML configuration files (parameters only — no secrets, those come via env vars).
 COPY config/ /app/config/
 
+# SQL migration files — required by the migrate command at runtime.
+COPY database/migrations/ /build/database/migrations/
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
