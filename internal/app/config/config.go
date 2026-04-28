@@ -131,13 +131,13 @@ type PositionConfig struct {
 
 // SolanaExecutionConfig holds Phase 7 Solana execution parameters.
 type SolanaExecutionConfig struct {
-	SlippageCapBps         int32  `yaml:"slippage_cap_bps"`
-	ConfirmTimeoutMs       int    `yaml:"confirm_timeout_ms"`
-	ReceiptPollIntervalMs  int    `yaml:"receipt_poll_interval_ms"`
-	MaxSendAttempts        int    `yaml:"max_send_attempts"`
+	SlippageCapBps         int32    `yaml:"slippage_cap_bps"`
+	ConfirmTimeoutMs       int      `yaml:"confirm_timeout_ms"`
+	ReceiptPollIntervalMs  int      `yaml:"receipt_poll_interval_ms"`
+	MaxSendAttempts        int      `yaml:"max_send_attempts"`
 	WalletKeyPaths         []string `yaml:"wallet_key_paths"`
-	ComputeUnitLimitBuffer int    `yaml:"compute_unit_limit_buffer"`
-	PriorityFeeLamports    int64  `yaml:"priority_fee_lamports"`
+	ComputeUnitLimitBuffer int      `yaml:"compute_unit_limit_buffer"`
+	PriorityFeeLamports    int64    `yaml:"priority_fee_lamports"`
 }
 
 // ExecutionConfig holds Phase 3+4 execution parameters: retry/replacement (Phase 3)
@@ -156,12 +156,12 @@ type ExecutionConfig struct {
 	ConcurrencyMax         int     `yaml:"concurrency_max"`
 	DefaultMaxSlippageBps  int32   `yaml:"default_max_slippage_bps"`
 	// Phase 4: private RPC routing
-	PrivateRouteThresholdUsd float64  `yaml:"private_route_threshold_usd"`
+	PrivateRouteThresholdUsd float64 `yaml:"private_route_threshold_usd"`
 	// PrivateEndpoints may contain API keys embedded in URLs (e.g. Alchemy, Infura).
 	// json:"-" prevents them from being serialized into Config.Snapshot() and stored
 	// in the strategy_versions.config_snapshot column.
-	PrivateEndpoints         []string `yaml:"private_endpoints"         json:"-"`
-	Mode                     string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
+	PrivateEndpoints []string `yaml:"private_endpoints"         json:"-"`
+	Mode             string   `yaml:"mode"` // "live" | "shadow" (Phase 5)
 	// Gas: configurable gas limit for swap transactions.
 	// Override per-chain if different token contracts require more gas.
 	GasLimit uint64 `yaml:"gas_limit"`
@@ -343,16 +343,16 @@ type BudgetsConfig struct {
 // HardeningConfig holds Phase 8 production hardening parameters.
 type HardeningConfig struct {
 	// Reconciliation worker parameters (§ 4.10.E.2).
-	ReconciliationIntervalMs int `yaml:"reconciliation_interval_ms"` // default: 30000
+	ReconciliationIntervalMs   int `yaml:"reconciliation_interval_ms"`   // default: 30000
 	ReconciliationToleranceBps int `yaml:"reconciliation_tolerance_bps"` // default: 50 (0.5%)
 
 	// Worker partition parameters (§ 4.11.B).
-	PartitionLeaseTTLSec    int `yaml:"partition_lease_ttl_sec"`    // default: 60
+	PartitionLeaseTTLSec      int `yaml:"partition_lease_ttl_sec"`      // default: 60
 	PartitionRenewIntervalSec int `yaml:"partition_renew_interval_sec"` // default: 30
 
 	// DLQ retry policy (§ 4.10.C).
-	MaxTransientRetries    int `yaml:"max_transient_retries"`    // default: 5
-	MaxApplicationRetries  int `yaml:"max_application_retries"`  // default: 3
+	MaxTransientRetries   int `yaml:"max_transient_retries"`   // default: 5
+	MaxApplicationRetries int `yaml:"max_application_retries"` // default: 3
 
 	// Event bus batch size for ClaimNextEvents.
 	EventClaimBatchSize int `yaml:"event_claim_batch_size"` // default: 10
@@ -393,6 +393,17 @@ func Load(paths ...string) (*Config, error) {
 		executionPath := filepath.Join(cwd, "config", "execution.yaml")
 		if _, statErr := os.Stat(executionPath); statErr == nil {
 			paths = append(paths, executionPath)
+		}
+	} else if len(paths) == 1 && strings.HasSuffix(paths[0], "pipeline.yaml") {
+		// When a single pipeline.yaml path is given (e.g. from findConfigPath),
+		// auto-discover sibling config files so budgets.yaml, chains.yaml,
+		// and execution.yaml are always merged in.
+		dir := filepath.Dir(paths[0])
+		for _, name := range []string{"chains.yaml", "budgets.yaml", "execution.yaml"} {
+			p := filepath.Join(dir, name)
+			if _, statErr := os.Stat(p); statErr == nil {
+				paths = append(paths, p)
+			}
 		}
 	}
 
@@ -461,10 +472,12 @@ func (c *Config) Port() string {
 }
 
 func loadFile(path string, cfg *Config) error {
-	data, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("config: read %s: %w", path, err)
 	}
+	// Expand ${ENV_VAR} placeholders (e.g. ${SOLANA_RPC_HTTP_1} in chains.yaml).
+	data := []byte(os.ExpandEnv(string(raw)))
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("config: parse %s: %w", path, err)
 	}

@@ -3,6 +3,8 @@
 -- Safe for rolling deployment: ADD COLUMN IF NOT EXISTS with safe defaults.
 -- No DROP, no ALTER COLUMN TYPE, no data loss.
 
+BEGIN;
+
 -- ── positions.amount_raw ──────────────────────────────────────────────────────
 -- Stores the last-known on-chain token balance as a decimal string.
 -- AdjustPositionAmount writes here instead of current_price (which is a price
@@ -22,3 +24,5 @@ ALTER TABLE events
 CREATE INDEX IF NOT EXISTS idx_events_block_number
     ON events (chain, block_number)
     WHERE block_number > 0;
+
+COMMIT;

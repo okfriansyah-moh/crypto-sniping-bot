@@ -4,12 +4,17 @@
 -- All changes are additive: ADD COLUMN with safe defaults, CREATE TABLE IF NOT EXISTS.
 -- No DROP, no ALTER COLUMN TYPE. Safe for rolling deployment.
 
+BEGIN;
+
 -- ── § 4.10.A  Event ordering columns ─────────────────────────────────────────
 
+-- chain and consumer must be added first — idx_events_dispatch references them.
 ALTER TABLE events
-    ADD COLUMN IF NOT EXISTS logical_order_key BYTEA   NOT NULL DEFAULT '\x00'::bytea,
-    ADD COLUMN IF NOT EXISTS partition_key     INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS retry_count       INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS chain              TEXT    NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS consumer           TEXT    NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS logical_order_key  BYTEA   NOT NULL DEFAULT '\x00'::bytea,
+    ADD COLUMN IF NOT EXISTS partition_key      INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS retry_count        INTEGER NOT NULL DEFAULT 0;
 
 -- Dispatch index: consumer + partition + ordering in one pass.
 CREATE INDEX IF NOT EXISTS idx_events_dispatch
@@ -23,11 +28,6 @@ ALTER TABLE events
 CREATE INDEX IF NOT EXISTS idx_events_invalidated
     ON events (invalidated_at)
     WHERE invalidated_at IS NOT NULL;
-
--- chain and consumer columns required by dispatch index (additive, safe default).
-ALTER TABLE events
-    ADD COLUMN IF NOT EXISTS chain    TEXT NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS consumer TEXT NOT NULL DEFAULT '';
 
 -- ── § 4.10.C  Dead-letter queue ───────────────────────────────────────────────
 
@@ -191,3 +191,5 @@ CREATE TABLE IF NOT EXISTS ingestion_drops (
 
 CREATE INDEX IF NOT EXISTS idx_drops_window
     ON ingestion_drops (chain, dropped_at);
+
+COMMIT;

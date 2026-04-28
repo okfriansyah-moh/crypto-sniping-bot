@@ -69,6 +69,12 @@ func RunUpdater(
 		return err
 	}
 
+	logger.Info("strategy_version_proposed",
+		"version_id", dbVersion.StrategyVersionID,
+		"parent_version_id", dbVersion.ParentVersionID,
+		"trace_id", evt.TraceID,
+	)
+
 	if err := adapter.SetStrategyVersionStatus(ctx, dbVersion.StrategyVersionID, "shadow", "updater_proposed"); err != nil {
 		logger.Error("updater_set_shadow_failed", "version_id", dbVersion.StrategyVersionID, "error", err)
 		_ = adapter.ReleaseEventClaim(ctx, evt.EventID)

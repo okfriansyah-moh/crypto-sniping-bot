@@ -269,6 +269,18 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		w.logger.Warn("execution_worker_persist_failed", "event_id", result.EventID, "error", err)
 	}
 
+	w.logger.Info("trade_executed",
+		"token_lifecycle_id", alloc.TokenLifecycleID,
+		"status", result.Status,
+		"success", result.Success,
+		"chain", alloc.Chain,
+		"latency_ms", result.LatencyMs,
+		"slippage_realized_bps", result.SlippageRealizedBps,
+		"mev_protected", result.MEVProtected,
+		"simulated", result.Simulated,
+		"trace_id", result.TraceID,
+	)
+
 	nextState := "EXECUTED"
 	if !result.Success {
 		nextState = "FAILED"

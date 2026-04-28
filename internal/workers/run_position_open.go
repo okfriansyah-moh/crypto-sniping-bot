@@ -99,6 +99,17 @@ func (w *PositionOpenWorker) Process(ctx context.Context, evt *database.Event) (
 		return nil, fmt.Errorf("position_open_worker: transition: %w", err)
 	}
 
+	w.logger.Info("position_opened",
+		"token", pos.TokenAddress,
+		"chain", pos.Chain,
+		"entry_price", pos.EntryPrice,
+		"tp1_bps", pos.Tp1Bps,
+		"tp2_bps", pos.Tp2Bps,
+		"sl_bps", pos.SlBps,
+		"status", pos.Status,
+		"trace_id", pos.TraceID,
+	)
+
 	return makeOutputEvent(
 		pos.EventID, pos, "position_state_event",
 		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,

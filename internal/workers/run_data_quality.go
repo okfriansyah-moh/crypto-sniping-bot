@@ -59,6 +59,13 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		return nil, fmt.Errorf("dq_worker: module: %w", err)
 	}
 
+	w.logger.Info("dq_decision",
+		"token", dqDTO.TokenAddress,
+		"decision", dqDTO.Decision,
+		"risk_score", dqDTO.RiskScore,
+		"trace_id", dqDTO.TraceID,
+	)
+
 	// Persist the result regardless of decision.
 	if err := w.adapter.InsertDataQuality(ctx, dqDTO); err != nil {
 		w.logger.Warn("dq_worker_persist_failed", "event_id", dqDTO.EventID, "error", err)

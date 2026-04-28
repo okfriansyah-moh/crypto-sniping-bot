@@ -111,6 +111,8 @@ func pollOnce(
 				"reason", updated.ExitReason,
 				"pnl_pct", updated.PnlPct,
 				"pnl_usd", updated.PnlUsd,
+				"chain", updated.Chain,
+				"trace_id", updated.TraceID,
 			)
 
 			if err := doMandatoryTransition(ctx, adapter, updated.TokenLifecycleID, "POSITION_OPEN", "POSITION_CLOSED", updated.ExitReason, "position_poll"); err != nil {

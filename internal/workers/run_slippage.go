@@ -15,10 +15,10 @@ import (
 // SlippageWorker implements Layer 4: Slippage Model.
 // Consumes: feature_event → emits: slippage_event.
 type SlippageWorker struct {
-	adapter      database.Adapter
-	model        *models.SlippageModel
-	defaultSize  float64
-	logger       *slog.Logger
+	adapter     database.Adapter
+	model       *models.SlippageModel
+	defaultSize float64
+	logger      *slog.Logger
 }
 
 // NewSlippageWorker constructs a SlippageWorker using the configured bucket grid.
@@ -52,6 +52,13 @@ func (w *SlippageWorker) Process(ctx context.Context, evt *database.Event) (*dat
 			"event_id", evt.EventID, "error", err)
 		return nil, nil
 	}
+
+	w.logger.Info("slippage_estimated",
+		"event_id", slip.EventID,
+		"p50_bps", slip.ExpectedP50Bps,
+		"p95_bps", slip.ExpectedP95Bps,
+		"trace_id", slip.TraceID,
+	)
 
 	if err := w.adapter.InsertSlippageEstimate(ctx, slip); err != nil {
 		w.logger.Warn("slippage_worker_persist_failed",

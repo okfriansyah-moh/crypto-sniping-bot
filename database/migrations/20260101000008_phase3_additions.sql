@@ -18,9 +18,12 @@ CREATE TABLE IF NOT EXISTS quarantine_tokens (
     expires_at         TIMESTAMP
 );
 
+-- Partial index covering only non-expired permanent quarantines.
+-- CURRENT_TIMESTAMP is not IMMUTABLE so cannot be used in index predicates;
+-- time-limited quarantine expiry is enforced at query time, not here.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantine_token_address
     ON quarantine_tokens (token_address)
-    WHERE expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP;
+    WHERE expires_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_quarantine_lifecycle
     ON quarantine_tokens (lifecycle_id);

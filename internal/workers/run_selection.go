@@ -76,6 +76,15 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		return nil, fmt.Errorf("selection_worker: module: %w", err)
 	}
 
+	w.logger.Info("selection_decision",
+		"token", selDTO.TokenAddress,
+		"selected", selDTO.Selected,
+		"rank", selDTO.Rank,
+		"combined_score", selDTO.CombinedScore,
+		"reject_reason", selDTO.RejectReason,
+		"trace_id", selDTO.TraceID,
+	)
+
 	if err := w.adapter.InsertSelection(ctx, selDTO); err != nil {
 		w.logger.Warn("selection_worker_persist_failed", "event_id", selDTO.EventID, "error", err)
 	}

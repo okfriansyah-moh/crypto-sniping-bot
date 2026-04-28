@@ -1,6 +1,6 @@
-// Package telegram — operator command handlers for /status /pnl /positions /kill /resume /version.
-// All destructive commands (/kill, /resume) are logged with timestamp and require
-// a confirmation token before execution.
+// Package telegram — operator command handlers for /status /pnl /positions /kill /resume /version /mode /help.
+// All destructive commands (/kill, /resume, /mode) are logged with timestamp and require
+// AllowedUserIDs to be configured before execution.
 // No remote code execution is permitted via these commands — ever.
 package telegram
 
@@ -22,19 +22,21 @@ const (
 	CmdKill      CommandType = "/kill"
 	CmdResume    CommandType = "/resume"
 	CmdVersion   CommandType = "/version"
+	CmdMode      CommandType = "/mode"
+	CmdHelp      CommandType = "/help"
 )
 
 // isDestructive returns true for commands that modify system state.
 func (c CommandType) isDestructive() bool {
-	return c == CmdKill || c == CmdResume
+	return c == CmdKill || c == CmdResume || c == CmdMode
 }
 
 // CommandRequest carries the parsed operator command.
 type CommandRequest struct {
-	Type      CommandType
-	Args      []string
-	IssuedAt  time.Time
-	IssuerID  string // Telegram user ID (string form)
+	Type     CommandType
+	Args     []string
+	IssuedAt time.Time
+	IssuerID string // Telegram user ID (string form)
 }
 
 // CommandResult is the formatted text response to send back.
@@ -53,7 +55,7 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	}
 	cmd := CommandType(strings.ToLower(parts[0]))
 	switch cmd {
-	case CmdStatus, CmdPnl, CmdPositions, CmdKill, CmdResume, CmdVersion:
+	case CmdStatus, CmdPnl, CmdPositions, CmdKill, CmdResume, CmdVersion, CmdMode, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
 			Args:     parts[1:],
@@ -74,6 +76,7 @@ type Handler struct {
 	killFn         func(ctx context.Context) error
 	resumeFn       func(ctx context.Context) error
 	versionFn      func(ctx context.Context) (string, error)
+	modeFn         func(ctx context.Context, mode string) (string, error)
 	allowedUserIDs map[string]struct{} // nil means unconfigured
 	logger         *slog.Logger
 }
@@ -86,6 +89,7 @@ type HandlerOptions struct {
 	KillFn      func(ctx context.Context) error
 	ResumeFn    func(ctx context.Context) error
 	VersionFn   func(ctx context.Context) (string, error)
+	ModeFn      func(ctx context.Context, mode string) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -111,6 +115,7 @@ func NewHandler(opts HandlerOptions) *Handler {
 		killFn:         opts.KillFn,
 		resumeFn:       opts.ResumeFn,
 		versionFn:      opts.VersionFn,
+		modeFn:         opts.ModeFn,
 		allowedUserIDs: allowedSet(opts.AllowedUserIDs),
 		logger:         logger,
 	}
@@ -223,7 +228,61 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 			return nil, fmt.Errorf("commands: version: %w", err)
 		}
 		return &CommandResult{Text: text}, nil
+
+	case CmdMode:
+		if len(req.Args) == 0 {
+			return &CommandResult{
+				Text:        "Usage: /mode <strict|balanced|explore>",
+				Destructive: true,
+			}, nil
+		}
+		modeArg := strings.ToLower(req.Args[0])
+		// Normalize alias: "explore" → "EXPLORATION"
+		switch modeArg {
+		case "strict":
+			modeArg = "STRICT"
+		case "balanced":
+			modeArg = "BALANCED"
+		case "explore", "exploration":
+			modeArg = "EXPLORATION"
+		default:
+			return &CommandResult{
+				Text:        fmt.Sprintf("❌ Unknown mode %q — valid values: strict, balanced, explore", req.Args[0]),
+				Destructive: true,
+			}, nil
+		}
+		if h.modeFn == nil {
+			return &CommandResult{Text: "mode: not configured", Destructive: true}, nil
+		}
+		text, err := h.modeFn(ctx, modeArg)
+		if err != nil {
+			return nil, fmt.Errorf("commands: mode: %w", err)
+		}
+		return &CommandResult{Text: text, Destructive: true}, nil
+
+	case CmdHelp:
+		return &CommandResult{Text: helpText()}, nil
 	}
 
 	return nil, fmt.Errorf("commands: unhandled command type: %q", req.Type)
+}
+
+// helpText returns a static listing of all available operator commands.
+func helpText() string {
+	return "<b>Available Commands</b>\n\n" +
+		"<b>📊 Read-only</b>\n" +
+		"/status — System mode, drawdown, positions, exposure, strategy\n" +
+		"/pnl — 24h realized drawdown and open exposure summary\n" +
+		"/positions — List all open positions with size and entry price\n" +
+		"/version — Active strategy version ID and status\n\n" +
+		"<b>⚙️ Operational</b>\n" +
+		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +
+		"/mode balanced — Switch to BALANCED mode (default)\n" +
+		"/mode explore — Switch to EXPLORATION mode (relaxed thresholds)\n\n" +
+		"<b>🔴 Destructive</b>\n" +
+		"/kill — Activate kill switch (halts all trading immediately)\n" +
+		"/resume — Clear kill switch (resumes trading)\n\n" +
+		"<b>ℹ️ Help</b>\n" +
+		"/help — Show this message\n\n" +
+		"<i>Destructive commands require AllowedUserIDs to be configured.</i>"
 }

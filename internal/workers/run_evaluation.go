@@ -127,6 +127,16 @@ func (w *EvaluationWorker) Process(ctx context.Context, evt *database.Event) (*d
 		)
 	}
 
+	w.logger.Info("trade_evaluated",
+		"evaluation_id", evalDTO.EvaluationID,
+		"sample_size", evalDTO.SampleSize,
+		"fp_count", evalDTO.FalsePositiveCount,
+		"fn_count", evalDTO.FalseNegativeCount,
+		"expectancy", evalDTO.Expectancy,
+		"brier_score", evalDTO.BrierScore,
+		"trace_id", evalDTO.TraceID,
+	)
+
 	// Compute priority for the output event.
 	evalDTO.Priority = resource_control.ComputePriority(
 		"position_event", true, time.Time{}, now, w.weights,
