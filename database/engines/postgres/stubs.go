@@ -96,17 +96,15 @@ FROM system_state
 WHERE id = 1`
 
 	var dto contracts.SystemStateDTO
-	var stateVersion int64
 	err := d.pool.QueryRowContext(ctx, q).Scan(
 		&dto.Mode, &dto.DrawdownPct, &dto.DrawdownWindowHours, &dto.OpenPositions,
 		&dto.TotalExposureUsd, &dto.ActiveStrategyID, &dto.ShadowStrategyID,
 		&dto.LastTransitionReason, &dto.UpdatedAt,
-		&dto.VersionID, &stateVersion,
+		&dto.VersionID, &dto.StateVersion,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get system state: %w", err)
 	}
-	_ = stateVersion // returned separately via UpsertSystemState CAS
 	return &dto, nil
 }
 

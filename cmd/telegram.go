@@ -39,6 +39,11 @@ func buildTelegramComponents(
 			"note", "set SNIPER_TELEGRAM_BOT_TOKEN + SNIPER_TELEGRAM_CHAT_ID to enable Telegram")
 		return nil, nil
 	}
+	if chatID == "" {
+		logger.Error("telegram_misconfigured",
+			"note", "SNIPER_TELEGRAM_BOT_TOKEN is set but SNIPER_TELEGRAM_CHAT_ID is empty — Telegram disabled")
+		return nil, nil
+	}
 
 	allowedIDs := parseTelegramAllowedUsers()
 	client := telegram.NewClient(token, chatID)
@@ -222,18 +227,17 @@ func buildVersionFn(db database.Adapter) func(ctx context.Context) (string, erro
 
 func buildModeFn(db database.Adapter, logger *slog.Logger) func(ctx context.Context, mode string) (string, error) {
 	return func(ctx context.Context, mode string) (string, error) {
-		// Get current state to read live fields and current version for CAS.
+		// Get current state to read live fields and the CAS version counter.
 		current, err := db.GetSystemState(ctx)
 		if err != nil {
 			return "", fmt.Errorf("get system state: %w", err)
 		}
 
-		var expectedVersion int64
 		var newState contracts.SystemStateDTO
+		var expectedVersion int64
 		if current != nil {
 			newState = *current
-			// state_version is not exposed on the DTO; use 0 to force-upsert
-			// (the adapter will insert/replace regardless of current version).
+			expectedVersion = current.StateVersion
 		}
 		newState.Mode = mode
 		newState.LastTransitionReason = "/mode command (telegram_operator)"

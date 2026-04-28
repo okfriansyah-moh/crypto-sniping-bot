@@ -25,7 +25,15 @@ import (
 	"time"
 )
 
-const wsHandshakeGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+const (
+	wsHandshakeGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+	// maxWSFrameSize caps the payload length advertised in a 64-bit extended
+	// frame.  A malicious or buggy endpoint could advertise an enormous length,
+	// causing make([]byte, n) to panic (negative int on 32-bit) or exhaust
+	// memory.  4 MiB is well above any legitimate Solana subscription message.
+	maxWSFrameSize = 4 << 20 // 4 MiB
+)
 
 // wsConn is a minimal RFC 6455 WebSocket connection.
 //
@@ -73,7 +81,13 @@ func dialWS(rawURL string, connectTimeout time.Duration) (*wsConn, error) {
 		if !strings.Contains(host, ":") {
 			host = host + ":443"
 		}
-		d := tls.Dialer{Config: &tls.Config{ServerName: u.Hostname()}} //nolint:gosec
+		// Pass a net.Dialer with the same deadline so the TCP connect and TLS
+		// handshake are both bounded by connectTimeout, not just the I/O after.
+		netDialer := &net.Dialer{}
+		if !deadline.IsZero() {
+			netDialer.Deadline = deadline
+		}
+		d := tls.Dialer{Config: &tls.Config{ServerName: u.Hostname()}, NetDialer: netDialer} //nolint:gosec
 		c, dialErr := d.Dial("tcp", host)
 		if dialErr != nil {
 			return nil, fmt.Errorf("ws: tls dial %s: %w", host, dialErr)
@@ -265,7 +279,11 @@ func (c *wsConn) readFrame() (opcode byte, payload []byte, err error) {
 		if _, err = io.ReadFull(c.br, ext[:]); err != nil {
 			return 0, nil, fmt.Errorf("ws: read 64-bit length: %w", err)
 		}
-		payloadLen = int(binary.BigEndian.Uint64(ext[:]))
+		v := binary.BigEndian.Uint64(ext[:])
+		if v > maxWSFrameSize {
+			return 0, nil, fmt.Errorf("ws: frame too large (%d bytes, max %d)", v, maxWSFrameSize)
+		}
+		payloadLen = int(v)
 	default:
 		payloadLen = rawLen
 	}

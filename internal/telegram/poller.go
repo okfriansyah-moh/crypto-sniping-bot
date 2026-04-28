@@ -134,8 +134,8 @@ func (p *Poller) poll(ctx context.Context) ([]tgUpdate, error) {
 	}
 
 	url := fmt.Sprintf(
-		"https://api.telegram.org/bot%s/getUpdates?timeout=%d&offset=%d",
-		p.client.botToken,
+		"%s?timeout=%d&offset=%d",
+		p.client.apiURL("getUpdates"),
 		pollerLongPollTimeout,
 		p.offset,
 	)

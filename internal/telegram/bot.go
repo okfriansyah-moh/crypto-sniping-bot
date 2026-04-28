@@ -24,20 +24,46 @@ const maxResponseBytes = 1 << 20 // 1 MiB
 type Client struct {
 	botToken   string
 	chatID     string
+	apiBase    string // base URL without trailing slash, e.g. "https://api.telegram.org/botTOKEN"
 	httpClient *http.Client
 }
+
+const defaultTelegramBase = "https://api.telegram.org"
 
 // NewClient returns a new Telegram client.
 // botToken is sourced from config (never hardcoded).
 // chatID is the operator chat or group ID.
 func NewClient(botToken, chatID string) *Client {
+	return newClient(botToken, chatID, defaultTelegramBase)
+}
+
+// NewClientWithBaseURL creates a Client that sends requests to a custom base
+// URL instead of api.telegram.org.  The format string must contain a single
+// %s placeholder that will be substituted with the bot token, e.g.
+// "http://localhost:PORT/bot%s".  Intended only for tests.
+func NewClientWithBaseURL(botToken, chatID, baseURLFmt string) *Client {
+	base := fmt.Sprintf(baseURLFmt, botToken)
+	return newClient(botToken, chatID, base)
+}
+
+func newClient(botToken, chatID, apiBase string) *Client {
 	return &Client{
 		botToken: botToken,
 		chatID:   chatID,
+		apiBase:  apiBase,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// apiURL returns the full URL for a Telegram Bot API method (e.g. "sendMessage").
+func (c *Client) apiURL(method string) string {
+	if c.apiBase == defaultTelegramBase {
+		return fmt.Sprintf("%s/bot%s/%s", c.apiBase, c.botToken, method)
+	}
+	// Custom base already embeds the token (set by NewClientWithBaseURL).
+	return c.apiBase + "/" + method
 }
 
 type sendMessageRequest struct {
@@ -68,7 +94,7 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 		return fmt.Errorf("telegram: marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", c.botToken)
+	url := c.apiURL("sendMessage")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("telegram: build request: %w", err)
