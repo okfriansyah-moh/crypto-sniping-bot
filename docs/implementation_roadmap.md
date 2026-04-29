@@ -61,18 +61,18 @@ Quick reference for all 8 implementation phases. Each phase maps to one or more 
 
 ### Subsection Count by Phase
 
-| Phase | Subsections                      | Workers Added                                                        | New Contracts                                 |
-| ----- | -------------------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
-| 0     | 0.1 – 0.7 (7 global conventions) | —                                                                    | `trace.go`, `event_envelope.go`               |
-| 1     | 9 components                     | 1 (`run_ingestion.go`)                                               | `market_data.go`                              |
-| 2     | 2.1 – 2.11 (11 subsections)      | 9 workers                                                            | 8 contracts                                   |
-| 3     | 8 subsections + §3.1             | 1 (`run_evaluation.go`)                                              | `evaluation.go`                               |
-| 4     | 8 subsections                    | 3 model workers                                                      | `probability.go`, `slippage.go`, `latency.go` |
-| 5     | 10 subsections + §5.1            | 6 workers                                                            | `learning_record.go`                          |
-| 6     | 12 subsections                   | 2 workers                                                            | — (no new DTOs)                               |
-| 7     | 7 subsections                    | 2 workers (Solana ingestion + execution)                             | — (chain-agnostic — reuses existing DTOs)     |
-| 8     | 8.1 – 8.7 (7 subsections)        | 1 worker (`run_reconciliation.go`)                                   | — (additive adapter methods only)             |
-| 9     | 9.1 – 9.6 (6 subsections)        | 5 workers (DQ-real, feature-real, prob, capital-dyn, position-price) | — (no new DTOs; reuses existing)              |
+| Phase | Subsections                                          | Workers Added                                                        | New Contracts                                 |
+| ----- | ---------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
+| 0     | 0.1 – 0.7 (7 global conventions)                     | —                                                                    | `trace.go`, `event_envelope.go`               |
+| 1     | 9 components                                         | 1 (`run_ingestion.go`)                                               | `market_data.go`                              |
+| 2     | 2.1 – 2.11 (11 subsections)                          | 9 workers                                                            | 8 contracts                                   |
+| 3     | 8 subsections + §3.1                                 | 1 (`run_evaluation.go`)                                              | `evaluation.go`                               |
+| 4     | 8 subsections                                        | 3 model workers                                                      | `probability.go`, `slippage.go`, `latency.go` |
+| 5     | 10 subsections + §5.1                                | 6 workers                                                            | `learning_record.go`                          |
+| 6     | 12 subsections                                       | 2 workers                                                            | — (no new DTOs)                               |
+| 7     | 7 subsections                                        | 2 workers (Solana ingestion + execution)                             | — (chain-agnostic — reuses existing DTOs)     |
+| 8     | 8.1 – 8.7 (7 subsections)                            | 1 worker (`run_reconciliation.go`)                                   | — (additive adapter methods only)             |
+| 9     | 9.1 – 9.7 (7 subsections + cross-module §§ 9.8–9.12) | 5 workers (DQ-real, feature-real, prob, capital-dyn, position-price) | — (no new DTOs; reuses existing)              |
 
 ---
 
@@ -4375,7 +4375,8 @@ A green replay validation is a hard merge gate to `main`.
 | **GAP-04** | L4/L5 | [9.3 Probability — Wire the Model](#93-probability-model--wire-the-existing-model) | `Probability` static → dynamic per token |
 | **GAP-05** | L7    | [9.4 Capital — Dynamic Sizing](#94-capital-engine--dynamic-sizing)                 | `Capital` 0.40 → ≥ 0.65                  |
 | **GAP-02** | L9    | [9.5 Position — Real Price Feed](#95-position-engine--real-price-feed-critical)    | `Execution` (TP/SL) 0 → live             |
-| **GAP-06** | L10   | [9.6 Learning — Real Inputs](#96-learning-engine--real-signals)                    | `AdaptationQuality` 0.20 → compounding   |
+| **ALL**    | xfn   | [9.6 Failure Handling Matrix](#96-failure-handling-matrix-mandatory)               | Cross-module deterministic failure rules |
+| **GAP-06** | L10   | [9.7 Learning — Real Inputs](#97-learning-engine--real-signals)                    | `AdaptationQuality` 0.20 → compounding   |
 
 > **Lower-tier gaps (GAP-07 through GAP-17)** are deferred to follow-on hardening passes; they are tracked in `docs/PROFITABILITY_GAPS.md` and do not gate Phase 9 completion. The six gaps above collectively move the combined profit multiplier from ~0.1 % to an estimated 5–10 % of theoretical maximum (per `docs/PROFITABILITY_GAPS.md` § "Recommended Implementation Sequence").
 
@@ -5073,7 +5074,150 @@ The factory in `price_oracle_factory.go` resolves the right implementation by ch
 
 ---
 
-## 9.6 Learning Engine — Real Signals
+## 9.6 Failure Handling Matrix (mandatory)
+
+**Closes:** cross-cutting determinism contract for §§ 9.1–9.5 and 9.7. **All layers. All chains.**
+
+### Objective
+
+Define the **single authoritative failure-mode contract** for every Phase 9 module. No subsystem may invent a failure path not listed here. The default behavior on **any** unmapped failure is `REJECT` (allocation, validation, lifecycle) — silent fallbacks are forbidden.
+
+### Universal Rules (non-negotiable)
+
+| Rule     | Statement                                                                                                                                                                                                                                                                                                                                                  |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **F-1**  | RPC / network failure on a safety detector (DQ) → `VerdictRiskyPass`. **Never** `VerdictPass`. The aggregator MUST treat `RiskyPass` as positive risk in `RiskScore`.                                                                                                                                                                                      |
+| **F-2**  | RPC failure on a price fetch (Position) → **skip THIS cycle for THIS position**. Never force-exit. Time-based exit (`max_hold_seconds`) remains the only failure-driven exit.                                                                                                                                                                              |
+| **F-3**  | Missing or invalid `ProbabilityEstimateDTO.Probability` (`< 0` or `> 1`, NaN, `nil`) → `REJECT validated_edge_event` with `Reason=invalid_probability`. **Never** silently default to `0.5` or `cfg.PriorProbability`.                                                                                                                                     |
+| **F-4**  | `f_kelly < 0` (negative-EV pre-clamp) → `REJECT allocation_event` with `Reason=negative_kelly`. **Never** clamp to a positive minimum.                                                                                                                                                                                                                     |
+| **F-5**  | Any `LearningRecord` whose `featDTO.AllStubs() == true` OR `featDTO.LiquidityUsdRaw == 0` → SKIP record; increment `learning_records_skipped_total{reason}`. **Never** include in cohort centroid or feature-importance regression.                                                                                                                        |
+| **F-6**  | Every fallback path MUST emit a `Reason=` tag on its output event so downstream observability can quantify fallback rate. A handler that silently returns the success type without a reason on a failure path is a contract violation.                                                                                                                     |
+| **F-7**  | Default = REJECT. If a failure mode is encountered that is **not** documented in §§ 9.1–9.5/9.7 or in the matrix below, the worker MUST reject the in-flight DTO with `Reason=unmapped_failure` and emit a `system_event level=error`. No "reasonable fallback" is permitted; unmapped failures are bugs.                                                  |
+| **F-8**  | Determinism preserved. Every failure-handling branch MUST be a pure function of `(input event, RPC result at BlockNumber, config snapshot)`. Wall-clock-dependent fallbacks are forbidden (D2 invariant, § 9.12).                                                                                                                                          |
+| **F-9**  | DLQ routing. After `n_max_retries` (Phase 8 § 8.2) on the same event without a clean `Reason` tag, the orchestrator routes the event to DLQ. **Never** swallow exceptions; **never** mark an event as processed on an exception path without an emitted output event (success OR explicit reject).                                                         |
+| **F-10** | Cache integrity. On `chain_reorg_event` covering a block range, every Phase 9 cache (DQ detector cache, feature Sync-cache, native-price cache, pool-decimals cache, pool-create-blocktime cache) MUST evict every entry whose source block is in the reorged range. Surviving entries downstream of a reorg cause non-deterministic replay and are a bug. |
+
+### Per-Module Failure Matrix (consolidated)
+
+Authoritative for code review. The per-section tables in §§ 9.1–9.5 and § 9.7 remain in force; this matrix is the cross-module index.
+
+| Module      | Failure trigger                         | Action (deterministic)                                    | `Reason` tag             | Metric incremented                                         |
+| ----------- | --------------------------------------- | --------------------------------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| DQ          | Per-detector ctx timeout                | `VerdictRiskyPass` (positive risk)                        | `detector_timeout`       | `dq_detector_errors_total{detector,reason=timeout}`        |
+| DQ          | Total budget exceeded                   | All unfinished → `VerdictRiskyPass`                       | `budget_exceeded`        | `dq_detector_errors_total{detector,reason=budget}`         |
+| DQ          | Etherscan / BscScan rate-limit          | Last-good cache (within TTL) else `VerdictRiskyPass`      | `verify_rate_limited`    | `dq_detector_errors_total{detector=verify,reason=ratelim}` |
+| DQ          | Decode error                            | `VerdictRiskyPass`                                        | `decode_error`           | `dq_detector_errors_total{detector,reason=decode}`         |
+| DQ          | Pool not yet indexed                    | `VerdictRiskyPass`; `ContractSafety = 0.5`                | `pool_not_indexed`       | `dq_detector_errors_total{detector,reason=cold}`           |
+| Features    | `eth_getLogs` window empty              | Cold-start defaults; `Confidence ≤ 0.4`                   | `cold_start`             | `feature_cold_start_total{feature}`                        |
+| Features    | Sync-cache miss (first event on pool)   | Momentum features = 0.0; `Confidence = 0.4`               | `cold_start_window`      | `feature_cold_start_total{feature=momentum}`               |
+| Features    | Native-token price stale > 60 s         | Use last-known up to 5 min                                | (none — within budget)   | —                                                          |
+| Features    | Native-token price stale > 5 min        | `LiquidityUsdRaw = 0`; `Confidence = 0.2`                 | `native_price_stale`     | `feature_native_price_stale_total`                         |
+| Features    | Pool not yet indexed                    | `TokenAge = 0`; `Confidence = 0.3`                        | `pool_not_indexed`       | `feature_pool_not_indexed_total`                           |
+| Probability | `probability_event` missing > 200 ms    | Fall back to `cfg.PriorProbability` **with** `Reason` tag | `prob_join_timeout`      | `validation_fallback_total{reason=join_timeout}`           |
+| Probability | `Probability ∉ [0,1]` or NaN            | **REJECT** validated edge                                 | `invalid_probability`    | `validation_reject_total{reason=invalid_prob}`             |
+| Probability | `Confidence < min_model_confidence`     | Fall back to prior; allow if EV still positive            | `low_model_confidence`   | `validation_fallback_total{reason=low_conf}`               |
+| Probability | Model `Predict()` returns error         | DLQ per Phase 8 § 8.2; never silent default               | `model_error`            | `probability_model_errors_total`                           |
+| Capital     | `f_kelly < 0`                           | **REJECT** allocation                                     | `negative_kelly`         | `capital_reject_total{reason=negative_kelly}`              |
+| Capital     | `probDTO.Probability` unavailable       | **REJECT** allocation                                     | `missing_probability`    | `capital_reject_total{reason=missing_prob}`                |
+| Capital     | Cohort-id not in active StrategyVersion | Use `default_cohort_multiplier = 1.0`; warn               | `cohort_unknown`         | `capital_cohort_unknown_total`                             |
+| Capital     | Mode-cache stale > `mode_freshness_sec` | Default to `BALANCED` multiplier; warn                    | `mode_stale`             | `capital_mode_stale_total`                                 |
+| Capital     | Phase 6 envelope cap hit                | **REJECT** allocation (preserve Phase 6 contract)         | (envelope reason)        | `capital_envelope_reject_total{cap}`                       |
+| Position    | RPC price-fetch ctx timeout             | **Skip cycle** — never force exit                         | `price_fetch_timeout`    | `position_price_fetch_failures_total{reason=timeout}`      |
+| Position    | `consecutive_failures ≥ threshold`      | Skip cycle + emit `position_event level=warn`             | `price_feed_unavailable` | `position_price_feed_unavailable_total`                    |
+| Position    | Native-price stale beyond max           | Halt new TP/SL evals; positions remain open               | `native_price_stale`     | `position_native_price_stale_total`                        |
+| Position    | Pool drained (reserves = 0)             | SL exit with `IsRug=true`                                 | `pool_drained`           | `position_rug_exit_total`                                  |
+| Position    | Pool layout decode error (Solana)       | Treat as Indeterminate; skip cycle                        | `decode_error`           | `position_decode_errors_total`                             |
+| Learning    | `featDTO.AllStubs()` or `LiqUsd == 0`   | **SKIP** record from window/centroid                      | `stub_input`             | `learning_records_skipped_total{reason=stub_input}`        |
+| Learning    | `N < min_samples_for_update`            | Skip update cycle                                         | `insufficient_samples`   | `learning_skip_total{reason=insufficient}`                 |
+| Learning    | Cohort centroid degenerate              | Skip cohort update; emit warning                          | `degenerate_cohort`      | `learning_skip_total{reason=degenerate}`                   |
+| Learning    | Singular regression matrix              | Skip importance emission this cycle                       | `singular_matrix`        | `learning_importance_errors_total`                         |
+| All         | Unmapped failure                        | **REJECT** + `system_event level=error`                   | `unmapped_failure`       | `pipeline_unmapped_failure_total{module}`                  |
+
+### Failure-Mode Test Coverage (mandatory)
+
+Every row of the matrix above MUST have at least one unit test or integration fixture exercising it. CI gate: `go test -tags failure_matrix ./...` enumerates the row count and asserts 1:1 coverage. Adding a row without adding a test → red CI.
+
+### Forbidden Patterns (reviewers reject on sight)
+
+```go
+// ❌ silent default to mid-prior on missing probability
+if probDTO == nil { p = 0.5 }
+
+// ❌ swallow RPC error and proceed
+price, _ := priceClient.GetTokenPrice(ctx, t, c)        // discarded err
+if price == "" { price = pos.EntryPrice }                // forbidden — must skip cycle
+
+// ❌ silent fallback without Reason tag
+if !ok { return contracts.NewValidatedEdgeEvent(evt, edge, prob, cfg.PriorProbability, ""), nil }
+
+// ❌ retry forever without DLQ
+for { if err := op(); err == nil { break } }
+
+// ❌ force-exit position on price-feed failure
+if err != nil { adapter.EmitPositionEvent(ctx, pos, ExitOnError); continue }
+```
+
+### Required Patterns
+
+```go
+// ✅ tag every fallback with Reason
+if prob.Confidence < cfg.MinModelConfidence {
+    p, reason = cfg.PriorProbability, "low_model_confidence"
+}
+
+// ✅ skip-not-force-exit on price failure
+if err != nil {
+    h.metrics.IncFailure(pos.ID, "price_fetch_timeout")
+    continue                                              // next position, not exit
+}
+
+// ✅ unmapped failure → explicit REJECT + alert
+default:
+    return contracts.NewAllocationReject(evt, "unmapped_failure"), errSystemAlert
+
+// ✅ DLQ after bounded retries
+if retryCount >= cfg.MaxRetries {
+    return adapter.RouteToDLQ(ctx, evt, "max_retries_exceeded")
+}
+```
+
+### Exit Criteria
+
+- [ ] Every row of the per-module failure matrix has 1:1 unit-test or integration-fixture coverage (CI-enforced)
+- [ ] Zero occurrences of forbidden patterns above in `internal/modules/` and `internal/workers/` (grep CI gate)
+- [ ] Over a 24h replay, `pipeline_unmapped_failure_total == 0` — every failure routes through a documented branch
+- [ ] DLQ depth steady-state ≤ Phase 8 § 8.2 envelope; no silent error swallowing observable
+- [ ] All fallback events carry a non-empty `Reason` tag (verified by `SELECT COUNT(*) FROM events WHERE event_type IN (...) AND payload->>'reason' = ''` returning 0)
+
+### Cross-Module Quick Reference (single-page reviewer index)
+
+The detailed matrix above is authoritative. This compressed view is the single-page reference reviewers print or paste into PR descriptions. Per-module tables in §§ 9.1–9.5 and § 9.7 remain in force.
+
+| Module      | Failure                              | Action                                           | Reason tag emitted     |
+| ----------- | ------------------------------------ | ------------------------------------------------ | ---------------------- |
+| DQ          | RPC timeout (per detector)           | `VerdictRiskyPass`; aggregate as positive risk   | `detector_timeout`     |
+| DQ          | Total budget exceeded                | All unfinished detectors → `VerdictRiskyPass`    | `budget_exceeded`      |
+| DQ          | Etherscan rate-limit                 | Last-good cache or `VerdictRiskyPass`            | `verify_rate_limited`  |
+| DQ          | Pool not indexed                     | `VerdictRiskyPass`; `ContractSafety = 0.5`       | `pool_not_indexed`     |
+| Features    | `eth_getLogs` window empty           | Cold-start defaults; `Confidence ≤ 0.4`          | `cold_start`           |
+| Features    | Sync-cache miss (first event)        | Momentum features = 0.0; `Confidence = 0.4`      | `cold_start_momentum`  |
+| Features    | Native-token price stale > 5 min     | `LiquidityUsdRaw = 0`; `Confidence = 0.2`        | `native_price_stale`   |
+| Probability | `probability_event` missing for join | Fall back to `cfg.PriorProbability` after 200 ms | `prob_join_timeout`    |
+| Probability | `Probability` outside [0,1]          | Reject validated edge                            | `invalid_probability`  |
+| Probability | `Confidence < min_model_confidence`  | Fall back to prior                               | `low_model_confidence` |
+| Capital     | `f_kelly < 0`                        | Reject allocation; do NOT size                   | `negative_kelly`       |
+| Capital     | Probability missing                  | Reject allocation                                | `missing_probability`  |
+| Capital     | Mode lookup stale                    | Default to `BALANCED` multiplier; warn           | `mode_stale`           |
+| Position    | RPC price-fetch timeout              | **Skip cycle** — never force exit                | `price_fetch_timeout`  |
+| Position    | Native-price stale beyond max        | Halt new TP/SL evals; positions remain open      | `native_price_stale`   |
+| Position    | Pool drained (reserve = 0)           | SL exit with `IsRug=true`                        | `pool_drained`         |
+| Learning    | Stub-only feature record             | Skip record; metric `learning_records_skipped`   | `stub_input`           |
+| Learning    | `N < min_samples_for_update`         | Skip cycle                                       | `insufficient_samples` |
+| Learning    | Cohort centroid degenerate           | Skip cohort update                               | `degenerate_cohort`    |
+
+---
+
+## 9.7 Learning Engine — Real Signals
 
 **Closes:** GAP-14 / cascading from GAP-03. **Layer 10.** **All chains.**
 
@@ -5179,7 +5323,7 @@ No new worker. `internal/workers/run_updater.go` continues to operate. Phase 9 c
 
 ---
 
-## 9.7 New / Updated Workers Summary
+## 9.8 New / Updated Workers Summary
 
 > Per § 0.6, **no new event types are introduced.** The "new workers" listed in the original brief are clarified below — most are **enhancements to existing workers**, not new dispatchers. Phase 9 keeps the worker topology unchanged.
 
@@ -5195,7 +5339,7 @@ No new worker. `internal/workers/run_updater.go` continues to operate. Phase 9 c
 
 **No new worker files** are added in Phase 9. **No new consumer groups, no new event types, no duplicate consumers.** All workers continue using the `SELECT … FOR UPDATE SKIP LOCKED` pattern from Phase 0.
 
-### 9.7a Per-Worker `Process()` Contracts (mandatory — drop-in spec)
+### 9.8a Per-Worker `Process()` Contracts (mandatory — drop-in spec)
 
 Every Phase 9 worker handler conforms to the `StageHandler` interface from Phase 0:
 
@@ -5390,7 +5534,7 @@ learning_record_event ──► learning  ──► strategy_version_update (sys
 
 ---
 
-## 9.8 Configuration Additions
+## 9.9 Configuration Additions
 
 Phase 9 adds **four** dedicated config files under `config/`. All thresholds, timeouts, weights, and multipliers live here — never hardcoded in module code. See § 0.5.
 
@@ -5406,7 +5550,7 @@ Existing `config/chains.yaml` gains a per-chain `data_quality` block (closes GAP
 
 ---
 
-## 9.9 Performance Constraints (whole-phase SLA)
+## 9.10 Performance Constraints (whole-phase SLA)
 
 | Subsystem                             | Hot-path budget (p95)                         | Mechanism                                                                           |
 | ------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -5419,39 +5563,11 @@ Existing `config/chains.yaml` gains a per-chain `data_quality` block (closes GAP
 | Learning update                       | Periodic (1 min cadence)                      | Off-hot-path; no impact on per-trade latency                                        |
 | **Total pipeline (DETECT → EXECUTE)** | **≤ 2000 ms** (p95)                           | Sum of above stages on critical path; verified by Phase 6 latency SLO               |
 
-> **Rule:** No Phase 9 change may regress the Phase 6 SLO `executed_trade_latency_p95 < 1500 ms`, AND no Phase 9 stage may exceed its individual budget on p95. Verified by load test in § 9.10 exit criteria.
+> **Rule:** No Phase 9 change may regress the Phase 6 SLO `executed_trade_latency_p95 < 1500 ms`, AND no Phase 9 stage may exceed its individual budget on p95. Verified by load test in § 9.11 exit criteria.
 
 ---
 
-## 9.9a Master Failure-Mode Table (cross-module)
-
-Single-page reference for reviewers. Per-module tables in §§ 9.1–9.6 remain authoritative; this table is the consolidated cross-module view.
-
-| Module      | Failure                              | Action                                           | Reason tag emitted     |
-| ----------- | ------------------------------------ | ------------------------------------------------ | ---------------------- |
-| DQ          | RPC timeout (per detector)           | `VerdictRiskyPass`; aggregate as positive risk   | `detector_timeout`     |
-| DQ          | Total budget exceeded                | All unfinished detectors → `VerdictRiskyPass`    | `budget_exceeded`      |
-| DQ          | Etherscan rate-limit                 | Last-good cache or `VerdictRiskyPass`            | `verify_rate_limited`  |
-| DQ          | Pool not indexed                     | `VerdictRiskyPass`; `ContractSafety = 0.5`       | `pool_not_indexed`     |
-| Features    | `eth_getLogs` window empty           | Cold-start defaults; `Confidence ≤ 0.4`          | `cold_start`           |
-| Features    | Sync-cache miss (first event)        | Momentum features = 0.0; `Confidence = 0.4`      | `cold_start_momentum`  |
-| Features    | Native-token price stale > 5 min     | `LiquidityUsdRaw = 0`; `Confidence = 0.2`        | `native_price_stale`   |
-| Probability | `probability_event` missing for join | Fall back to `cfg.PriorProbability` after 200 ms | `prob_join_timeout`    |
-| Probability | `Probability` outside [0,1]          | Reject validated edge                            | `invalid_probability`  |
-| Probability | `Confidence < min_model_confidence`  | Fall back to prior                               | `low_model_confidence` |
-| Capital     | `f_kelly < 0`                        | Reject allocation; do NOT size                   | `negative_kelly`       |
-| Capital     | Probability missing                  | Reject allocation                                | `missing_probability`  |
-| Capital     | Mode lookup stale                    | Default to `BALANCED` multiplier; warn           | `mode_stale`           |
-| Position    | RPC price-fetch timeout              | **Skip cycle** — never force exit                | `price_fetch_timeout`  |
-| Position    | Native-price stale beyond max        | Halt new TP/SL evals; positions remain open      | `native_price_stale`   |
-| Position    | Pool drained (reserve = 0)           | SL exit with `IsRug=true`                        | `pool_drained`         |
-| Learning    | Stub-only feature record             | Skip record; metric `learning_records_skipped`   | `stub_input`           |
-| Learning    | `N < min_samples_for_update`         | Skip cycle                                       | `insufficient_samples` |
-| Learning    | Cohort centroid degenerate           | Skip cohort update                               | `degenerate_cohort`    |
-
----
-
-## 9.10 Phase 9 Exit Criteria (Master Gate)
+## 9.11 Phase 9 Exit Criteria (Master Gate)
 
 Phase 9 is **complete** only when **all** of the following hold simultaneously over a continuous 24h replay window:
 
@@ -5473,16 +5589,16 @@ Phase 9 is **complete** only when **all** of the following hold simultaneously o
 
 ---
 
-## 9.11 Determinism Guarantee (mandatory — non-negotiable)
+## 9.12 Determinism Guarantee (mandatory — non-negotiable)
 
 Every Phase 9 module MUST satisfy the four invariants below. These are the contract enforced by the Phase 8 § 8.5 replay validation CI gate; Phase 9 inherits and tightens it.
 
-| Invariant                                 | Rule                                                                                                                                                                                                                                                                                   | Enforcement                                                                                                                                               |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **D1 — Same input ⇒ same output**         | For any input event `E`, replaying `E` twice on the same `StrategyVersion` produces bit-for-bit identical output events (same `EventID`, same payload, same emission order).                                                                                                           | CI: `scripts/replay_diff.sh` runs the 24h golden fixture twice; the resulting `events` rows MUST hash-equal. Drift fails the build.                       |
-| **D2 — Time windows are block-bounded**   | All windows in §§ 9.1–9.6 reference `in.BlockTimestamp` (event-derived) — never `time.Now()`, `monotonic`, or wall-clock. Periodic workers (position poll, updater) are exempt for ticks only — but their **decision logic** MUST still be a pure function of inputs read at the tick. | `grep -nE 'time\.Now                                                                                                                                      | time\.Since' internal/modules/data_quality/ internal/modules/features/ internal/modules/capital/ internal/modules/learning/` MUST return zero matches. |
-| **D3 — No randomness on the hot path**    | No `rand`, `crypto/rand`, `math/rand`, no probabilistic data structures (bloom/cuckoo) outside cache layers, no goroutine race-dependent ordering. All map iterations replaced by sorted-key iteration before output materialization.                                                  | `grep -nE 'math/rand                                                                                                                                      | rand\.' internal/modules/`MUST return zero matches. Code review rejects unsorted`range m` over maps that affect output payloads.                       |
-| **D4 — Replay parity with Phase 8 § 8.5** | The replay engine pattern (`replay-engine-pattern` skill) holds: prefix-isolated topics, no side-effects to external systems during replay, idempotent INSERT semantics. Phase 9 modules MUST NOT introduce stateful caches that cannot be rebuilt from the event log.                 | All caches in §§ 9.1–9.2 are explicitly TTL-bounded and rebuildable from RPC archive at `BlockNumber`. Phase 8 replay CI gate passes with Phase 9 merged. |
+| Invariant                                 | Rule                                                                                                                                                                                                                                                                                             | Enforcement                                                                                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **D1 — Same input ⇒ same output**         | For any input event `E`, replaying `E` twice on the same `StrategyVersion` produces bit-for-bit identical output events (same `EventID`, same payload, same emission order).                                                                                                                     | CI: `scripts/replay_diff.sh` runs the 24h golden fixture twice; the resulting `events` rows MUST hash-equal. Drift fails the build.                       |
+| **D2 — Time windows are block-bounded**   | All windows in §§ 9.1–9.5 and § 9.7 reference `in.BlockTimestamp` (event-derived) — never `time.Now()`, `monotonic`, or wall-clock. Periodic workers (position poll, updater) are exempt for ticks only — but their **decision logic** MUST still be a pure function of inputs read at the tick. | `grep -nE 'time\.Now                                                                                                                                      | time\.Since' internal/modules/data_quality/ internal/modules/features/ internal/modules/capital/ internal/modules/learning/` MUST return zero matches. |
+| **D3 — No randomness on the hot path**    | No `rand`, `crypto/rand`, `math/rand`, no probabilistic data structures (bloom/cuckoo) outside cache layers, no goroutine race-dependent ordering. All map iterations replaced by sorted-key iteration before output materialization.                                                            | `grep -nE 'math/rand                                                                                                                                      | rand\.' internal/modules/`MUST return zero matches. Code review rejects unsorted`range m` over maps that affect output payloads.                       |
+| **D4 — Replay parity with Phase 8 § 8.5** | The replay engine pattern (`replay-engine-pattern` skill) holds: prefix-isolated topics, no side-effects to external systems during replay, idempotent INSERT semantics. Phase 9 modules MUST NOT introduce stateful caches that cannot be rebuilt from the event log.                           | All caches in §§ 9.1–9.2 are explicitly TTL-bounded and rebuildable from RPC archive at `BlockNumber`. Phase 8 replay CI gate passes with Phase 9 merged. |
 
 ### Concrete forbidden patterns (reviewers reject on sight)
 
