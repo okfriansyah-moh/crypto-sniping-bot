@@ -98,10 +98,9 @@ func NormalizePumpFunCreate(tx *TransactionResult, instr InstructionData, versio
 		Reorged:           false,
 		ExpiresAt:         "",
 		Priority:          0,
-		// Pump.fun specific metadata stored in reserved fields
-		// (name and symbol are available in event but MarketDataDTO has no text fields)
+		Symbol:            event.Symbol,
+		Name:              event.Name,
 	}
-	_ = event // event.Name, event.Symbol available if needed for future enrichment
 	return dto, nil
 }
 

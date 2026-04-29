@@ -189,14 +189,14 @@ func (d *DB) scanLifecycle(row *sql.Row) (*database.Lifecycle, error) {
 // Phase 2 best-effort: any forward transition is allowed; CAS guards reject concurrent races.
 func isValidTransition(from, to string) bool {
 	allowed := map[string][]string{
-		"DETECTED":       {"DQ_PASSED", "REJECTED"},
-		"DQ_PASSED":      {"FEATURE_READY", "REJECTED"},
-		"FEATURE_READY":  {"EDGE_DETECTED", "REJECTED"},
-		"EDGE_DETECTED":  {"VALIDATED", "REJECTED"},
-		"VALIDATED":      {"SELECTED", "REJECTED"},
-		"SELECTED":       {"EXECUTED", "FAILED"},
-		"EXECUTED":       {"POSITION_OPEN", "FAILED"},
-		"POSITION_OPEN":  {"POSITION_CLOSED"},
+		"DETECTED":      {"DQ_PASSED", "REJECTED"},
+		"DQ_PASSED":     {"FEATURE_READY", "REJECTED"},
+		"FEATURE_READY": {"EDGE_DETECTED", "REJECTED"},
+		"EDGE_DETECTED": {"VALIDATED", "REJECTED"},
+		"VALIDATED":     {"SELECTED", "REJECTED"},
+		"SELECTED":      {"EXECUTED", "FAILED"},
+		"EXECUTED":      {"POSITION_OPEN", "FAILED"},
+		"POSITION_OPEN": {"POSITION_CLOSED"},
 	}
 	targets, ok := allowed[from]
 	if !ok {
@@ -217,4 +217,105 @@ func isTerminalState(state string) bool {
 		return true
 	}
 	return false
+}
+
+// GetPipelineStats returns funnel counts per lifecycle state and the 10 most
+// recently detected tokens (with their ticker if available) for the given
+// window. A single GROUP BY query drives the funnel; a second JOIN query
+// fetches the recent-token list.
+func (d *DB) GetPipelineStats(ctx context.Context, windowHours int) (*database.PipelineStats, error) {
+	stats := &database.PipelineStats{WindowHours: windowHours}
+
+	// ── Funnel counts ─────────────────────────────────────────────────────────
+	const countQ = `
+SELECT current_state, COUNT(*)
+FROM token_lifecycle
+WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+GROUP BY current_state`
+
+	rows, err := d.pool.QueryContext(ctx, countQ, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get pipeline stats counts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var state string
+		var cnt int64
+		if err := rows.Scan(&state, &cnt); err != nil {
+			return nil, fmt.Errorf("get pipeline stats scan: %w", err)
+		}
+		switch state {
+		case "DETECTED":
+			stats.Detected = cnt
+		case "DQ_PASSED":
+			stats.DQPassed = cnt
+		case "FEATURE_READY":
+			stats.FeatureReady = cnt
+		case "EDGE_DETECTED":
+			stats.EdgeDetected = cnt
+		case "VALIDATED":
+			stats.Validated = cnt
+		case "SELECTED":
+			stats.Selected = cnt
+		case "EXECUTED":
+			stats.Executed = cnt
+		case "POSITION_OPEN":
+			stats.PositionOpen = cnt
+		case "POSITION_CLOSED":
+			stats.PositionClosed = cnt
+		case "REJECTED":
+			stats.Rejected = cnt
+		case "FAILED":
+			stats.Failed = cnt
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get pipeline stats rows: %w", err)
+	}
+
+	// ── Recent tokens (last 10 that passed DQ, newest first) ─────────────────
+	// LEFT JOIN market_data to pick up symbol/name/chain when persisted (Solana tokens).
+	// DISTINCT ON token_address avoids duplicates when multiple market_data rows
+	// exist for the same token (e.g. multiple swap events after pool creation).
+	const recentQ = `
+SELECT tl.token_address,
+       COALESCE(md.symbol, '') AS symbol,
+       COALESCE(md.name,   '') AS name,
+       tl.current_state,
+       COALESCE(md.chain,  '') AS chain,
+       tl.created_at
+FROM token_lifecycle tl
+LEFT JOIN LATERAL (
+    SELECT symbol, name, chain
+    FROM market_data
+    WHERE token_address = tl.token_address
+    ORDER BY block_number DESC
+    LIMIT 1
+) md ON TRUE
+WHERE tl.created_at >= NOW() - ($1 * INTERVAL '1 hour')
+ORDER BY tl.created_at DESC
+LIMIT 10`
+
+	rrows, err := d.pool.QueryContext(ctx, recentQ, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get pipeline stats recent: %w", err)
+	}
+	defer rrows.Close()
+
+	for rrows.Next() {
+		var rt database.RecentToken
+		if err := rrows.Scan(
+			&rt.TokenAddress, &rt.Symbol, &rt.Name,
+			&rt.State, &rt.Chain, &rt.DetectedAt,
+		); err != nil {
+			return nil, fmt.Errorf("get pipeline stats recent scan: %w", err)
+		}
+		stats.Recent = append(stats.Recent, rt)
+	}
+	if err := rrows.Err(); err != nil {
+		return nil, fmt.Errorf("get pipeline stats recent rows: %w", err)
+	}
+
+	return stats, nil
 }

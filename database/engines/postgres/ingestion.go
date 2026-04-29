@@ -57,7 +57,8 @@ INSERT INTO market_data (
     token0_address, token1_address,
     amount0_raw, amount1_raw, reserve_base_raw, reserve_token_raw,
     block_timestamp, ingested_at, rpc_endpoint, transport,
-    confirmation_depth, reorged, expires_at, priority
+    confirmation_depth, reorged, expires_at, priority,
+    symbol, name
 ) VALUES (
     $1,  $2,  $3,  $4,  $5,
     $6,  $7,  $8,  $9,  $10, $11,
@@ -65,7 +66,8 @@ INSERT INTO market_data (
     $16, $17,
     $18, $19, $20, $21,
     $22, $23, $24, $25,
-    $26, $27, $28, $29
+    $26, $27, $28, $29,
+    $30, $31
 )
 ON CONFLICT (event_id) DO NOTHING
 `
@@ -80,6 +82,7 @@ ON CONFLICT (event_id) DO NOTHING
 		dto.Amount0Raw, dto.Amount1Raw, dto.ReserveBaseRaw, dto.ReserveTokenRaw,
 		dto.BlockTimestamp, dto.IngestedAt, dto.RpcEndpoint, dto.Transport,
 		dto.ConfirmationDepth, dto.Reorged, expiresAt, dto.Priority,
+		dto.Symbol, dto.Name,
 	)
 	if err != nil {
 		return fmt.Errorf("insert market data: %w", err)

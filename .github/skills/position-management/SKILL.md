@@ -234,6 +234,32 @@ if pnlPct >= cfg.TP1 && pos.ExitStage == "none" { return sellPartial("tp1_hit") 
 
 ---
 
+## Phase 9 Notes (Profitability Restoration)
+
+Per `docs/implementation_roadmap.md` § 9.5, Phase 9 closes **GAP-02** by wiring a real
+`PriceClient` into `RunPositionPoll`. Without this, every TP/SL/Trail rule in this skill
+is dead code — positions exit only on `max_hold_seconds` time expiry. **This is the
+single highest-impact fix in Phase 9.**
+
+**Phase 9 mandates:**
+
+- `cmd/server.go` MUST call `rpc.NewPriceClientForChain(...)` and assert `priceClient != nil` before passing it to `workers.RunPositionPoll`
+- The `priceClient == nil` early-return guard at the top of `run_position_poll.go` MUST be removed
+- Per-fetch context timeout `price_fetch_timeout_ms` (default 500 ms) enforced
+- Per-cycle wall budget: `max_open_positions × price_fetch_timeout_ms × 1.2` — exceeded → `system_event level=warn`, reduce poll concurrency
+- Pool drained between polls (reserve = 0) → emergency `IsRug=true` exit signal → fire SL with `Reason=pool_drained`
+- **Never** return a fabricated price on RPC error — either real price or skip cycle
+- Native-token (ETH/BNB/SOL) USD price cached with TTL 60 s; max-stale 300 s; beyond → halt new TP/SL evaluations
+
+**Phase 9 exit criterion:** ≥ 80 % of position exits in a 1h replay are TP/SL/Trail
+triggers (not `max_hold_seconds`); realized PnL right-tail observable.
+
+**Cross-reference:** See `.github/skills/price-feed-integration/SKILL.md` for the full
+PriceClient implementation contract (interface, per-chain implementations, factory
+pattern, failure handling).
+
+---
+
 ## References
 
 - Architecture context: `docs/architecture-context/11_position_engine.md`

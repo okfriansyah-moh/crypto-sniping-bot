@@ -1,0 +1,87 @@
+# Data Quality Engine — Phase 9 (Profitability Restoration § 9.1)
+# ─────────────────────────────────────────────────────────────────
+# Real RPC-backed scam detector configuration.
+# Closes GAP-01 from docs/PROFITABILITY_GAPS.md.
+# All values tunable per chain via config/chains.yaml `data_quality` block (additive override).
+# No hardcoded values in module code (per copilot-instructions § 0.5).
+# ─────────────────────────────────────────────────────────────────
+
+data_quality:
+  # ── Per-detector timeouts ─────────────────────────────────────
+  # Hard ceiling per detector RPC call. Exceeded → Indeterminate (risky-pass).
+  detector_timeout_ms: 800
+
+  # ── Detector enable flags ─────────────────────────────────────
+  # Disabled detectors are skipped entirely (cost-saving for non-applicable chains).
+  detectors:
+    honeypot_simulation: true # eth_call buy→sell round trip
+    tax_anomaly: true # decode Transfer logs in simulated tx
+    lp_lock: true # Unicrypt / Team Finance / PinkLock
+    wash_trading: true # unique-sender ratio over recent Swaps
+    rug_authority: true # ABI selectors (EVM) / mint authority (Solana)
+    contract_verified: true # Etherscan / BscScan v2 source-code lookup
+
+  # ── Detector thresholds ───────────────────────────────────────
+  thresholds:
+    # Honeypot — max acceptable received/sent ratio deviation
+    honeypot_ratio_deviation_max: 0.30
+
+    # Tax anomaly — total tax ceiling in basis points (10% = 1000 bps)
+    tax_total_max_bps: 1000
+    tax_buy_max_bps: 800
+    tax_sell_max_bps: 1000
+
+    # Wash trading — minimum unique-sender ratio over recent Swap window
+    wash_unique_ratio_min: 0.30
+    wash_recent_swaps_window: 20
+
+    # LP lock — minimum lock duration in days
+    lp_lock_required: true
+    lp_lock_min_days: 30
+
+    # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
+    rug_dangerous_selectors:
+      - "mint"
+      - "pause"
+      - "blacklist"
+      - "setMaxTx"
+
+    # Rug authority (Solana) — must be renounced for safe pass
+    solana_require_mint_authority_renounced: true
+    solana_require_freeze_authority_renounced: true
+
+  # ── Detector cache (LRU) ──────────────────────────────────────
+  # Keyed by (chain, token_address, detector_name). Bounded.
+  cache:
+    max_entries: 50000
+    honeypot_ttl_sec: 600
+    tax_anomaly_ttl_sec: 600
+    lp_lock_ttl_sec: 300
+    wash_trading_ttl_sec: 60
+    rug_authority_ttl_sec: 1800
+    contract_verified_ttl_sec: 3600
+
+  # ── Risk score aggregation weights ────────────────────────────
+  # Weighted sum → RiskScore ∈ [0, 1]. All weights additive; sum normalized.
+  risk_weights:
+    honeypot: 0.30
+    tax_anomaly: 0.20
+    rug_authority: 0.20
+    lp_lock_missing: 0.15
+    wash_trading: 0.10
+    contract_unverified: 0.05
+
+  # ── Failure handling ──────────────────────────────────────────
+  failure_policy:
+    # On RPC timeout, treat detector as Indeterminate. Indeterminate flags
+    # contribute to RiskScore as if positive (risky-pass), never as safe.
+    indeterminate_as_positive: true
+    # If ≥ this many detectors are Indeterminate, reject DQ entirely.
+    max_indeterminate_count: 3
+
+  # ── Etherscan / BscScan v2 API ────────────────────────────────
+  contract_verified_api:
+    eth_url: "https://api.etherscan.io/v2/api"
+    bsc_url: "https://api.bscscan.com/v2/api"
+    rate_limit_per_sec: 5
+    request_timeout_ms: 1500

@@ -1,0 +1,35 @@
+# Probability Model — Phase 9 (Profitability Restoration § 9.3)
+# ─────────────────────────────────────────────────────────────────
+# Wires the existing ProbabilityModel.Predict() output into the
+# validation EV gate. Closes GAP-04 from docs/PROFITABILITY_GAPS.md.
+# Replaces fixed prior `P = 0.35` with model output.
+# ─────────────────────────────────────────────────────────────────
+
+probability:
+  # ── EV-gate consumption ───────────────────────────────────────
+  # Validation worker uses probDTO.Probability when available;
+  # falls back to prior_probability on miss/timeout/low-confidence.
+  use_model_output: true
+  prior_probability: 0.35 # documented fallback only
+
+  # ── Model confidence threshold ────────────────────────────────
+  # If probDTO.Confidence < this, fall back to prior and log low_model_confidence.
+  min_model_confidence: 0.40
+
+  # ── Probability join (validation worker) ──────────────────────
+  prob_join_timeout_ms: 200 # max wait for prob_event before fallback
+
+  # ── Validity guards ───────────────────────────────────────────
+  reject_out_of_range: true # P ∉ [0, 1] → reject with invalid_probability
+  reject_nan_or_inf: true
+
+  # ── Calibration windows (Brier score tracking) ────────────────
+  # Periodic worker-side stats — NOT for live retraining (Phase 5 owns that).
+  calibration_window_trades: 200
+  brier_max: 0.27 # alert if exceeded over window
+
+  # ── Fallback observability ────────────────────────────────────
+  # Emit metric counter on every fallback path; alert if > 5% of validations
+  # fall back over a 1h window (proves model output is normally available).
+  fallback_alert_pct: 0.05
+  fallback_alert_window_sec: 3600

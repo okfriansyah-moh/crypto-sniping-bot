@@ -56,6 +56,7 @@ func buildTelegramComponents(
 		ResumeFn:       buildResumeFn(db, logger),
 		VersionFn:      buildVersionFn(db),
 		ModeFn:         buildModeFn(db, logger),
+		PipelineFn:     buildPipelineFn(db),
 		AllowedUserIDs: allowedIDs,
 		Logger:         logger,
 	})
@@ -248,5 +249,61 @@ func buildModeFn(db database.Adapter, logger *slog.Logger) func(ctx context.Cont
 
 		logger.Info("telegram_mode_changed", "mode", mode)
 		return fmt.Sprintf("✅ Mode switched to <code>%s</code>", mode), nil
+	}
+}
+
+func buildPipelineFn(db database.Adapter) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		stats, err := db.GetPipelineStats(ctx, 24)
+		if err != nil {
+			return "", fmt.Errorf("get pipeline stats: %w", err)
+		}
+
+		var sb strings.Builder
+		sb.WriteString("<b>Pipeline Funnel (last 24h)</b>\n\n")
+
+		total := stats.Detected
+		pct := func(n int64) string {
+			if total == 0 {
+				return "0.0%"
+			}
+			return fmt.Sprintf("%.1f%%", float64(n)/float64(total)*100)
+		}
+
+		sb.WriteString(fmt.Sprintf("DETECTED     <code>%6d</code>  (100%%)\n", stats.Detected))
+		sb.WriteString(fmt.Sprintf("DQ_PASSED    <code>%6d</code>  (%s)\n", stats.DQPassed, pct(stats.DQPassed)))
+		sb.WriteString(fmt.Sprintf("FEATURE      <code>%6d</code>  (%s)\n", stats.FeatureReady, pct(stats.FeatureReady)))
+		sb.WriteString(fmt.Sprintf("EDGE         <code>%6d</code>  (%s)\n", stats.EdgeDetected, pct(stats.EdgeDetected)))
+		sb.WriteString(fmt.Sprintf("VALIDATED    <code>%6d</code>  (%s)\n", stats.Validated, pct(stats.Validated)))
+		sb.WriteString(fmt.Sprintf("SELECTED     <code>%6d</code>  (%s)\n", stats.Selected, pct(stats.Selected)))
+		sb.WriteString(fmt.Sprintf("EXECUTED     <code>%6d</code>  (%s)\n", stats.Executed, pct(stats.Executed)))
+		sb.WriteString(fmt.Sprintf("POS OPEN     <code>%6d</code>  (%s)\n", stats.PositionOpen, pct(stats.PositionOpen)))
+		sb.WriteString(fmt.Sprintf("POS CLOSED   <code>%6d</code>  (%s)\n", stats.PositionClosed, pct(stats.PositionClosed)))
+		sb.WriteString(fmt.Sprintf("REJECTED     <code>%6d</code>\n", stats.Rejected))
+		sb.WriteString(fmt.Sprintf("FAILED       <code>%6d</code>\n", stats.Failed))
+
+		if len(stats.Recent) > 0 {
+			sb.WriteString("\n<b>Recent tokens:</b>\n")
+			for _, rt := range stats.Recent {
+				addr := rt.TokenAddress
+				if len(addr) > 12 {
+					addr = addr[:6] + "…" + addr[len(addr)-4:]
+				}
+				ticker := rt.Symbol
+				if ticker == "" {
+					ticker = "—"
+				}
+				chain := rt.Chain
+				if chain == "" {
+					chain = "?"
+				}
+				sb.WriteString(fmt.Sprintf(
+					"<code>%s</code> [%s] %s · %s\n",
+					addr, ticker, rt.State, chain,
+				))
+			}
+		}
+
+		return sb.String(), nil
 	}
 }

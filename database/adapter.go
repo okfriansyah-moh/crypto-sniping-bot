@@ -441,9 +441,48 @@ type Adapter interface {
 
 	// RecordDrop records a dropped ingestion event for observability.
 	RecordDrop(ctx context.Context, chain, reason, tokenAddress, score string) error
+
+	// GetPipelineStats returns token counts per lifecycle state for the last
+	// windowHours and the most recent tokens that passed DQ validation.
+	// Used by the /pipeline Telegram command.
+	GetPipelineStats(ctx context.Context, windowHours int) (*PipelineStats, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────
+
+// PipelineStats is a snapshot of token funnel counts over a time window.
+// Returned by GetPipelineStats for the /pipeline Telegram command.
+type PipelineStats struct {
+	// Funnel counts — how many tokens reached each lifecycle state.
+	Detected       int64
+	DQPassed       int64
+	FeatureReady   int64
+	EdgeDetected   int64
+	Validated      int64
+	Selected       int64
+	Executed       int64
+	PositionOpen   int64
+	PositionClosed int64
+	Rejected       int64
+	Failed         int64
+
+	// Recent is the last 10 tokens that passed DQ validation in the window,
+	// newest first. Includes ticker/name when available (Solana tokens).
+	Recent []RecentToken
+
+	// WindowHours is the lookback window used for the query.
+	WindowHours int
+}
+
+// RecentToken is one row in PipelineStats.Recent.
+type RecentToken struct {
+	TokenAddress string
+	Symbol       string // empty for EVM tokens
+	Name         string // empty for EVM tokens
+	State        string // current lifecycle state
+	Chain        string
+	DetectedAt   string // ISO 8601
+}
 
 // Config holds database connection parameters.
 // Values are loaded from config/pipeline.yaml via the config package.

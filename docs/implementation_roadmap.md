@@ -32,6 +32,8 @@
 - [Phase 5 — Learning Engine (P2)](#phase-5--learning-engine-p2)
 - [Phase 6 — Resource Control, Scaling & Production Hardening (P2)](#phase-6--resource-control-wallet-sharding-scaling-p2)
 - [Phase 7 — Solana Market Extension (P2)](#phase-7--solana-market-extension-p2)
+- [Phase 8 — Final Production Hardening (P2+)](#phase-8--final-production-hardening)
+- [Phase 9 — Profitability Restoration & Signal Integrity (P2+)](#phase-9--profitability-restoration--signal-integrity-p2)
 - [Go-Live Checklist](#go-live-checklist)
 - [DB Adapter Mapping](#db-adapter-mapping)
 - [DTO Pipeline Map](#dto-pipeline-map)
@@ -44,29 +46,33 @@
 
 Quick reference for all 8 implementation phases. Each phase maps to one or more pipeline layers and introduces specific DTOs. See [Global Conventions](#global-conventions) for shared patterns applied across all phases.
 
-| Phase | Name                                        | Priority | Parallel Group    | Pipeline Layer(s)           | New DTOs Introduced                                                                                                                         | Migration                   | Requires |
-| ----- | ------------------------------------------- | -------- | ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------- |
-| **0** | Core Infrastructure                         | P0       | A — Sequential    | —                           | `EventEnvelope`, `StrategyVersion`                                                                                                          | `000001_initial_schema`     | —        |
-| **1** | Detection & Ingestion                       | P1       | A — Sequential    | L0 (Ingestion)              | `MarketDataDTO`                                                                                                                             | `000002_ingestion_tables`   | Phase 0  |
-| **2** | Minimal Trading Pipeline (FIRST TRADE)      | P1       | A — Sequential    | L1 → L9                     | `DataQualityDTO`, `FeatureDTO`, `EdgeDTO`, `ValidatedEdgeDTO`, `SelectionOutput`, `AllocationDTO`, `ExecutionResultDTO`, `PositionStateDTO` | `000003_trading_tables`     | Phase 1  |
-| **3** | Evaluation & Correctness                    | P1.5     | B — Parallel-safe | L10 (pre-learning)          | `EvaluationDTO`                                                                                                                             | `000004_state_machine`      | Phase 2  |
-| **4** | Signal Quality                              | P1.5     | B — Parallel-safe | L1–L5 (models)              | `ProbabilityEstimateDTO`, `SlippageEstimateDTO`, `LatencyProfileDTO`                                                                        | —                           | Phase 3  |
-| **5** | Learning Engine                             | P2       | B — Parallel-safe | L10 (full)                  | `LearningRecordDTO`                                                                                                                         | `000005_learning_tables`    | Phase 4  |
-| **6** | Resource Control, Wallet Sharding & Scaling | P2       | C — Final         | All (operational hardening) | `SystemStateDTO`                                                                                                                            | `000006_event_partitioning` | Phase 5  |
-| **7** | Solana Market Extension                     | P2       | D — Market addon  | L0, L8 (Solana-specific)    | — (chain-agnostic; reuses existing DTOs)                                                                                                    | `000007_solana_tables`      | Phase 6  |
+| Phase | Name                                         | Priority | Parallel Group    | Pipeline Layer(s)               | New DTOs Introduced                                                                                                                         | Migration                     | Requires |
+| ----- | -------------------------------------------- | -------- | ----------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------- |
+| **0** | Core Infrastructure                          | P0       | A — Sequential    | —                               | `EventEnvelope`, `StrategyVersion`                                                                                                          | `000001_initial_schema`       | —        |
+| **1** | Detection & Ingestion                        | P1       | A — Sequential    | L0 (Ingestion)                  | `MarketDataDTO`                                                                                                                             | `000002_ingestion_tables`     | Phase 0  |
+| **2** | Minimal Trading Pipeline (FIRST TRADE)       | P1       | A — Sequential    | L1 → L9                         | `DataQualityDTO`, `FeatureDTO`, `EdgeDTO`, `ValidatedEdgeDTO`, `SelectionOutput`, `AllocationDTO`, `ExecutionResultDTO`, `PositionStateDTO` | `000003_trading_tables`       | Phase 1  |
+| **3** | Evaluation & Correctness                     | P1.5     | B — Parallel-safe | L10 (pre-learning)              | `EvaluationDTO`                                                                                                                             | `000004_state_machine`        | Phase 2  |
+| **4** | Signal Quality                               | P1.5     | B — Parallel-safe | L1–L5 (models)                  | `ProbabilityEstimateDTO`, `SlippageEstimateDTO`, `LatencyProfileDTO`                                                                        | —                             | Phase 3  |
+| **5** | Learning Engine                              | P2       | B — Parallel-safe | L10 (full)                      | `LearningRecordDTO`                                                                                                                         | `000005_learning_tables`      | Phase 4  |
+| **6** | Resource Control, Wallet Sharding & Scaling  | P2       | C — Final         | All (operational hardening)     | `SystemStateDTO`                                                                                                                            | `000006_event_partitioning`   | Phase 5  |
+| **7** | Solana Market Extension                      | P2       | D — Market addon  | L0, L8 (Solana-specific)        | — (chain-agnostic; reuses existing DTOs)                                                                                                    | `000007_solana_tables`        | Phase 6  |
+| **8** | Final Production Hardening                   | P2+      | E — Final gate    | All (determinism + DLQ + reorg) | — (additive only)                                                                                                                           | `000012_production_hardening` | Phase 7  |
+| **9** | Profitability Restoration & Signal Integrity | P2+      | F — Mainnet gate  | L1, L2, L4, L7, L9, L10         | — (additive only; no new DTOs)                                                                                                              | — (no schema changes)         | Phase 8  |
 
 ### Subsection Count by Phase
 
-| Phase | Subsections                      | Workers Added                            | New Contracts                                 |
-| ----- | -------------------------------- | ---------------------------------------- | --------------------------------------------- |
-| 0     | 0.1 – 0.7 (7 global conventions) | —                                        | `trace.go`, `event_envelope.go`               |
-| 1     | 9 components                     | 1 (`run_ingestion.go`)                   | `market_data.go`                              |
-| 2     | 2.1 – 2.11 (11 subsections)      | 9 workers                                | 8 contracts                                   |
-| 3     | 8 subsections + §3.1             | 1 (`run_evaluation.go`)                  | `evaluation.go`                               |
-| 4     | 8 subsections                    | 3 model workers                          | `probability.go`, `slippage.go`, `latency.go` |
-| 5     | 10 subsections + §5.1            | 6 workers                                | `learning_record.go`                          |
-| 6     | 12 subsections                   | 2 workers                                | — (no new DTOs)                               |
-| 7     | 7 subsections                    | 2 workers (Solana ingestion + execution) | — (chain-agnostic — reuses existing DTOs)     |
+| Phase | Subsections                      | Workers Added                                                        | New Contracts                                 |
+| ----- | -------------------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
+| 0     | 0.1 – 0.7 (7 global conventions) | —                                                                    | `trace.go`, `event_envelope.go`               |
+| 1     | 9 components                     | 1 (`run_ingestion.go`)                                               | `market_data.go`                              |
+| 2     | 2.1 – 2.11 (11 subsections)      | 9 workers                                                            | 8 contracts                                   |
+| 3     | 8 subsections + §3.1             | 1 (`run_evaluation.go`)                                              | `evaluation.go`                               |
+| 4     | 8 subsections                    | 3 model workers                                                      | `probability.go`, `slippage.go`, `latency.go` |
+| 5     | 10 subsections + §5.1            | 6 workers                                                            | `learning_record.go`                          |
+| 6     | 12 subsections                   | 2 workers                                                            | — (no new DTOs)                               |
+| 7     | 7 subsections                    | 2 workers (Solana ingestion + execution)                             | — (chain-agnostic — reuses existing DTOs)     |
+| 8     | 8.1 – 8.7 (7 subsections)        | 1 worker (`run_reconciliation.go`)                                   | — (additive adapter methods only)             |
+| 9     | 9.1 – 9.6 (6 subsections)        | 5 workers (DQ-real, feature-real, prob, capital-dyn, position-price) | — (no new DTOs; reuses existing)              |
 
 ---
 
@@ -4349,7 +4355,656 @@ A green replay validation is a hard merge gate to `main`.
 
 ---
 
-## Go-Live Checklist
+# Phase 9 — Profitability Restoration & Signal Integrity (P2+)
+
+> **Goal:** Restore the system from _functionally correct but unprofitable_ (~0.1 % of theoretical maximum, see `docs/PROFITABILITY_GAPS.md`) to _profit-capable production_. Every fix in Phase 9 closes a fabricated-data leak in one of the six profit factors of the canonical invariant `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality`. Phase 9 is **mandatory before any mainnet capital is routed**, comes immediately after Phase 8, and has the same merge-gate weight as Phase 8.
+>
+> **Architecture invariant — no drift.** Phase 9 introduces **zero** new pipeline layers, **zero** new DTO types, and **zero** modifications to the database adapter interface. All work is internal-to-module: replace stubbed values with real computations, wire already-defined model outputs into already-defined consumers, populate already-defined DTO fields. Architecture, layer count, event-routing table, and adapter signatures are unchanged.
+>
+> **Source-of-truth cross-references:**
+>
+> - Gap inventory and per-chain implementation tables: `docs/PROFITABILITY_GAPS.md` (canonical)
+> - Layer-by-layer specs: `docs/architecture.md` § 3.1 (DQ), § 3.2 (Features), § 3.4 (Models), § 3.7 (Capital), § 3.9 (Position), § 3.10 (Learning)
+
+## 9.0 Gap → Layer Mapping
+
+| Gap        | Layer | Subsection                                                                         | Profit Factor Restored                   |
+| ---------- | ----- | ---------------------------------------------------------------------------------- | ---------------------------------------- |
+| **GAP-01** | L1    | [9.1 DataQuality — Real Detectors](#91-dataquality--real-detectors-critical)       | `DataQuality` 0.10 → ≥ 0.65              |
+| **GAP-03** | L2    | [9.2 Features — Real Signals](#92-feature-extraction--real-signals)                | `Features` 0.30 → ≥ 0.70                 |
+| **GAP-04** | L4/L5 | [9.3 Probability — Wire the Model](#93-probability-model--wire-the-existing-model) | `Probability` static → dynamic per token |
+| **GAP-05** | L7    | [9.4 Capital — Dynamic Sizing](#94-capital-engine--dynamic-sizing)                 | `Capital` 0.40 → ≥ 0.65                  |
+| **GAP-02** | L9    | [9.5 Position — Real Price Feed](#95-position-engine--real-price-feed-critical)    | `Execution` (TP/SL) 0 → live             |
+| **GAP-06** | L10   | [9.6 Learning — Real Inputs](#96-learning-engine--real-signals)                    | `AdaptationQuality` 0.20 → compounding   |
+
+> **Lower-tier gaps (GAP-07 through GAP-17)** are deferred to follow-on hardening passes; they are tracked in `docs/PROFITABILITY_GAPS.md` and do not gate Phase 9 completion. The six gaps above collectively move the combined profit multiplier from ~0.1 % to an estimated 5–10 % of theoretical maximum (per `docs/PROFITABILITY_GAPS.md` § "Recommended Implementation Sequence").
+
+### BLOCKERS
+
+**Phase 8 exit criteria must all be checked before starting Phase 9.** Specifically: ordering invariant, partition isolation, DLQ correctness, exactly-once execution, replay determinism, and kill-switch persistence are all verified. Phase 9 builds on this hardened substrate; running Phase 9 logic on a non-deterministic backbone would mask real signal regressions as flakes.
+
+### Scope
+
+**In scope:** Real RPC-backed scam detectors in Layer 1, real on-chain feature computation in Layer 2, wiring the already-implemented `ProbabilityModel.Predict()` into the EV gate, edge-proportional capital sizing, `PriceClient` implementations for ETH/BSC/Solana wired into `RunPositionPoll`, learning inputs flowing real features.
+
+**Explicitly excluded:**
+
+- **No new layers, no new DTOs, no new adapter methods, no new migrations.** All additions are internal-to-module.
+- **No new pipeline stages.** Existing event routing (§ 0.6) is unchanged.
+- **No protocol-level features** (Flashbots relay wiring, EIP-1559 ETH gas, additional Solana programs) — those are GAP-06/08/11/12/13 and belong to a follow-on hardening pass.
+- **No retraining of the probability model coefficients.** Phase 9 wires the existing model; coefficient learning is Phase 5's domain and resumes naturally once Phase 9 supplies real features.
+
+### Event Types Emitted
+
+**No new event types.** Phase 9 changes the _content_ of existing events, not the routing topology. The `data_quality_event`, `feature_event`, `probability_event`, `allocation_event`, `position_event`, and `learning_record_event` continue to carry their existing DTOs — populated with real values rather than stubs.
+
+### DTO Pipeline
+
+Phase 9 keeps the Phase 4 pipeline shape unchanged. The only change is that DTO fields previously zero/stub are now populated with real computations.
+
+| Stage             | Layer | DTO Fields Newly Populated (Phase 9)                                                                               |
+| ----------------- | ----- | ------------------------------------------------------------------------------------------------------------------ |
+| DataQuality       | 1     | `IsHoneypot`, `IsTaxAnomaly`, `IsRugRisk`, `IsWashTrading`, `LpLocked`, `ContractVerified`, real `RiskScore`       |
+| Features          | 2     | `TxVelocityScore`, `WalletEntropy`, `TokenAge`, `VolumeMomentum`, `PriceMomentum`, `LiquidityUsdRaw`, `Confidence` |
+| Validation (gate) | 5     | EV gate now consumes `ProbabilityEstimateDTO.Probability` (replaces fixed `cfg.PriorProbability`)                  |
+| Capital           | 7     | `AllocationDTO.SizeUsd` is now a function of `(score, probability, confidence, cohort, mode)`                      |
+| Position          | 9     | `PositionStateDTO.LastObservedPrice` populated from real RPC; TP1/TP2/SL/Trail decisions actually fire             |
+| Learning          | 10    | `LearningRecordDTO.Features` carries real signals; cohort centroid is meaningful                                   |
+
+### Lifecycle Transitions
+
+Phase 9 introduces **no new lifecycle states** and **no new transitions**. All Phase 2/3 transitions are unchanged. The improvement is in the _probability of taking the right transition_ — i.e., honeypots and rugs now route to `REJECTED` at L1 instead of falsely passing into `EXECUTED`.
+
+### Traceability
+
+All updated DTOs continue to carry the four mandatory traceability fields per § 0.3. Phase 9 introduces no new propagation rules.
+
+---
+
+## 9.1 DataQuality — Real Detectors (CRITICAL)
+
+**Closes:** GAP-01 (`docs/PROFITABILITY_GAPS.md`). **Layer 1.** **All chains.**
+
+### Objective
+
+Replace the five hardcoded `false` flags in `internal/modules/data_quality/data_quality.go` with real detectors. The goal is to make `RiskScore` a real signal and `ContractSafety` (the highest-weight feature in the probability model) reflect actual contract behavior rather than a constant lie.
+
+### Files
+
+```
+internal/modules/data_quality/
+├── data_quality.go            // existing — replace stub flags with detector calls
+├── honeypot.go                // NEW — buy/sell simulation per chain
+├── tax_detector.go            // NEW — decode Transfer logs, compute received/sent ratio
+├── lp_lock.go                 // NEW — Unicrypt / Team Finance / PinkLock + Solana LP NFT / PumpFun curve
+├── wash_trading.go            // existing — wire real unique-sender ratio
+├── rug_authority.go           // NEW — ABI selectors (EVM) + mint/freeze authority (Solana)
+├── contract_verified.go       // NEW — Etherscan/BscScan v2 source-code lookup
+├── detector_cache.go          // NEW — bounded LRU keyed by token_address; TTL from config
+└── data_quality_test.go       // expand: simulation fixtures, cache hit/miss, RPC timeout
+
+internal/rpc/
+├── evm_simulator.go           // NEW — eth_call simulation helper used by honeypot/tax detectors
+└── solana_simulator.go        // NEW — simulateTransaction helper used by Solana detectors
+```
+
+### DTO Flow
+
+Input: `MarketDataDTO` from `market_data_event`. Output: `DataQualityDTO` on `data_quality_event` with all six boolean flags populated and a real `RiskScore ∈ [0, 1]`.
+
+### Detector Inventory (per chain)
+
+The exact RPC strategy per detector is canonical in `docs/PROFITABILITY_GAPS.md` § GAP-01 — reproduced here only as a checklist:
+
+| Detector          | EVM (ETH/BSC)                                                         | Solana                                                     |
+| ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Honeypot          | `eth_call` simulate buy→sell; received/sent ratio                     | `simulateTransaction` buy+sell bundle; log analysis        |
+| Tax anomaly       | Decode `Transfer` logs in simulated tx                                | Decode SPL `Transfer` instructions in simulated tx         |
+| LP lock           | `balanceOf(lockContract, lpToken)` on Unicrypt/TeamFin/PinkLock       | LP NFT ownership (Raydium) / `complete` field (PumpFun)    |
+| Wash trading      | `eth_getLogs` last 20 `Swap` → unique `from` ratio                    | `GetSignaturesForAddress` last 20 → unique signer ratio    |
+| Rug risk          | ABI selectors `mint()`/`pause()`/`blacklist()` in unverified contract | `getAccountInfo` on token mint → check authority renounced |
+| Contract verified | Etherscan / BscScan v2 `getsourcecode`                                | n/a — instead check program upgrade authority              |
+
+### Worker
+
+`internal/workers/run_data_quality.go` already exists from Phase 2. **No new worker** — the dispatcher signature is unchanged. The DQ module gains an RPC client dependency, which is injected at worker construction time:
+
+```go
+dqMod := data_quality.New(cfg.DataQuality, evmSim, solanaSim, cache, logger)
+```
+
+### Adapter Calls
+
+**None.** No new adapter methods. The DQ module remains DB-free per `internal/modules/` rules.
+
+### Failure Handling
+
+| Failure                                      | Behavior                                                                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| RPC timeout (`detector_timeout_ms` exceeded) | Mark detector as `Indeterminate`; degrade flag to `risky-pass` (treated as positive risk in `RiskScore` aggregation, never as safe). |
+| Etherscan API rate-limit                     | Cache last good `ContractVerified` result for `cache_ttl_sec`; on miss, treat as `Indeterminate` → risky-pass.                       |
+| Detector returns unparseable response        | Increment `dq_detector_errors_total{detector}` metric; treat as `Indeterminate`.                                                     |
+| Pool not yet indexed by RPC archive          | Treat as `Indeterminate` (token may simply be too new); set `ContractSafety = 0.5` rather than 0.0.                                  |
+
+**Cache rules** (`detector_cache.go`):
+
+- LRU keyed by `(chain, token_address, detector_name)`
+- TTL per-detector from `config/data_quality.yaml` (e.g., `lp_lock_ttl_sec: 300`, `contract_verified_ttl_sec: 3600`)
+- Cache hits MUST NOT count toward `dq_detector_calls_total{detector,result=cache_hit}` separately so SLO tracking remains honest
+
+### Hot-Path Performance Constraints
+
+- **No detector may block the worker for > `detector_timeout_ms` (default 800 ms).** Use `context.WithTimeout` per detector call.
+- **All detectors are launched concurrently** via `errgroup`; total wall time ≤ slowest detector ≤ `detector_timeout_ms`.
+- **Cache aggressively.** A detector hit on a token that was already evaluated within TTL adds < 1 ms to DQ wall time.
+
+### Test Cases (mandatory)
+
+- **Unit:** honeypot fixture transaction → `IsHoneypot=true`, `RiskScore ≥ 0.8`
+- **Unit:** legitimate token fixture → all flags `false`, `RiskScore < 0.2`
+- **Unit:** RPC timeout simulation → `IsHoneypot=false` but `Indeterminate=true`, treated as risky-pass
+- **Unit:** cache hit on second call within TTL → 0 RPC calls observed
+- **Integration:** replay real testnet honeypot contract → `RiskScore ≥ 0.8`, lifecycle transitions to `REJECTED`
+- **Integration:** replay legitimate testnet token → flags all false, lifecycle continues to `DQ_PASSED`
+- **Integration:** kill RPC mid-detection → no panic, all 5 detectors return `Indeterminate`, DQ event still emitted with `risky-pass` flags
+
+### Exit Criteria
+
+- [ ] All five scam-detector booleans (`IsHoneypot`, `IsTaxAnomaly`, `IsRugRisk`, `IsWashTrading`, `LpLocked`) are populated by real detectors — no `false` literals remain in `data_quality.go`
+- [ ] Average DQ `RiskScore` distribution over a 1h replay shows non-zero variance (`stddev > 0.1`) — proof the detectors discriminate
+- [ ] Honeypot contract from a curated test fixture is rejected at L1 in 100 % of replays
+- [ ] DQ wall-time p95 ≤ `detector_timeout_ms × 1.1` (concurrent detection budget)
+- [ ] Cache hit ratio ≥ 60 % over a 24h replay (proves bounded RPC pressure)
+- [ ] Zero new entries in `internal/modules/data_quality/` import `database/` or `internal/rpc/` directly — RPC clients are injected only
+
+---
+
+## 9.2 Feature Extraction — Real Signals
+
+**Closes:** GAP-03 (`docs/PROFITABILITY_GAPS.md`). **Layer 2.** **All chains.**
+
+### Objective
+
+Replace the five `0.5` stub assignments in `internal/modules/features/features.go` with real on-chain computations. Populate `LiquidityUsdRaw` so the slippage model (Layer 4) finally selects the correct bucket. Raise per-feature `Confidence` from `0.3` stubs to `0.7–0.9` once real data flows.
+
+### Files
+
+```
+internal/modules/features/
+├── features.go                // existing — replace 0.5 stubs with computed values
+├── tx_velocity.go             // NEW — Swap-log count / window; per-chain helper
+├── wallet_entropy.go          // existing scaffold — populate with unique/total ratio
+├── token_age.go               // NEW — block_timestamp at pool creation
+├── volume_momentum.go         // NEW — 30s vs 5min rolling ratio from Sync events
+├── price_momentum.go          // NEW — reserve-ratio delta between consecutive Syncs
+├── liquidity_usd.go           // NEW — reserve_base × chain_native_price_usd
+├── confidence.go              // NEW — per-feature confidence aggregation
+└── features_test.go           // expand: each feature has a fixture-based assertion
+```
+
+### DTO Flow
+
+Input: `DataQualityDTO` on `data_quality_event` (already includes the underlying `MarketDataDTO`'s pool address and reserves). Output: `FeatureDTO` on `feature_event` with all eight numeric features populated and `Confidence` populated per § 9.2 of `docs/dto_contracts.md`.
+
+> **DTO additions:** None. The `FeatureConfidence` struct already exists in `contracts/feature.go` (verified 2026-04-29). Phase 9 only populates fields; no schema change.
+
+### Real-Signal Computation Map
+
+The exact computation per feature per chain is canonical in `docs/PROFITABILITY_GAPS.md` § GAP-03 — reproduced as the contract:
+
+| Feature           | EVM compute                                                                | Solana compute                                            | Confidence target |
+| ----------------- | -------------------------------------------------------------------------- | --------------------------------------------------------- | ----------------- |
+| `TxVelocityScore` | `eth_getLogs` count of `Swap` topics on pool, last 30s, sigmoid-normalized | `GetSignaturesForAddress(pool, limit=20)` last-30s count  | 0.85              |
+| `WalletEntropy`   | unique `from` / total over last 50 `Swap` events                           | unique signers from `GetSignaturesForAddress`             | 0.85              |
+| `TokenAge`        | `block.timestamp(pool_create) - in.BlockTimestamp`, normalized             | `MarketDataDTO.IngestedAt` (Solana already provides this) | 0.95              |
+| `VolumeMomentum`  | 30s swap-volume / 5min rolling avg from `Sync` events                      | reserve delta between two consecutive `getAccountInfo`    | 0.75              |
+| `PriceMomentum`   | reserve-ratio delta between consecutive Sync events                        | same via AMM reserve account polling                      | 0.75              |
+| `LiquidityUsdRaw` | `reserveBase_decimal × ethPriceUsd` (or BNB)                               | `reserveBase × solPriceUsd` from AMM pool                 | 0.90              |
+
+> **Normalization is delegated to `signal-normalizer` skill.** Each feature MUST go through Z-score then sigmoid before being assigned to its `FeatureDTO` field. See `.github/skills/signal-normalizer/SKILL.md`.
+
+### Worker
+
+`internal/workers/run_features.go` exists from Phase 2. Phase 9 only changes the module wiring (RPC client + Sync-event cache injected at construction):
+
+```go
+featMod := features.New(cfg.Features, evmRPC, solanaRPC, syncEventCache, normalizer, logger)
+```
+
+### Adapter Calls
+
+**None.** Feature module remains DB-free.
+
+### Failure Handling
+
+| Failure                                                    | Behavior                                                                                                           |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `eth_getLogs` window too large                             | Walk back in 5-block chunks; cap at 200 blocks; if still no results → emit feature with `Confidence ≤ 0.3`         |
+| Sync-event cache miss for `VolumeMomentum`/`PriceMomentum` | First-event-on-pool case → set momentum features = 0.0, `Confidence = 0.4` (cold start)                            |
+| Native-token price fetcher unavailable                     | Use last-known price (TTL 60 s); on persistent failure (> 5 min stale) → `LiquidityUsdRaw = 0`, `Confidence = 0.2` |
+| Pool not yet indexed                                       | `TokenAge = 0`, `Confidence = 0.3`; downstream models will discount accordingly                                    |
+
+### Hot-Path Performance Constraints
+
+- All feature computations launched concurrently per `errgroup`
+- Per-feature timeout: `feature_timeout_ms` (default 500 ms)
+- Sync-event window cache (in-memory ring buffer per pool, capped at `sync_cache_size` per pool) prevents repeated `eth_getLogs` calls
+- No feature may add > 50 ms p95 to the worker hot path under cache-warm conditions
+
+### Test Cases (mandatory)
+
+- **Unit:** synthetic 30-Swap fixture in 30 s window → `TxVelocityScore > 0.7`
+- **Unit:** 50-Swap fixture, 5 unique senders → `WalletEntropy ≈ 0.10`
+- **Unit:** consecutive Sync events with +20 % reserve growth → `VolumeMomentum > 0.7`
+- **Unit:** `LiquidityUsdRaw = reserveBase × 3000` (with stub price) → expected USD value
+- **Unit:** RPC timeout → all features carry their cold-start defaults; no panic
+- **Integration:** real testnet pool — features stable over 1h; no `0.5` literals in `FeatureDTO` payloads
+- **Integration:** Slippage model now selects correct bucket given populated `LiquidityUsdRaw` (verifies GAP-10 self-correction)
+
+### Exit Criteria
+
+- [ ] Zero `0.5` literal assignments in `internal/modules/features/`
+- [ ] `LiquidityUsdRaw > 0` for ≥ 99 % of `FeatureDTO`s emitted in a 1h replay
+- [ ] Per-feature `Confidence` averages: `TxVelocityScore` ≥ 0.80, `WalletEntropy` ≥ 0.80, `LiquidityUsdRaw` ≥ 0.85
+- [ ] Slippage-bucket distribution shows ≥ 4 buckets in use (proves real liquidity values flow)
+- [ ] `FeatureDTO` distribution: at least 3 of 5 momentum/velocity features show `stddev > 0.15` over a 1h window — proof of variance
+
+---
+
+## 9.3 Probability Model — Wire the Existing Model
+
+**Closes:** GAP-04 (`docs/PROFITABILITY_GAPS.md`). **Layer 5 (Validation).** **All chains.**
+
+### Objective
+
+The probability model in `internal/modules/models/probability.go` is fully implemented and mathematically correct. Its output (`ProbabilityEstimateDTO`) is currently ignored — `validation.go` uses `cfg.PriorProbability = 0.35` as a fixed value. Phase 9 wires the model output through the validation EV gate.
+
+### Files
+
+```
+internal/modules/validation/
+├── validation.go              // existing — replace fixed prior with prob_dto.Probability
+└── validation_test.go         // expand: EV-gate behavior across probability spectrum
+
+internal/orchestrator/
+└── routing.go                 // existing — already routes prob_event; verify join
+                                // (no change expected; documented in test-only PR)
+```
+
+### DTO Flow
+
+Validation already consumes `EdgeDTO` (Phase 2). Phase 4 added `ProbabilityEstimateDTO` emission but never wired the consumer side. Phase 9 closes the loop:
+
+```
+edge_event ──┐
+             ├──► validation_worker ──► validated_edge_event
+prob_event ──┘   (joins on TraceID)
+```
+
+The join is already implemented — what's missing is the `validation.Process()` reading from `probDTO.Probability` instead of `cfg.PriorProbability`.
+
+### Worker
+
+No new worker. `internal/workers/run_validation.go` already joins both events via the adapter's existing `ClaimNextEvents` filter. Phase 9 changes only the call-site within `validation.Process()`:
+
+```go
+// BEFORE (Phase 2/4):
+p := m.cfg.PriorProbability  // = 0.35 always
+
+// AFTER (Phase 9):
+p := probDTO.Probability     // sourced from ProbabilityModel.Predict(featureDTO)
+// Fallback rule: if probDTO.Confidence < cfg.MinModelConfidence, fall back to
+// cfg.PriorProbability and emit a `validation_event` with Reason=low_confidence.
+```
+
+### Adapter Calls
+
+**None changed.** Existing `ClaimNextEvents`, `MarkEventProcessed`, and event emission paths are unchanged.
+
+### Failure Handling
+
+| Failure                                       | Behavior                                                                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `probability_event` missing for the trace     | Wait `prob_join_timeout_ms` (default 200 ms) for the join; on timeout fall back to `cfg.PriorProbability` and tag `Reason=prob_join_timeout` |
+| `probDTO.Probability` outside [0, 1]          | Reject the validated edge with `Reason=invalid_probability` and emit a structured warning                                                    |
+| `probDTO.Confidence < cfg.MinModelConfidence` | Fall back to `cfg.PriorProbability`; emit `Reason=low_model_confidence`; allow trade if EV gate still passes                                 |
+| Probability model returns error               | Emit DLQ event per Phase 8 § 8.2 retry policy; never silently default to `0.5`                                                               |
+
+### Test Cases (mandatory)
+
+- **Unit:** `probDTO.Probability = 0.8`, edge gain = 3000 bps → EV positive → `Decision=ACCEPT`
+- **Unit:** `probDTO.Probability = 0.1` → EV negative → `Decision=REJECT`
+- **Unit:** probability event arrives after timeout → fallback to `cfg.PriorProbability` with `Reason=prob_join_timeout`
+- **Unit:** `probDTO.Probability = 1.5` → reject with `invalid_probability`; no panic
+- **Integration:** replay 100 fixtures → distribution of accepted-trade probabilities shows variance (`stddev > 0.1`); no constant `0.35` value
+- **Integration:** model confidence below threshold → fallback path exercised, observable via `validation_event.Reason`
+
+### Exit Criteria
+
+- [ ] `validation.go` no longer references `cfg.PriorProbability` on the happy path — it is only used as a documented fallback
+- [ ] EV gate evaluates `EV = p × gain_bps − (1−p) × loss_bps − fees − slippage` with `p = probDTO.Probability` for ≥ 95 % of validated edges
+- [ ] `Brier score` of accepted-vs-realized labels ≤ 0.27 over a 200-trade testnet window (probability is now calibrated and used)
+- [ ] Probability fallback rate ≤ 5 % over a 1h replay (proves model output is normally available)
+
+---
+
+## 9.4 Capital Engine — Dynamic Sizing
+
+**Closes:** GAP-05 (`docs/PROFITABILITY_GAPS.md`). **Layer 7.** **All chains.**
+
+### Objective
+
+Replace the `cfg.FixedEntrySizeUsd = $50` constant in `internal/modules/capital/capital.go` with a Kelly-adjacent edge-proportional sizing function. Honors per-cohort multipliers, per-mode multipliers, and the bounded exploration band.
+
+### Files
+
+```
+internal/modules/capital/
+├── capital.go                 // existing — replace fixed size with dynamic formula
+├── kelly.go                   // NEW — Kelly fraction calculation with caps
+├── cohort_multiplier.go       // NEW — read multiplier from active StrategyVersion
+├── mode_multiplier.go         // NEW — STRICT/BALANCED/EXPLORATION lookup
+├── exploration_band.go        // NEW — 1–5% bounded exploration sizing
+└── capital_test.go            // expand: edge-vs-size relationship, all clamps
+```
+
+### DTO Flow
+
+Input: `SelectionOutputDTO` on `selection_event` (carries `CombinedScore`, `IsExploration`). Output: `AllocationDTO` on `allocation_event` with `SizeUsd` now a function of `(score, probability, confidence, cohort, mode)` — clamped to `[min_size_usd, max_size_usd]` and bounded by the existing capital envelope (4 caps already enforced in Phase 6).
+
+### Sizing Formula
+
+```
+f_kelly = clamp((P × R − (1−P)) / R, 0, kelly_cap)
+   where R = PriorGainBps / PriorLossBps
+         P = probDTO.Probability   (joined from probability_event)
+         confidence = featDTO.Confidence.Aggregate
+
+size_raw   = base_size_usd × f_kelly × confidence × cohort_multiplier × mode_multiplier
+size_final = clamp(size_raw, min_size_usd, max_size_usd)
+```
+
+**Mode multipliers** (from `config/capital.yaml`):
+
+- `STRICT` → 0.5×
+- `BALANCED` → 1.0×
+- `EXPLORATION` → 1.3×, but with `f_kelly` ceiling at `kelly_cap_exploration` (default 0.05)
+
+**Exploration band** (per `docs/architecture.md` § 7): when `selectionDTO.IsExploration=true`, allocate `min_exploration_pct..max_exploration_pct` (default 1–5 %) of `total_capital_usd` regardless of edge score — this is how the system intentionally probes the FN frontier.
+
+### Worker
+
+`internal/workers/run_capital.go` exists from Phase 2 (renamed `run_capital_dynamic.go` is **not** required — keep the existing file name; replace the body). Capital module gains:
+
+- `cohortLookup` (queries the active `StrategyVersion` snapshot for `cohort_multipliers`)
+- `modeLookup` (reads current `SystemStateDTO.Mode`)
+
+Both are injected at worker construction.
+
+### Adapter Calls
+
+**None new.** Cohort multipliers come from the already-pinned `StrategyVersion` snapshot (Phase 0). Mode comes from the periodic `system_event` last value cached in the worker process.
+
+### Failure Handling
+
+| Failure                                    | Behavior                                                                                                                                         |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `probDTO.Probability` unavailable          | Skip allocation; emit `allocation_event` with `Rejected=true`, `Reason=missing_probability` (matches Phase 6 capital envelope rejection pattern) |
+| Cohort lookup miss (new cohort_id)         | Use `default_cohort_multiplier = 1.0`; log structured warning                                                                                    |
+| Mode lookup stale (> `mode_freshness_sec`) | Default to `BALANCED` multiplier; emit `system_event` warning                                                                                    |
+| `f_kelly < 0` (negative EV pre-clamp)      | Reject allocation with `Reason=negative_kelly`; do NOT allocate                                                                                  |
+
+### Test Cases (mandatory)
+
+- **Unit:** P=0.8, R=2.0 → f_kelly = (0.8×2 − 0.2)/2 = 0.7 → clamped to `kelly_cap`
+- **Unit:** P=0.3, R=2.0 → f_kelly = (0.6 − 0.7)/2 = -0.05 → reject with `negative_kelly`
+- **Unit:** mode=STRICT, score=high → size = 0.5 × computed → smaller than BALANCED for same input
+- **Unit:** `IsExploration=true` → size in `[min_exploration_pct, max_exploration_pct]` of total capital regardless of score
+- **Unit:** all envelope-cap rejections still observable (Phase 6 contract preserved)
+- **Integration:** 100 fixtures with varied `(P, score)` → size distribution shows `stddev > 30 %` of mean (no constant $50)
+
+### Exit Criteria
+
+- [ ] `cfg.FixedEntrySizeUsd` is no longer referenced on the happy path
+- [ ] `AllocationDTO.SizeUsd` is monotonically increasing in `(P × score × confidence)` over a 200-fixture sweep (correctness of Kelly direction)
+- [ ] Mode-multiplier effect observable: STRICT mean size = 0.5 × BALANCED mean size (within ±10 %)
+- [ ] Exploration band budget respected: total exploration capital over 1h ≤ `max_exploration_pct × total_capital_usd`
+- [ ] All four Phase 6 capital envelope rejections still fire correctly (regression check)
+
+---
+
+## 9.5 Position Engine — Real Price Feed (CRITICAL)
+
+**Closes:** GAP-02 (`docs/PROFITABILITY_GAPS.md`). **Layer 9.** **All chains.**
+
+### Objective
+
+Implement `position.PriceClient` for ETH, BSC, and Solana, and wire it into `RunPositionPoll` in `cmd/server.go`. Without this, every TP1/TP2/SL/Trail calculation in `position.go` is dead code — positions exit only on `max_hold_seconds` expiry. This is the single highest-impact fix in Phase 9.
+
+### Files
+
+```
+internal/rpc/
+├── price_fetcher.go           // NEW — PriceClient interface implementations
+├── evm_reserve_price.go       // NEW — getAmountsOut(router, 1e18, [token→native])
+├── solana_reserve_price.go    // NEW — getAccountInfo(pool) → reserveBase / reserveToken
+└── price_oracle_factory.go    // NEW — NewPriceClientForChain(chain, ...) PriceClient
+
+cmd/
+└── server.go                  // existing — wire NewPriceClientForChain into RunPositionPoll
+
+internal/modules/position/
+└── position.go                // existing — interface unchanged; no-op confirms
+
+internal/workers/
+└── run_position_poll.go       // existing — remove the `priceClient == nil` early return guard
+```
+
+### DTO Flow
+
+Position polling is a **periodic** worker (per § 0.6) — no input event. It reads open positions from the adapter and emits `position_event` on TP/SL/Trail/Time triggers.
+
+### Worker
+
+`internal/workers/run_position_poll.go` exists. Phase 9 changes:
+
+1. **Remove** the `if priceClient == nil { return }` guard at line 85 (verified by codebase audit 2026-04-29).
+2. The poll body unchanged — it already calls `priceClient.GetPrice(ctx, chain, token)` and applies `position.EvaluateExit(...)`.
+
+### Adapter Calls
+
+**None new.** `ListOpenPositionsForReconciliation` (Phase 8) and `UpdatePositionPriceObservation` (existing) are reused.
+
+### Wiring (cmd/server.go)
+
+```go
+// BEFORE: nil price client → silent disablement of all TP/SL logic
+workers.RunPositionPoll(ctx, db, cfg, nil, logger)
+
+// AFTER: chain-resolved price client; TP/SL fires for real
+priceClient := rpc.NewPriceClientForChain(activeChain, cfg, solanaRPCClient, evmClient)
+workers.RunPositionPoll(ctx, db, cfg, priceClient, logger)
+```
+
+### Per-Chain Implementation
+
+| Chain  | Implementation              | RPC method                                                                                           |
+| ------ | --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| ETH    | `EVMReservePriceFetcher`    | `getAmountsOut(uniRouter, 1e18, [token, WETH])` → token price in WETH; multiply by ETH/USD           |
+| BSC    | `EVMReservePriceFetcher`    | `getAmountsOut(pancakeRouter, 1e18, [token, WBNB])`                                                  |
+| Solana | `SolanaReservePriceFetcher` | `getAccountInfo(poolAddress)` → decode AMM layout (Raydium / PumpFun) → `reserveBase / reserveToken` |
+
+The factory in `price_oracle_factory.go` resolves the right implementation by chain string (closes GAP-17 partially — sufficient for the three Phase 9 chains).
+
+### Failure Handling
+
+| Failure                            | Behavior                                                                                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RPC timeout per price fetch        | Skip this poll cycle for the position; on `consecutive_failures ≥ price_failure_threshold`, emit `position_event` with `Reason=price_feed_unavailable` and `level=warn` |
+| Native-token price stale           | Use last-known price up to `native_price_max_stale_sec`; beyond that, halt new TP/SL evaluations until refresh                                                          |
+| Pool drained between polls         | Reserve = 0 → emergency `IsRug=true` exit signal → trigger SL with `Reason=pool_drained`                                                                                |
+| Decode error on Solana pool layout | Increment `position_decode_errors_total`; treat as `Indeterminate`; do not fire TP/SL on this cycle                                                                     |
+
+### Hot-Path Performance Constraints
+
+- Polling cadence configurable per-chain (`config/pipeline.yaml position_poll_interval_ms`) — typical 500–1000 ms
+- Price fetch p95 ≤ `price_fetch_timeout_ms` (default 500 ms)
+- Per-cycle wall budget: `max_open_positions × price_fetch_timeout_ms × 1.2` — exceeded → emit `system_event level=warn` and reduce poll concurrency
+
+### Test Cases (mandatory)
+
+- **Unit:** TP1 trigger fires when observed price ≥ entry × `tp1_multiplier`
+- **Unit:** SL trigger fires when observed price ≤ entry × `sl_multiplier`
+- **Unit:** Trail trigger fires after peak draws back by `trail_drawdown_bps`
+- **Unit:** RPC timeout → no false trigger; position remains open
+- **Integration:** Solana fixture pool — price decoded correctly within `price_fetch_timeout_ms`
+- **Integration:** EVM fixture (mainnet fork) — TP1 fires at expected price level
+- **Integration:** wire-up smoke — start `cmd/server` with `chain=eth`; verify `priceClient != nil` at boot via log line
+
+### Exit Criteria
+
+- [ ] `priceClient != nil` is asserted at `cmd/server.go` boot for all three chains
+- [ ] Over a 1h testnet replay, ≥ 80 % of position exits are due to TP/SL/Trail triggers (not `time_max_hold`)
+- [ ] Zero `priceClient == nil` early returns remain in `run_position_poll.go`
+- [ ] Realized PnL distribution shows non-trivial right tail (TP captures actual pumps), proving exit logic fires
+- [ ] No detected runaway-poll incidents over 24h replay (worker stays within wall budget)
+
+---
+
+## 9.6 Learning Engine — Real Signals
+
+**Closes:** GAP-14 / cascading from GAP-03. **Layer 10.** **All chains.**
+
+### Objective
+
+The learning stack (`updater.go`, `ab_promoter.go`, `shadow_recorder.go`, `evaluator.go`) is correctly implemented (Phase 5). Its inputs were stubs — every `LearningRecord` carried a `FeatureDTO` with five `0.5`s. Once Phase 9 § 9.2 is complete, the inputs are real; this subsection ensures the learning loop **uses** that real input correctly.
+
+### Files
+
+```
+internal/modules/learning/
+├── updater.go                 // existing — verify cohort grouping uses real features
+├── feature_importance.go      // NEW — per-feature contribution tracking
+├── cohort_performance.go      // NEW — per-cohort PnL stats
+└── learning_test.go           // expand: cohort divergence test, feature-importance correctness
+```
+
+### DTO Flow
+
+`LearningRecordDTO` (Phase 5) is unchanged — it already carries the full `FeatureDTO`. Phase 9 changes only what flows _into_ the record (real features instead of stubs) and what the updater extracts from it.
+
+### Worker
+
+No new worker. `internal/workers/run_updater.go` continues to operate. Phase 9 changes:
+
+- Cohort centroid calculation now uses real feature variance (not collapsed to `[0.5, 0.5, 0.5, 0.5, 0.5]`)
+- Feature-importance metric computed per cycle and emitted as `system_event level=info` for observability
+- Per-cohort PnL aggregation now meaningful (cohorts have distinct centroids)
+
+### Adapter Calls
+
+**None new.** All existing learning queries from Phase 5 are reused.
+
+### Configuration Tightening
+
+`config/pipeline.yaml learning` adjustments (per `docs/PROFITABILITY_GAPS.md` § GAP-14):
+
+- `min_samples_for_update` raised from current default to `≥ 50`
+- Per-cohort multiplier updates **enabled** in `LearningConfig.UpdateCohortMultipliers=true`
+- `ShadowRecorder.RecordRejection()` is verified wired (FN tracking required)
+
+### Failure Handling
+
+| Failure                                             | Behavior                                                                         |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Insufficient samples (`N < min_samples`)            | Skip update; emit `system_event level=info`, `Reason=insufficient_samples`       |
+| Cohort centroid degenerate (all features identical) | Skip cohort update, emit warning; avoids learning noise from regression in § 9.2 |
+| Feature-importance fit fails (singular matrix)      | Skip importance emission for this cycle; no impact on threshold updates          |
+
+### Test Cases (mandatory)
+
+- **Unit:** synthetic 50-record cohort with real feature variance → centroid is non-degenerate (`stddev > 0.1` across features)
+- **Unit:** sample count below threshold → no update emitted
+- **Unit:** feature-importance computation given known correlation → top-1 feature matches expected
+- **Integration:** 24h replay with Phase 9 § 9.2 active → at least 2 cohort groups with materially different PnL means (`|μ1 − μ2| > 5 % of base size`)
+- **Integration:** A/B promotion gate fires correctly with real-feature `expectancy` calculation
+
+### Exit Criteria
+
+- [ ] No `LearningRecordDTO` in a 1h replay carries a `FeatureDTO` with `[0.5, 0.5, 0.5, 0.5, 0.5]` payload (regression on § 9.2)
+- [ ] Cohort centroids show meaningful variance (`stddev across cohorts > 0.15` for at least 3 features)
+- [ ] Feature-importance ranking is stable across two consecutive 24h windows (Spearman ρ ≥ 0.7) — proof that learning is converging, not flailing
+- [ ] At least 1 successful A/B promotion in a 7-day testnet window (compounding adaptation observable)
+- [ ] False-negative tracking: `shadow_trades` table contains at least 1000 rows after a 24h replay
+
+---
+
+## 9.7 New / Updated Workers Summary
+
+> Per § 0.6, **no new event types are introduced.** The "new workers" listed in the original brief are clarified below — most are **enhancements to existing workers**, not new dispatchers. Phase 9 keeps the worker topology unchanged.
+
+| Worker File                             | Status                   | Phase 9 Change                                                 |
+| --------------------------------------- | ------------------------ | -------------------------------------------------------------- |
+| `internal/workers/run_data_quality.go`  | **enhanced** (Phase 2)   | Inject EVM/Solana RPC simulators + detector cache              |
+| `internal/workers/run_features.go`      | **enhanced** (Phase 2)   | Inject RPC clients + Sync-event cache + signal normalizer      |
+| `internal/workers/run_validation.go`    | **enhanced** (Phase 2/4) | Wire `probDTO.Probability` into EV gate; add fallback path     |
+| `internal/workers/run_capital.go`       | **enhanced** (Phase 2)   | Replace fixed size with Kelly-adjacent dynamic formula         |
+| `internal/workers/run_position_poll.go` | **enhanced** (Phase 2)   | Remove `priceClient == nil` early return; wire real price feed |
+| `internal/workers/run_updater.go`       | **enhanced** (Phase 5)   | Cohort centroid + feature-importance aggregation               |
+
+**No new worker files** are added in Phase 9.
+
+---
+
+## 9.8 Configuration Additions
+
+Phase 9 adds **four** dedicated config files under `config/`. All thresholds, timeouts, weights, and multipliers live here — never hardcoded in module code. See § 0.5.
+
+```
+config/
+├── data_quality.yaml          // NEW — detector timeouts, TTLs, thresholds
+├── feature.yaml               // NEW — per-feature windows, normalization, defaults
+├── probability.yaml           // NEW — model confidence threshold, fallback rules
+└── capital.yaml               // NEW — Kelly cap, mode multipliers, exploration band
+```
+
+Existing `config/chains.yaml` gains a per-chain `data_quality` block (closes GAP-16 partially) — additive, never removes existing keys.
+
+---
+
+## 9.9 Performance Constraints (whole-phase)
+
+| Subsystem        | Hot-path budget (p95)               | Mechanism                                                                           |
+| ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
+| DQ detectors     | ≤ `detector_timeout_ms` (800 ms)    | `errgroup` concurrent detection; bounded LRU cache; per-detector context timeout    |
+| Feature compute  | ≤ `feature_timeout_ms` (500 ms)     | Concurrent `errgroup`; in-memory Sync-event ring buffer; chunked `eth_getLogs` walk |
+| Probability join | ≤ `prob_join_timeout_ms` (200 ms)   | Fall back to prior on miss; never block validation indefinitely                     |
+| Capital sizing   | ≤ 5 ms                              | Pure in-memory math; no I/O                                                         |
+| Position price   | ≤ `price_fetch_timeout_ms` (500 ms) | Per-position context timeout; cycle wall budget cap                                 |
+| Learning update  | Periodic (1 min cadence)            | Off-hot-path; no impact on per-trade latency                                        |
+
+> **Rule:** No Phase 9 change may regress the Phase 6 SLO `executed_trade_latency_p95 < 1500 ms`. Verified by load test in § 9.10 exit criteria.
+
+---
+
+## 9.10 Phase 9 Exit Criteria (Master Gate)
+
+Phase 9 is **complete** only when **all** of the following hold simultaneously over a continuous 24h replay window:
+
+- [ ] **DataQuality factor** — average `RiskScore` distribution variance `> 0.1`; honeypot fixtures rejected at L1 in 100 % of replays; combined `DataQuality` profit-factor estimate ≥ 0.65 (up from 0.10)
+- [ ] **Feature completeness** — zero `FeatureDTO` in 1h with `[0.5, 0.5, 0.5, 0.5, 0.5]` stub payload; `LiquidityUsdRaw > 0` for ≥ 99 % of features; combined `Features` profit-factor ≥ 0.70 (up from 0.30)
+- [ ] **Probability not constant** — `validation_event` accepted-probability distribution `stddev > 0.10`; Brier score of accepted-vs-realized ≤ 0.27; fallback rate ≤ 5 %
+- [ ] **Capital dynamic** — `AllocationDTO.SizeUsd` over 200 fixtures shows `stddev > 30 %` of mean; mode-multiplier effect observable (STRICT ≈ 0.5× BALANCED); exploration band respected
+- [ ] **TP/SL working** — ≥ 80 % of position exits in a 1h replay are TP/SL/Trail (not `max_hold_seconds`); no `priceClient == nil` paths reachable; realized PnL right-tail observable
+- [ ] **Learning improving** — cohort centroid variance `> 0.15`; feature-importance Spearman ρ ≥ 0.7 across two consecutive 24h windows; ≥ 1 successful A/B promotion in 7-day testnet window
+- [ ] **No architecture drift** — `git diff main..phase-9 -- contracts/` shows only additive changes; `git diff main..phase-9 -- database/adapter.go` is empty; `git diff main..phase-9 -- docs/architecture.md` is non-substantive (Phase-9 status note only)
+- [ ] **No SLO regression** — `executed_trade_latency_p95 < 1500 ms` holds (Phase 6 invariant)
+- [ ] **Test coverage** — every detector, every feature, every fallback branch has at least one unit test; integration suite covers the 6 critical fixtures (honeypot, legit token, RPC timeout, low confidence, exploration, real exit)
+- [ ] **Replay determinism preserved** — Phase 8 § 8.5 replay validation CI gate remains green with all Phase 9 changes merged
+
+> **Decision rule:** if any single bullet fails, Phase 9 is incomplete. There is no partial pass — Phase 9 closes the safety multiplier and signal-quality multipliers simultaneously, and a failure in either re-introduces the pre-Phase-9 unprofitability.
+
+---
 
 > All items must be checked before routing real capital on mainnet. Each item references the phase that introduces the requirement and has a deterministic pass/fail test.
 

@@ -3,6 +3,7 @@ package ingestion_solana_test
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -271,8 +272,8 @@ func TestNormalizeRaydiumPoolInit_WrongDiscriminator(t *testing.T) {
 
 func TestModuleStartNoop_NoClient(t *testing.T) {
 	cfg := config.SolanaConfig{
-		ChainID:  "solana",
-		Programs: []config.SolanaProgramConfig{{ProgramID: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", Family: "pumpfun"}},
+		ChainID:          "solana",
+		Programs:         []config.SolanaProgramConfig{{ProgramID: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", Family: "pumpfun"}},
 		IngestionBackoff: config.IngestionBackoff{InitialMs: 100, MaxMs: 1000, Multiplier: 2.0},
 	}
 
@@ -314,14 +315,19 @@ func TestModuleStart_EmitsPumpFunCreate(t *testing.T) {
 
 	client := &mockSolanaClient{
 		notifications: []ingestion_solana.LogsNotification{
-			{Signature: sig, Slot: 50000},
+			// Logs must contain "Instruction: Create" or the pre-filter drops it.
+			{
+				Signature: sig,
+				Slot:      50000,
+				Logs:      []string{"Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]", "Program log: Instruction: Create"},
+			},
 		},
 		txMap: map[string]*ingestion_solana.TransactionResult{sig: tx},
 	}
 
 	cfg := config.SolanaConfig{
-		ChainID:  "solana",
-		Programs: []config.SolanaProgramConfig{{ProgramID: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", Family: "pumpfun"}},
+		ChainID:          "solana",
+		Programs:         []config.SolanaProgramConfig{{ProgramID: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", Family: "pumpfun"}},
 		IngestionBackoff: config.IngestionBackoff{InitialMs: 100, MaxMs: 1000, Multiplier: 2.0},
 	}
 
@@ -362,5 +368,77 @@ func TestEventID_Derivation(t *testing.T) {
 		if len(expected) != 16 {
 			t.Errorf("ContentIDFromString returned %d chars, want 16", len(expected))
 		}
+	}
+}
+
+func TestShouldFetchTransaction_PumpFun(t *testing.T) {
+	prog := config.SolanaProgramConfig{ProgramID: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", Family: "pumpfun"}
+
+	cases := []struct {
+		name      string
+		logs      []string
+		wantFetch bool
+	}{
+		{"create instruction", []string{"Program log: Instruction: Create"}, true},
+		{"create with other logs", []string{"Program invoke [1]", "Program log: Instruction: Create", "Program success"}, true},
+		{"buy instruction", []string{"Program log: Instruction: Buy"}, false},
+		{"sell instruction", []string{"Program log: Instruction: Sell"}, false},
+		{"empty logs", []string{}, false},
+		{"nil logs", nil, false},
+		{"unrelated log", []string{"Program log: something else"}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			notif := ingestion_solana.LogsNotification{Logs: tc.logs}
+			got := ingestion_solana.ShouldFetchTransaction(notif, prog)
+			if got != tc.wantFetch {
+				t.Errorf("ShouldFetchTransaction = %v, want %v", got, tc.wantFetch)
+			}
+		})
+	}
+}
+
+func TestShouldFetchTransaction_Raydium(t *testing.T) {
+	// Raydium V4 is not Anchor — always return true regardless of logs.
+	prog := config.SolanaProgramConfig{ProgramID: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", Family: "raydium-v4"}
+
+	cases := []struct {
+		name string
+		logs []string
+	}{
+		{"no logs", nil},
+		{"swap logs", []string{"Program log: some swap log"}},
+		{"init logs", []string{"Program log: initialize"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			notif := ingestion_solana.LogsNotification{Logs: tc.logs}
+			if !ingestion_solana.ShouldFetchTransaction(notif, prog) {
+				t.Error("raydium-v4 should always return true from ShouldFetchTransaction")
+			}
+		})
+	}
+}
+
+func TestIsRateLimitError(t *testing.T) {
+	cases := []struct {
+		name      string
+		errMsg    string
+		wantMatch bool
+	}{
+		{"rate limit", "solana_client: getTransaction: rpc error -32003: daily request limit reached", true},
+		{"network error", "connection refused", false},
+		{"other rpc error", "rpc error -32600: invalid request", false},
+		{"nil-ish wrapper", "-32003", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("%s", tc.errMsg)
+			got := ingestion_solana.IsRateLimitError(err)
+			if got != tc.wantMatch {
+				t.Errorf("IsRateLimitError(%q) = %v, want %v", tc.errMsg, got, tc.wantMatch)
+			}
+		})
 	}
 }

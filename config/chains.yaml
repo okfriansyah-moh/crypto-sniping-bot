@@ -95,6 +95,13 @@ solana:
       family: raydium-v4
     - program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
       family: pumpfun
+  # getTransaction HTTP rate cap — must be ≤ RPC provider account limit.
+  # QuickNode free tier = 15 req/s; lowered to 2 to stay within daily quota.
+  # At 2 req/s the daily usage is ~172k calls — well under free-tier daily caps.
+  get_transaction_rps: 2
+  # rate_limit_backoff_ms: how long to suppress getTransaction calls after a
+  # -32003 daily-quota error. Default 60s; increase if quota resets take longer.
+  rate_limit_backoff_ms: 60000
   ingestion_backoff:
     initial_ms: 200
     max_ms: 30000

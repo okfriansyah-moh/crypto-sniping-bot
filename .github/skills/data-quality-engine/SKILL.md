@@ -263,6 +263,29 @@ Shadow trades table: database schema tracks rejected tokens' subsequent price ac
 
 ---
 
+## Phase 9 Notes (Profitability Restoration)
+
+Per `docs/implementation_roadmap.md` § 9.1, Phase 9 closes **GAP-01** by replacing the
+five hardcoded `false` flags in `internal/modules/data_quality/data_quality.go` with
+real RPC-backed detectors. This skill is the canonical reference for that work.
+
+**Phase 9 mandates:**
+
+- Detector inventory MUST be implemented per chain (EVM/Solana) per the table in § 9.1
+- All detectors run concurrently via `errgroup` with per-detector context timeout `detector_timeout_ms` (default 800 ms from `config/data_quality.yaml`)
+- LRU cache (`detector_cache.go`) keyed by `(chain, token_address, detector_name)` with per-detector TTL
+- RPC timeout → `Indeterminate` flag → treated as risky-pass (never as safe)
+- Module remains DB-free; RPC clients (`evm_simulator`, `solana_simulator`) injected at worker construction
+- Honeypot fixtures MUST be rejected at L1 in 100 % of replays (Phase 9 exit criterion)
+- DQ wall-time p95 ≤ `detector_timeout_ms × 1.1` (concurrent budget)
+- Cache hit ratio ≥ 60 % over 24h replay (bounded RPC pressure)
+
+**Files added in Phase 9:** `honeypot.go`, `tax_detector.go`, `lp_lock.go`,
+`rug_authority.go`, `contract_verified.go`, `detector_cache.go`, plus
+`internal/rpc/{evm_simulator.go, solana_simulator.go}`.
+
+---
+
 ## References
 
 - Architecture: `docs/architecture.md` § 3.1 (Data Quality Engine)

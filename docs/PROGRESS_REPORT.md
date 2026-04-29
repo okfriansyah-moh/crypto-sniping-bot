@@ -9,29 +9,30 @@
 
 | Metric           | Value      |
 | ---------------- | ---------- |
-| **Total Phases** | 10         |
+| **Total Phases** | 11         |
 | **Completed**    | 11         |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 0          |
-| **Last Updated** | 2026-04-27 |
+| **Not Started**  | 1          |
+| **Last Updated** | 2026-04-29 |
 
 ---
 
 ## Phase Progress
 
-| Phase | Name                       | Status    | Retry Count | Notes                                                                                                                                                                                                                                                                     |
-| ----- | -------------------------- | --------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Core Infrastructure        | completed | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean.                                                                                                                                |
-| 1     | Detection & Ingestion      | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
-| 2     | Pipeline Core              | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
-| 3     | Evaluation Correctness     | completed | 0           | Mandatory CAS, evaluation worker, state_machine, traceability, circuit_breaker, fee-bump, Telegram dispatcher+commands, migration 000008                                                                                                                                  |
-| 4     | Probability Models         | completed | 0           | Logistic probability model, bucket-based slippage, rolling-window latency profiles; new workers (probability, slippage, latency); validation worker now consumes model estimates with prior fallback; additive DQ/feature/edge detector helpers; tests + build/vet clean. |
-| 5     | Learning Engine            | completed | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass.                                                                                                                           |
-| 6     | Observability & Risk       | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
-| —     | Production Hardening       | completed | 0           | 8 critical/significant/moderate fixes: C4 CAS bypass, C2 circuit-breaker wiring, C3 hardcoded ETH price, S4 hardcoded gas limit, S6 hardcoded poll timeouts, C1 wallet sharding, S3 double MarkEventProcessed, M1 unstructured logging. Build/vet/all-30-packages clean.  |
-| 7     | Solana Market              | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
-| 8     | Final Production Hardening | completed | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| Phase | Name                       | Status      | Retry Count | Notes                                                                                                                                                                                                                                                                     |
+| ----- | -------------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Core Infrastructure        | completed   | 0           | DB adapter, event bus, migrations, orchestrator, worker loop, StrategyVersion pin, DTO contracts; 12 PR items fixed; build/vet/test clean.                                                                                                                                |
+| 1     | Detection & Ingestion      | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| 2     | Pipeline Core              | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| 3     | Evaluation Correctness     | completed   | 0           | Mandatory CAS, evaluation worker, state_machine, traceability, circuit_breaker, fee-bump, Telegram dispatcher+commands, migration 000008                                                                                                                                  |
+| 4     | Probability Models         | completed   | 0           | Logistic probability model, bucket-based slippage, rolling-window latency profiles; new workers (probability, slippage, latency); validation worker now consumes model estimates with prior fallback; additive DQ/feature/edge detector helpers; tests + build/vet clean. |
+| 5     | Learning Engine            | completed   | 0           | Shadow trades, FP/FN classifier, evaluator, updater, A/B promoter, rollback watchdog, opportunity monitor; 21 unit tests; all 14 packages pass.                                                                                                                           |
+| 6     | Observability & Risk       | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| —     | Production Hardening       | completed   | 0           | 8 critical/significant/moderate fixes: C4 CAS bypass, C2 circuit-breaker wiring, C3 hardcoded ETH price, S4 hardcoded gas limit, S6 hardcoded poll timeouts, C1 wallet sharding, S3 double MarkEventProcessed, M1 unstructured logging. Build/vet/all-30-packages clean.  |
+| 7     | Solana Market              | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| 8     | Final Production Hardening | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
+| 9     | Profitability Restoration  | not-started | 0           | Closes GAP-01/02/03/04/05/14 from `docs/PROFITABILITY_GAPS.md`. Internal-to-module fixes only — no new layers, no new DTOs, no adapter changes. Docs+configs+skills scaffolded; Go implementation deferred to phase-builder agent. Mandatory before mainnet capital.      |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 

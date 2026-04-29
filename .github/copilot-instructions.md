@@ -401,7 +401,8 @@ Skills are pre-digested knowledge packages that agents load on-demand. They live
 ├── strategy-auto-disable/SKILL.md    # 5-trigger lifecycle: probation→active→disabled→review
 ├── monitoring-loop-engine/SKILL.md   # Price-driven position poll loop, kill switch first
 ├── exposure-monitor/SKILL.md         # 80% portfolio cap, 20 positions, 0.5% single limit gate
-└── signal-normalizer/SKILL.md        # Z-score + sigmoid two-stage normalization to [-1,+1]
+├── signal-normalizer/SKILL.md        # Z-score + sigmoid two-stage normalization to [-1,+1]
+└── price-feed-integration/SKILL.md   # Live price feed (EVM getAmountsOut + Solana AMM decode), GAP-02
 ```
 
 ### Skill Loading Rules

@@ -1,0 +1,84 @@
+# Feature Extraction — Phase 9 (Profitability Restoration § 9.2)
+# ─────────────────────────────────────────────────────────────────
+# Real on-chain feature computation configuration.
+# Closes GAP-03 from docs/PROFITABILITY_GAPS.md.
+# Replaces 5/8 hardcoded `0.5` stubs with real signals.
+# ─────────────────────────────────────────────────────────────────
+
+feature:
+  # ── Per-feature compute timeout ───────────────────────────────
+  feature_timeout_ms: 500
+
+  # ── Sync-event ring buffer (per pool) ─────────────────────────
+  # Prevents repeated eth_getLogs calls for momentum/velocity computation.
+  sync_cache:
+    size_per_pool: 200
+    eviction_strategy: "ring_buffer" # FIFO; oldest dropped first
+    refresh_on_new_swap: true
+
+  # ── tx_velocity_score ─────────────────────────────────────────
+  tx_velocity:
+    window_sec: 30
+    swap_count_normalize_high: 50 # ≥ this → score 1.0
+    swap_count_normalize_low: 0 # 0 swaps → score 0.0
+    confidence_target: 0.85
+
+  # ── wallet_entropy ────────────────────────────────────────────
+  wallet_entropy:
+    recent_swaps_window: 50
+    confidence_target: 0.85
+    cold_start_default: 0.0
+    cold_start_confidence: 0.4
+
+  # ── token_age ─────────────────────────────────────────────────
+  token_age:
+    # Normalized via piecewise function: < 30s → 0.2, 30-300s → 1.0, > 300s → 0.6
+    too_new_threshold_sec: 30
+    sweet_spot_min_sec: 30
+    sweet_spot_max_sec: 300
+    confidence_target: 0.95
+
+  # ── volume_momentum ───────────────────────────────────────────
+  volume_momentum:
+    short_window_sec: 30
+    long_window_sec: 300 # 5 min rolling avg
+    cold_start_default: 0.0
+    cold_start_confidence: 0.4
+    confidence_target: 0.75
+
+  # ── price_momentum ────────────────────────────────────────────
+  price_momentum:
+    sync_event_pair_min: 2 # need ≥ 2 Sync events to compute delta
+    cold_start_default: 0.0
+    cold_start_confidence: 0.4
+    confidence_target: 0.75
+
+  # ── liquidity_usd_raw ─────────────────────────────────────────
+  liquidity_usd:
+    # Native-token (ETH/BNB/SOL) USD price source
+    native_price_ttl_sec: 60
+    native_price_max_stale_sec: 300
+    confidence_target: 0.90
+    on_stale_default: 0.0
+    on_stale_confidence: 0.20
+
+  # ── eth_getLogs walk policy (EVM) ─────────────────────────────
+  eth_getlogs:
+    chunk_blocks: 5
+    max_walk_blocks: 200 # cap walk-back distance
+
+  # ── Normalization (delegated to signal-normalizer skill) ──────
+  # All raw signals MUST go through Z-score → sigmoid before assignment.
+  # This block is informational; the normalizer reads its own config from
+  # signal-normalizer skill defaults. Override here if needed.
+  normalization:
+    use_zscore: true
+    use_sigmoid: true
+    sigmoid_steepness: 1.0 # k in 1/(1+exp(-k*z))
+    zscore_min_samples: 20
+
+  # ── Aggregate Confidence ──────────────────────────────────────
+  # FeatureDTO.Confidence.Aggregate = mean(per-feature confidences) clamped to [0, 1]
+  confidence_aggregate:
+    method: "mean"
+    min_features_required: 4 # < this → Aggregate = 0.3 (cold start)

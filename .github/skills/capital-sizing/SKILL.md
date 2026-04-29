@@ -340,6 +340,39 @@ func CheckCorrelationLimit(
 
 ---
 
+## Phase 9 Notes (Profitability Restoration)
+
+Per `docs/implementation_roadmap.md` § 9.4, Phase 9 closes **GAP-05** by replacing the
+fixed `cfg.FixedEntrySizeUsd = $50` constant with a Kelly-adjacent edge-proportional
+sizing function. Configuration lives in `config/capital.yaml`.
+
+**Phase 9 mandates:**
+
+```
+f_kelly = clamp((P × R − (1−P)) / R, 0, kelly_cap)
+   where R = PriorGainBps / PriorLossBps
+         P = probDTO.Probability   (joined from probability_event)
+
+size_raw   = base_size_usd × f_kelly × confidence × cohort_multiplier × mode_multiplier
+size_final = clamp(size_raw, min_size_usd, max_size_usd)
+```
+
+- **Mode multipliers** (from `config/capital.yaml`): STRICT 0.5×, BALANCED 1.0×, EXPLORATION 1.3×
+- **Exploration band**: when `SelectionOutputDTO.IsExploration=true`, allocate 1–5 % of total capital regardless of edge score (intentional FN-frontier probing per architecture § 7)
+- **Kelly cap**: `kelly_cap` (0.25 default), tightened to `kelly_cap_exploration` (0.05) during EXPLORATION mode
+- **Confidence floor**: `Aggregate < min_aggregate_confidence` (0.40) → reject allocation
+- **Negative Kelly**: `f_kelly < 0` (negative EV pre-clamp) → reject with `Reason=negative_kelly`
+- **Mode lookup stale**: if `SystemStateDTO.Mode` older than `mode_freshness_sec` → default to BALANCED
+- **Phase 6 envelope caps remain in force** — dynamic sizing applies BEFORE the four envelope rejections; all Phase 6 contracts preserved (regression check in exit criteria)
+
+**Phase 9 exit criterion:** `SizeUsd` over 200 fixtures shows `stddev > 30 %` of mean;
+mode-multiplier effect observable (STRICT mean ≈ 0.5 × BALANCED mean within ±10 %).
+
+**Files added in Phase 9:** `kelly.go`, `cohort_multiplier.go`, `mode_multiplier.go`,
+`exploration_band.go`.
+
+---
+
 ## References
 
 - Architecture context: `docs/architecture-context/9_capital_engine.md`

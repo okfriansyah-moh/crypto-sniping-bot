@@ -15,7 +15,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"crypto-sniping-bot/contracts"
@@ -58,12 +60,12 @@ type LogsNotification struct {
 
 // TransactionResult holds the decoded transaction data needed for normalization.
 type TransactionResult struct {
-	Signature        string
-	Slot             uint64
-	BlockTime        int64  // Unix timestamp
-	Instructions     []InstructionData
-	AccountKeys      []string
-	RecentBlockhash  string
+	Signature       string
+	Slot            uint64
+	BlockTime       int64 // Unix timestamp
+	Instructions    []InstructionData
+	AccountKeys     []string
+	RecentBlockhash string
 }
 
 // InstructionData holds a single instruction's program ID, accounts, and data.
@@ -85,6 +87,11 @@ type Module struct {
 
 	mu     sync.Mutex
 	stopFn context.CancelFunc
+
+	// rateLimitUntil is the Unix-nano deadline before which GetTransaction calls
+	// are suppressed after receiving an RPC -32003 rate-limit error.
+	// Zero means no active backoff.
+	rateLimitUntil atomic.Int64
 }
 
 // New creates a Module ready to Start.
@@ -185,6 +192,11 @@ func (m *Module) runProgramLoop(ctx context.Context, prog config.SolanaProgramCo
 	}
 }
 
+// solanaHeartbeatInterval controls how often the ingestion loop logs an
+// INFO-level throughput summary. Visible at LOG_LEVEL=info so operators
+// can confirm events are flowing even when no qualifying creates appear.
+const solanaHeartbeatInterval = 60 * time.Second
+
 // runSubscribeLoop opens a single logsSubscribe session and processes events.
 func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgramConfig) error {
 	notifs, err := m.client.SubscribeLogs(ctx, prog.ProgramID)
@@ -192,22 +204,63 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 		return fmt.Errorf("subscribe_logs: %w", err)
 	}
 
+	var totalNotifs, failedTx, emitted atomic.Int64
+	// Breakdown counters — shown in every heartbeat so operators know exactly
+	// where notifications go instead of seeing only events_emitted=0.
+	var nilTx, normalizeSkip, noInstrMatch, processErrors atomic.Int64
+	// logFilterSkip counts notifications dropped by the log pre-filter (no RPC call made).
+	var logFilterSkip atomic.Int64
+	// rateLimitSkip counts notifications skipped during an active rate-limit backoff.
+	var rateLimitSkip atomic.Int64
+	// sampleSeq is incremented for every successfully-fetched notification
+	// and used to gate 1-in-sampleRate INFO log lines.
+	var sampleSeq atomic.Int64
+
+	heartbeat := time.NewTicker(solanaHeartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+
+		case <-heartbeat.C:
+			m.logger.Info("solana_ingestion_heartbeat",
+				"program", prog.ProgramID,
+				"family", prog.Family,
+				"notifications_received", totalNotifs.Load(),
+				"failed_tx", failedTx.Load(),
+				"log_filter_skip", logFilterSkip.Load(),
+				"rate_limit_skip", rateLimitSkip.Load(),
+				"nil_tx", nilTx.Load(),
+				"no_instr_match", noInstrMatch.Load(),
+				"normalize_skip", normalizeSkip.Load(),
+				"process_errors", processErrors.Load(),
+				"events_emitted", emitted.Load(),
+			)
+
 		case notif, ok := <-notifs:
 			if !ok {
 				return fmt.Errorf("subscription channel closed")
 			}
+			totalNotifs.Add(1)
 			if notif.Err != nil {
+				failedTx.Add(1)
 				m.logger.Debug("solana_ingestion_failed_tx",
 					"signature", notif.Signature,
 					"slot", notif.Slot,
 				)
 				continue
 			}
-			if err := m.processNotification(ctx, notif, prog); err != nil {
+			// Log pre-filter: skip GetTransaction if log content makes it clear
+			// this notification is not a pool-init/create instruction.
+			if !ShouldFetchTransaction(notif, prog) {
+				logFilterSkip.Add(1)
+				continue
+			}
+			seq := sampleSeq.Add(1)
+			if err := m.processNotification(ctx, notif, prog, seq, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip); err != nil {
+				processErrors.Add(1)
 				m.logger.Warn("solana_ingestion_process_error",
 					"signature", notif.Signature,
 					"error", err,
@@ -217,20 +270,74 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 	}
 }
 
+// solanaLogSampleRate controls how often activity is sampled to INFO.
+// Every sampleRate-th successfully-fetched notification produces one INFO line
+// so operators see real traffic without log flooding.
+const solanaLogSampleRate int64 = 100
+
 // processNotification fetches the full transaction and emits DTOs.
-func (m *Module) processNotification(ctx context.Context, notif LogsNotification, prog config.SolanaProgramConfig) error {
+// seq is the monotonically increasing counter used for 1-in-sampleRate sampling.
+func (m *Module) processNotification(
+	ctx context.Context,
+	notif LogsNotification,
+	prog config.SolanaProgramConfig,
+	seq int64,
+	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip *atomic.Int64,
+) error {
+	// Circuit breaker: skip GetTransaction during an active rate-limit backoff.
+	if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
+		rateLimitSkip.Add(1)
+		return nil
+	}
+
 	tx, err := m.client.GetTransaction(ctx, notif.Signature)
 	if err != nil {
+		if IsRateLimitError(err) {
+			backoff := rateLimitBackoff(m.cfg)
+			until := time.Now().Add(backoff).UnixNano()
+			m.rateLimitUntil.Store(until)
+			rateLimitSkip.Add(1)
+			m.logger.Warn("solana_rate_limit_backoff",
+				"family", prog.Family,
+				"backoff_s", int(backoff.Seconds()),
+				"note", "getTransaction quota exhausted; suppressing calls until backoff expires",
+			)
+			return nil
+		}
 		return fmt.Errorf("get_transaction %s: %w", notif.Signature, err)
 	}
 	if tx == nil {
-		return nil // not yet finalized at commitment
+		// Transaction not yet at commitment level — normal for confirmed vs finalized.
+		nilTx.Add(1)
+		if seq%solanaLogSampleRate == 0 {
+			m.logger.Info("solana_tx_sample",
+				"family", prog.Family,
+				"signature", notif.Signature,
+				"slot", notif.Slot,
+				"result", "nil_tx",
+				"note", "1-in-100 sample: tx not yet at commitment",
+			)
+		}
+		return nil
 	}
 
+	if seq%solanaLogSampleRate == 0 {
+		m.logger.Info("solana_tx_sample",
+			"family", prog.Family,
+			"signature", notif.Signature,
+			"slot", tx.Slot,
+			"instructions", len(tx.Instructions),
+			"result", "fetched",
+			"note", "1-in-100 sample",
+		)
+	}
+
+	instrMatched := 0
 	for _, instr := range tx.Instructions {
 		if instr.ProgramID != prog.ProgramID {
 			continue
 		}
+		instrMatched++
 		var dto *contracts.MarketDataDTO
 		var normErr error
 
@@ -243,12 +350,24 @@ func (m *Module) processNotification(ctx context.Context, notif LogsNotification
 			continue
 		}
 		if normErr != nil {
+			normalizeSkip.Add(1)
 			m.logger.Debug("solana_ingestion_normalize_skip",
 				"family", prog.Family,
 				"signature", notif.Signature,
 				"instr_index", instr.Index,
 				"reason", normErr,
 			)
+			if seq%solanaLogSampleRate == 0 {
+				// Sampled visibility: tells operator most skips are swaps, not bugs.
+				m.logger.Info("solana_tx_sample",
+					"family", prog.Family,
+					"signature", notif.Signature,
+					"instr_index", instr.Index,
+					"result", "normalize_skip",
+					"reason", normErr,
+					"note", "1-in-100 sample: most skips are swaps, not pool-inits/creates",
+				)
+			}
 			continue
 		}
 		if dto == nil {
@@ -258,11 +377,63 @@ func (m *Module) processNotification(ctx context.Context, notif LogsNotification
 		if err := m.emit(ctx, *dto); err != nil {
 			return fmt.Errorf("emit %s: %w", dto.EventID, err)
 		}
-		m.logger.Debug("solana_ingestion_emitted",
+		emitted.Add(1)
+		m.logger.Info("solana_ingestion_emitted",
 			"event_id", dto.EventID,
 			"market", dto.Market,
 			"token", dto.TokenAddress,
+			"symbol", dto.Symbol,
+			"name", dto.Name,
+			"tx", notif.Signature,
+			"slot", notif.Slot,
 		)
 	}
+	if instrMatched == 0 {
+		noInstrMatch.Add(1)
+	}
 	return nil
+}
+
+// ShouldFetchTransaction returns false when the notification log content makes
+// it certain the transaction is NOT a pool-init or token-create instruction,
+// allowing the module to skip the GetTransaction RPC call entirely.
+//
+// PumpFun is an Anchor program that logs the instruction name verbatim:
+//
+//	"Program log: Instruction: Create"   → pool/token creation (fetch)
+//	"Program log: Instruction: Buy"      → swap (skip)
+//	"Program log: Instruction: Sell"     → swap (skip)
+//	"Program log: Instruction: Withdraw" → LP action (skip)
+//
+// Raydium V4 is not an Anchor program and does not log instruction names,
+// so we cannot filter it by log content and always return true.
+func ShouldFetchTransaction(notif LogsNotification, prog config.SolanaProgramConfig) bool {
+	switch prog.Family {
+	case "pumpfun":
+		for _, l := range notif.Logs {
+			if strings.Contains(l, "Instruction: Create") {
+				return true
+			}
+		}
+		// No "Instruction: Create" found — this is a swap/buy/sell, skip it.
+		return false
+	default:
+		// raydium-v4 and unknown families: fetch and let normalize decide.
+		return true
+	}
+}
+
+// IsRateLimitError returns true when the error is an RPC -32003 daily quota error.
+func IsRateLimitError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "-32003")
+}
+
+// rateLimitBackoff returns the configured circuit-breaker cooldown.
+// Falls back to 60 seconds when not configured.
+func rateLimitBackoff(cfg config.SolanaConfig) time.Duration {
+	ms := cfg.RateLimitBackoffMs
+	if ms <= 0 {
+		ms = 60_000
+	}
+	return time.Duration(ms) * time.Millisecond
 }

@@ -23,6 +23,7 @@ const (
 	CmdResume    CommandType = "/resume"
 	CmdVersion   CommandType = "/version"
 	CmdMode      CommandType = "/mode"
+	CmdPipeline  CommandType = "/pipeline"
 	CmdHelp      CommandType = "/help"
 )
 
@@ -55,7 +56,7 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	}
 	cmd := CommandType(strings.ToLower(parts[0]))
 	switch cmd {
-	case CmdStatus, CmdPnl, CmdPositions, CmdKill, CmdResume, CmdVersion, CmdMode, CmdHelp:
+	case CmdStatus, CmdPnl, CmdPositions, CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
 			Args:     parts[1:],
@@ -77,6 +78,7 @@ type Handler struct {
 	resumeFn       func(ctx context.Context) error
 	versionFn      func(ctx context.Context) (string, error)
 	modeFn         func(ctx context.Context, mode string) (string, error)
+	pipelineFn     func(ctx context.Context) (string, error)
 	allowedUserIDs map[string]struct{} // nil means unconfigured
 	logger         *slog.Logger
 }
@@ -90,6 +92,7 @@ type HandlerOptions struct {
 	ResumeFn    func(ctx context.Context) error
 	VersionFn   func(ctx context.Context) (string, error)
 	ModeFn      func(ctx context.Context, mode string) (string, error)
+	PipelineFn  func(ctx context.Context) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -116,6 +119,7 @@ func NewHandler(opts HandlerOptions) *Handler {
 		resumeFn:       opts.ResumeFn,
 		versionFn:      opts.VersionFn,
 		modeFn:         opts.ModeFn,
+		pipelineFn:     opts.PipelineFn,
 		allowedUserIDs: allowedSet(opts.AllowedUserIDs),
 		logger:         logger,
 	}
@@ -260,6 +264,16 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 		}
 		return &CommandResult{Text: text, Destructive: true}, nil
 
+	case CmdPipeline:
+		if h.pipelineFn == nil {
+			return &CommandResult{Text: "pipeline: not configured"}, nil
+		}
+		text, err := h.pipelineFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: pipeline: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
 	case CmdHelp:
 		return &CommandResult{Text: helpText()}, nil
 	}
@@ -274,6 +288,7 @@ func helpText() string {
 		"/status — System mode, drawdown, positions, exposure, strategy\n" +
 		"/pnl — 24h realized drawdown and open exposure summary\n" +
 		"/positions — List all open positions with size and entry price\n" +
+		"/pipeline — Token validation funnel stats and recent tickers\n" +
 		"/version — Active strategy version ID and status\n\n" +
 		"<b>⚙️ Operational</b>\n" +
 		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +

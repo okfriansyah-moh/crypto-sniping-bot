@@ -42,48 +42,105 @@ const (
 )
 
 // SolanaClient implements ingestion_solana.SolanaRPCClient.
-// It selects one HTTP endpoint and one WebSocket endpoint from the config.
+// Supports multi-endpoint failover: on a -32003 rate-limit error the client
+// rotates to the next configured endpoint so the caller's retry hits a
+// different provider (e.g. QuickNode → Helius).
 type SolanaClient struct {
-	httpEndpoint string
-	wsEndpoint   string
-	httpClient   *http.Client
-	logger       *slog.Logger
-	idCounter    atomic.Int64
+	wsEndpoints   []string // all configured ws endpoints, priority order
+	httpEndpoints []string // all configured http endpoints, priority order
+	// wsIdx / httpIdx are atomically incremented on -32003 errors.
+	// activeWS / activeHTTP mod-wrap so the index cycles through all endpoints.
+	wsIdx      atomic.Int64
+	httpIdx    atomic.Int64
+	httpClient *http.Client
+	logger     *slog.Logger
+	idCounter  atomic.Int64
+	// txRateLimiter throttles getTransaction calls to the configured req/s cap.
+	// Waiting for a tick before each call prevents -32013 rate-limit errors.
+	txRateLimiter <-chan time.Time
+}
+
+// activeWS returns the current WebSocket endpoint.
+func (c *SolanaClient) activeWS() string {
+	if len(c.wsEndpoints) == 0 {
+		return ""
+	}
+	return c.wsEndpoints[int(c.wsIdx.Load())%len(c.wsEndpoints)]
+}
+
+// activeHTTP returns the current HTTP endpoint.
+func (c *SolanaClient) activeHTTP() string {
+	if len(c.httpEndpoints) == 0 {
+		return ""
+	}
+	return c.httpEndpoints[int(c.httpIdx.Load())%len(c.httpEndpoints)]
+}
+
+// isWSRateLimited returns true when the RPC error is a -32003 quota error on the WS path.
+// When true the caller should rotate and return the error so the reconnect loop retries
+// on the next endpoint.
+func isWSRateLimited(e *rpcError) bool {
+	return e != nil && e.Code == -32003
 }
 
 // NewSolanaClient returns a SolanaClient built from the given SolanaConfig.
-// Returns an error if neither a ws nor http endpoint is found in the config.
+// All configured ws and http endpoints are stored in priority order so the
+// client can rotate to a fallback when the primary returns -32003.
+// Returns an error if no endpoints are found.
 func NewSolanaClient(cfg config.SolanaConfig, logger *slog.Logger) (*SolanaClient, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	var httpEP, wsEP string
+	// Collect endpoints by kind, preserving the order they appear in config
+	// (config is already sorted by priority in chains.yaml).
+	var wsEPs, httpEPs []string
 	for _, ep := range cfg.RPCEndpoints {
 		switch ep.Kind {
 		case "http":
-			if httpEP == "" {
-				httpEP = ep.URL
+			if ep.URL != "" {
+				httpEPs = append(httpEPs, ep.URL)
 			}
 		case "ws":
-			if wsEP == "" {
-				wsEP = ep.URL
+			if ep.URL != "" {
+				wsEPs = append(wsEPs, ep.URL)
 			}
 		}
 	}
 
-	if httpEP == "" && wsEP == "" {
+	if len(wsEPs) == 0 && len(httpEPs) == 0 {
 		return nil, fmt.Errorf("solana_client: no RPC endpoints configured in chains.yaml")
 	}
 
+	if len(wsEPs) > 1 {
+		logger.Info("solana_client_endpoints_loaded",
+			"ws_count", len(wsEPs),
+			"http_count", len(httpEPs),
+		)
+	}
+
 	return &SolanaClient{
-		httpEndpoint: httpEP,
-		wsEndpoint:   wsEP,
+		wsEndpoints:   wsEPs,
+		httpEndpoints: httpEPs,
 		httpClient: &http.Client{
 			Timeout: solanaRequestTimeout,
 		},
-		logger: logger,
+		logger:        logger,
+		txRateLimiter: buildRateLimiter(cfg.GetTransactionRPS),
 	}, nil
+}
+
+// defaultGetTransactionRPS is the fallback when get_transaction_rps is unset.
+const defaultGetTransactionRPS = 12
+
+// buildRateLimiter returns a channel that produces one tick per interval,
+// effectively limiting callers to rps requests per second.
+// If rps ≤ 0 the default is used.
+func buildRateLimiter(rps int) <-chan time.Time {
+	if rps <= 0 {
+		rps = defaultGetTransactionRPS
+	}
+	return time.NewTicker(time.Second / time.Duration(rps)).C
 }
 
 // ── JSON-RPC helpers ──────────────────────────────────────────────────────────
@@ -115,10 +172,13 @@ func (c *SolanaClient) nextID() int64 {
 	return c.idCounter.Add(1)
 }
 
-// httpRPC sends a single JSON-RPC request to the HTTP endpoint and
+// httpRPC sends a single JSON-RPC request to the active HTTP endpoint and
 // unmarshals the result into result (must be a pointer).
+// On a -32003 rate-limit error the HTTP endpoint index is rotated so the next
+// call uses the fallback provider.
 func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []interface{}, result interface{}) error {
-	if c.httpEndpoint == "" {
+	httpEP := c.activeHTTP()
+	if httpEP == "" {
 		return fmt.Errorf("solana_client: no HTTP endpoint configured")
 	}
 
@@ -133,7 +193,7 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 		return fmt.Errorf("solana_client: marshal %s request: %w", method, err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.httpEndpoint, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpEP, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("solana_client: build %s request: %w", method, err)
 	}
@@ -155,6 +215,15 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 		return fmt.Errorf("solana_client: parse %s response: %w", method, err)
 	}
 	if rpcResp.Error != nil {
+		if rpcResp.Error.Code == -32003 {
+			newIdx := c.httpIdx.Add(1)
+			c.logger.Warn("solana_http_rate_limited_rotating",
+				"method", method,
+				"from", httpEP,
+				"to", c.httpEndpoints[int(newIdx)%len(c.httpEndpoints)],
+				"total_endpoints", len(c.httpEndpoints),
+			)
+		}
 		return fmt.Errorf("solana_client: %s: %w", method, rpcResp.Error)
 	}
 	if result != nil && len(rpcResp.Result) > 0 {
@@ -171,12 +240,17 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 // Returns a channel that receives LogsNotification values until:
 //   - ctx is cancelled, or
 //   - the WebSocket connection drops (channel is closed; caller should reconnect).
+//
+// When the server returns -32003 (rate limit) the active WS endpoint is rotated
+// so that the next call from runProgramLoop's reconnect loop hits the fallback
+// provider (e.g. QuickNode → Helius).
 func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-chan ingestion_solana.LogsNotification, error) {
-	if c.wsEndpoint == "" {
+	wsEP := c.activeWS()
+	if wsEP == "" {
 		return nil, fmt.Errorf("solana_client: no WebSocket endpoint configured")
 	}
 
-	conn, err := dialWS(c.wsEndpoint, solanaWSConnectTimeout)
+	conn, err := dialWS(wsEP, solanaWSConnectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("solana_client: ws connect: %w", err)
 	}
@@ -210,6 +284,15 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 	}
 	if subResp.Error != nil {
 		conn.Close()
+		if isWSRateLimited(subResp.Error) {
+			newIdx := c.wsIdx.Add(1)
+			c.logger.Warn("solana_ws_rate_limited_rotating",
+				"program", programID,
+				"from", wsEP,
+				"to", c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)],
+				"total_endpoints", len(c.wsEndpoints),
+			)
+		}
 		return nil, fmt.Errorf("solana_client: logsSubscribe: %w", subResp.Error)
 	}
 	_ = conn.setDeadline(time.Time{}) // clear deadline; notifications are unbounded
@@ -297,6 +380,12 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 // GetTransaction fetches the full transaction by signature.
 // Returns nil if the transaction is not yet visible at the configured commitment.
 func (c *SolanaClient) GetTransaction(ctx context.Context, signature string) (*ingestion_solana.TransactionResult, error) {
+	// Wait for a rate-limit token before issuing the HTTP call.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.txRateLimiter:
+	}
 	params := []interface{}{
 		signature,
 		map[string]interface{}{
@@ -407,6 +496,9 @@ type logsNotificationEnvelope struct {
 // ── getTransaction response parser ───────────────────────────────────────────
 
 // solanaTransactionJSON is the JSON shape of a getTransaction result.
+// For v0 transactions, static account keys are in Transaction.Message.AccountKeys.
+// ALT-resolved accounts live in Meta.LoadedAddresses and must be appended to
+// form the full account list used by instruction account indices.
 type solanaTransactionJSON struct {
 	Slot        uint64 `json:"slot"`
 	BlockTime   int64  `json:"blockTime"`
@@ -421,6 +513,15 @@ type solanaTransactionJSON struct {
 			} `json:"instructions"`
 		} `json:"message"`
 	} `json:"transaction"`
+	// Meta.LoadedAddresses is populated for v0 transactions that use Address
+	// Lookup Tables (ALTs).  Account indices in instructions refer into the
+	// combined list: static keys + ALT writable + ALT readonly.
+	Meta struct {
+		LoadedAddresses struct {
+			Writable []string `json:"writable"`
+			Readonly []string `json:"readonly"`
+		} `json:"loadedAddresses"`
+	} `json:"meta"`
 }
 
 // parseGetTransactionResponse converts the raw JSON from getTransaction into
@@ -432,7 +533,19 @@ func parseGetTransactionResponse(signature string, raw json.RawMessage) (*ingest
 	}
 
 	msg := tx.Transaction.Message
-	keys := msg.AccountKeys
+	// Build the full account list: static keys first, then ALT-resolved accounts
+	// in Solana's canonical order (writable before readonly).  Instruction
+	// account indices (programIdIndex and accounts[]) index into this combined
+	// slice — using only the static keys causes out-of-bounds resolves and
+	// silently drops accounts, producing "insufficient accounts" errors.
+	keys := make([]string, 0,
+		len(msg.AccountKeys)+
+			len(tx.Meta.LoadedAddresses.Writable)+
+			len(tx.Meta.LoadedAddresses.Readonly),
+	)
+	keys = append(keys, msg.AccountKeys...)
+	keys = append(keys, tx.Meta.LoadedAddresses.Writable...)
+	keys = append(keys, tx.Meta.LoadedAddresses.Readonly...)
 
 	instrs := make([]ingestion_solana.InstructionData, 0, len(msg.Instructions))
 	for i, instr := range msg.Instructions {
