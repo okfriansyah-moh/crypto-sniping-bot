@@ -114,6 +114,31 @@ func TestProcessWithEstimates_LegacyMode(t *testing.T) {
 	}
 }
 
+// Phase 9 audit M3 regression: NaN/Inf CombinedScore must not be
+// silently coerced to a max-favorable size (fail-open). The pre-fix
+// behavior flattened NaN to 0 in clampUnit and then promoted 0 → 1.0.
+func TestProcessWithEstimates_InvalidScore_Rejects(t *testing.T) {
+	mod := New(phase9Cfg())
+	prob := &contracts.ProbabilityEstimateDTO{Probability: 0.7, Calibration: 0.8}
+	feat := featWithConfidence(0.7)
+
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		in := selectedInputP9()
+		in.CombinedScore = bad
+		got, err := mod.ProcessWithEstimates(context.Background(), in, prob, feat, "BALANCED", "eth", 0)
+		if err != nil {
+			t.Fatalf("unexpected err for score %v: %v", bad, err)
+		}
+		if !got.Rejected || got.RejectReason != "invalid_score" {
+			t.Errorf("score=%v: expected invalid_score reject, got rejected=%v reason=%q size=%v",
+				bad, got.Rejected, got.RejectReason, got.SizeUsd)
+		}
+		if got.SizeUsd != 0 {
+			t.Errorf("score=%v: rejected allocation must have SizeUsd=0, got %v", bad, got.SizeUsd)
+		}
+	}
+}
+
 func TestProcessWithEstimates_NotSelected(t *testing.T) {
 	mod := New(phase9Cfg())
 	in := selectedInputP9()

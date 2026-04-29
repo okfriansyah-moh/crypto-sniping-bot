@@ -75,10 +75,19 @@ func (m *Module) ProcessWithEstimates(
 	}
 
 	// ── Raw edge-proportional size ────────────────────────────────
+	// Security (Phase 9 audit M3): explicitly reject NaN/Inf
+	// CombinedScore — clampUnit silently flattens these to 0, which
+	// would then be coerced to 1.0 below (fail-open: max favorable
+	// sizing on malformed upstream input).
+	if math.IsNaN(in.CombinedScore) || math.IsInf(in.CombinedScore, 0) {
+		return rejectedAllocation(in, chain, "invalid_score", now), nil
+	}
 	score := clampUnit(in.CombinedScore)
 	if score == 0 {
-		// Score may be missing for legacy callers — treat as 1.0 to avoid
-		// zeroing every allocation. Rejection is governed elsewhere.
+		// Legitimate zero score may indicate a legacy caller that does
+		// not populate CombinedScore — treat as 1.0 to avoid zeroing
+		// every allocation. NaN/Inf are rejected above; only finite
+		// values reach this branch.
 		score = 1.0
 	}
 	conf := aggConf
