@@ -101,7 +101,14 @@ func (m *Module) ProcessWithEstimates(
 	sizeRaw := base * score * p * conf * f
 
 	// ── Mode + cohort multipliers ─────────────────────────────────
-	modeMult, _ := ModeMultiplier(mode, m.cfg)
+	// Security (Phase 9 audit M2): honor failure policy when the
+	// configured ModeMultipliers map does not contain the active
+	// mode. Default behavior remains fail-soft (BALANCED fallback)
+	// unless OnModeLookupStale="reject" is set.
+	modeMult, modeFallback := ModeMultiplier(mode, m.cfg)
+	if modeFallback && m.cfg.FailurePolicy.OnModeLookupStale == "reject" {
+		return rejectedAllocation(in, chain, "mode_lookup_stale", now), nil
+	}
 	cohortMult := CohortMultiplier("default", m.cfg)
 	sizeUsd := sizeRaw * modeMult * cohortMult
 
@@ -206,6 +213,14 @@ func aggregateConfidence(feat *contracts.FeatureDTO) float64 {
 	min := math.Inf(1)
 	any := false
 	for _, v := range values {
+		// Security (Phase 9 audit M1): explicitly skip NaN/Inf —
+		// `v <= 0` returns false for NaN, which would otherwise
+		// poison `min` with non-finite values and propagate Inf
+		// into size_raw. Defense-in-depth before the final
+		// IsNaN/IsInf size check.
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
 		if v <= 0 {
 			continue
 		}

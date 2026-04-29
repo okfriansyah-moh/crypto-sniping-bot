@@ -149,3 +149,39 @@ func TestProcessWithEstimates_NotSelected(t *testing.T) {
 		t.Errorf("expected pass-through rejection: got %v", got)
 	}
 }
+
+// Phase 9 audit M2 regression: when ModeMultipliers map lacks the active
+// mode and FailurePolicy.OnModeLookupStale="reject", engine must reject
+// rather than silently falling back to BALANCED (fail-open).
+func TestProcessWithEstimates_ModeLookupStaleReject(t *testing.T) {
+cfg := phase9Cfg()
+cfg.FailurePolicy.OnModeLookupStale = "reject"
+cfg.ModeMultipliers = map[string]float64{"BALANCED": 1.0} // STRICT/EXPLORATION absent
+mod := New(cfg)
+prob := &contracts.ProbabilityEstimateDTO{Probability: 0.6}
+feat := &contracts.FeatureDTO{Confidence: contracts.FeatureConfidence{LiquidityScore: 0.9}}
+got, _ := mod.ProcessWithEstimates(context.Background(), selectedInputP9(), prob, feat, "UNKNOWN_MODE", "eth", 0)
+if !got.Rejected || got.RejectReason != "mode_lookup_stale" {
+t.Errorf("expected mode_lookup_stale reject, got rejected=%v reason=%q", got.Rejected, got.RejectReason)
+}
+}
+
+// Phase 9 audit M1 regression: NaN entries in FeatureConfidence must not
+// poison aggregateConfidence into +Inf and propagate a non-finite size.
+func TestProcessWithEstimates_NaNConfidence_NotFailOpen(t *testing.T) {
+mod := New(phase9Cfg())
+prob := &contracts.ProbabilityEstimateDTO{Probability: 0.6}
+feat := &contracts.FeatureDTO{Confidence: contracts.FeatureConfidence{
+LiquidityScore: math.NaN(),
+ContractSafety: math.Inf(1),
+WalletEntropy:  0.7,
+}}
+got, _ := mod.ProcessWithEstimates(context.Background(), selectedInputP9(), prob, feat, "BALANCED", "eth", 0)
+if got.Rejected {
+// Acceptable: rejected for a sane reason
+return
+}
+if math.IsNaN(got.SizeUsd) || math.IsInf(got.SizeUsd, 0) || got.SizeUsd <= 0 {
+t.Errorf("non-finite/zero size leaked through: %v", got.SizeUsd)
+}
+}
