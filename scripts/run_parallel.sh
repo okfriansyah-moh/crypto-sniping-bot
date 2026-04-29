@@ -6,11 +6,15 @@
 # simultaneously using autonomous AI agents.
 #
 # Usage:
-#   ./scripts/run_parallel.sh start [--mode=1|2|3] <phases...>
+#   ./scripts/run_parallel.sh start [--mode=1|2|3] [--model=<name>] <phases...>
 #   ./scripts/run_parallel.sh status
 #   ./scripts/run_parallel.sh merge
 #   ./scripts/run_parallel.sh cleanup
 #   ./scripts/run_parallel.sh gates
+#
+#   --model=<name>  Override LLM model for this run (e.g. claude-opus-4.7).
+#                   When set, ALL agent calls (heavy + rotation) use this model.
+#                   When omitted, the mode's default routing applies.
 #
 # Modes:
 #   Mode 1 — Full Parallel   : One worktree + agent per phase (max speed)
@@ -92,6 +96,10 @@ MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}"           # Mode 1 only
 MODEL_HEAVY_LITE="${MODEL_HEAVY_LITE:-claude-sonnet-4.6}" # Modes 2 & 3
 MODEL_ROTATE_POOL=("claude-sonnet-4.6" "claude-sonnet-4.5" "gpt-5.3-codex" "gpt-5.4")
 ROTATION_INDEX=0
+
+# Optional CLI override: when --model=<name> is passed (or MODEL_OVERRIDE env is set),
+# every model selection (heavy + rotation pool) collapses to this single model.
+MODEL_OVERRIDE="${MODEL_OVERRIDE:-}"
 
 # ── Per-stage retry limits (bounded — no infinite loops) ──────────────────
 MAX_RETRIES_PHASE_BUILDER="${MAX_RETRIES_PHASE_BUILDER:-5}"
@@ -2336,7 +2344,7 @@ usage() {
 Skeleton Parallel — Parallel Development Orchestrator
 
 Usage:
-  $(basename "$0") start [--mode=1|2|3] <phase> [<phase> ...]
+  $(basename "$0") start [--mode=1|2|3] [--model=<name>] <phase> [<phase> ...]
   $(basename "$0") status
   $(basename "$0") merge
   $(basename "$0") cleanup
@@ -2353,9 +2361,13 @@ Options:
   --mode=1        Full Parallel   — one agent per phase (max speed)
   --mode=2        Token-Optimized — single session, sequential (min cost)
   --mode=3        Hybrid          — parallel groups, sequential within (default)
+  --model=<name>  Override LLM model for this run (e.g. claude-opus-4.7).
+                  Applies to ALL agent calls (heavy + rotation). Falls back to
+                  the mode's default model routing when omitted.
   --no-auto-merge Skip auto-merge/PR after agents complete (manual merge step)
 
 Environment Variables:
+  MODEL_OVERRIDE                Same effect as --model=<name> (CLI flag wins)
   MODEL_HEAVY                   Override Mode 1 heavy model (default: claude-opus-4.7)
   MODEL_HEAVY_LITE              Override Modes 2 & 3 heavy model (default: claude-sonnet-4.6)
   MAX_PARALLEL_AGENTS           Override max concurrent agents (default: 3)
@@ -2367,12 +2379,13 @@ Environment Variables:
   MAX_REMEDIATION_RETRIES       Override remediation retries (default: 3)
 
 Examples:
-  $(basename "$0") start 2 3 4              # Mode 3 (default): auto-group and run
-  $(basename "$0") start --mode=1 2 3       # Mode 1: full parallel
-  $(basename "$0") start --mode=2 1 2 3     # Mode 2: single session, sequential
-  $(basename "$0") status                   # Check progress
-  $(basename "$0") merge                    # Merge and validate
-  $(basename "$0") cleanup                  # Clean everything up
+  $(basename "$0") start 2 3 4                          # Mode 3 (default): auto-group and run
+  $(basename "$0") start --mode=1 2 3                   # Mode 1: full parallel
+  $(basename "$0") start --mode=2 1 2 3                 # Mode 2: single session, sequential
+  $(basename "$0") start --mode=2 --model=claude-opus-4.7 9   # Mode 2 forced onto claude-opus-4.7
+  $(basename "$0") status                               # Check progress
+  $(basename "$0") merge                                # Merge and validate
+  $(basename "$0") cleanup                              # Clean everything up
 
 See docs/PARALLEL_DEV.md for full documentation.
 EOF
@@ -2403,6 +2416,13 @@ main() {
                             exit 1
                         fi
                         ;;
+                    --model=*)
+                        MODEL_OVERRIDE="${1#--model=}"
+                        if [[ -z "${MODEL_OVERRIDE}" ]]; then
+                            log_error "--model= requires a non-empty value (e.g. --model=claude-opus-4.7)."
+                            exit 1
+                        fi
+                        ;;
                     --no-auto-merge)
                         AUTO_MERGE=false
                         ;;
@@ -2426,6 +2446,15 @@ main() {
             check_copilot_cli
             check_copilot_auth
             run_env_hook "${PROJECT_ROOT}"
+
+            # Apply --model override (collapses heavy + rotation pool to a single model)
+            if [[ -n "${MODEL_OVERRIDE}" ]]; then
+                MODEL_HEAVY="${MODEL_OVERRIDE}"
+                MODEL_HEAVY_LITE="${MODEL_OVERRIDE}"
+                MODEL_ROTATE_POOL=("${MODEL_OVERRIDE}")
+                ROTATION_INDEX=0
+                log_info "Model override: ${MODEL_OVERRIDE} (applied to all agent calls)"
+            fi
 
             log_info "Mode: ${MODE} | Phases: ${phases[*]}"
 
