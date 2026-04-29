@@ -19,11 +19,11 @@ import (
 // stubAdapter is a zero-value-safe Adapter stub for worker helper tests.
 // Methods relevant to helpers are overridable via fields.
 type stubAdapter struct {
-	transitionErr    error
-	lifecycleResult  *database.Lifecycle
-	lifecycleErr     error
-	correlationEvts  []database.Event
-	correlationErr   error
+	transitionErr   error
+	lifecycleResult *database.Lifecycle
+	lifecycleErr    error
+	correlationEvts []database.Event
+	correlationErr  error
 }
 
 func (s *stubAdapter) Initialize(_ context.Context, _ database.Config) error { return nil }
@@ -34,8 +34,8 @@ func (s *stubAdapter) InsertEvent(_ context.Context, _ database.Event) error { r
 func (s *stubAdapter) ClaimNextEvent(_ context.Context, _ string, _ []string) (*database.Event, error) {
 	return nil, nil
 }
-func (s *stubAdapter) MarkEventProcessed(_ context.Context, _ string) error  { return nil }
-func (s *stubAdapter) ReleaseEventClaim(_ context.Context, _ string) error   { return nil }
+func (s *stubAdapter) MarkEventProcessed(_ context.Context, _ string) error { return nil }
+func (s *stubAdapter) ReleaseEventClaim(_ context.Context, _ string) error  { return nil }
 func (s *stubAdapter) GetEventByID(_ context.Context, _ string) (*database.Event, error) {
 	return nil, database.ErrNotFound
 }
@@ -49,7 +49,9 @@ func (s *stubAdapter) UpsertIngestionWatermark(_ context.Context, _ string, _ ui
 func (s *stubAdapter) GetIngestionWatermark(_ context.Context, _ string) (uint64, error) {
 	return 0, nil
 }
-func (s *stubAdapter) InsertMarketData(_ context.Context, _ contracts.MarketDataDTO) error { return nil }
+func (s *stubAdapter) InsertMarketData(_ context.Context, _ contracts.MarketDataDTO) error {
+	return nil
+}
 func (s *stubAdapter) GetMarketData(_ context.Context, _ string) (*contracts.MarketDataDTO, error) {
 	return nil, database.ErrNotFound
 }
@@ -74,8 +76,8 @@ func (s *stubAdapter) InsertStateViolation(_ context.Context, _, _, _, _ string)
 func (s *stubAdapter) InsertDataQuality(_ context.Context, _ contracts.DataQualityDTO) error {
 	return nil
 }
-func (s *stubAdapter) InsertFeature(_ context.Context, _ contracts.FeatureDTO) error   { return nil }
-func (s *stubAdapter) InsertEdge(_ context.Context, _ contracts.EdgeDTO) error         { return nil }
+func (s *stubAdapter) InsertFeature(_ context.Context, _ contracts.FeatureDTO) error { return nil }
+func (s *stubAdapter) InsertEdge(_ context.Context, _ contracts.EdgeDTO) error       { return nil }
 func (s *stubAdapter) InsertValidatedEdge(_ context.Context, _ contracts.ValidatedEdgeDTO) error {
 	return nil
 }
@@ -255,7 +257,7 @@ func (s *stubAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool,
 }
 func (s *stubAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error { return nil }
 func (s *stubAdapter) IsSystemHalted(_ context.Context) (bool, string, error)     { return false, "", nil }
-func (s *stubAdapter) ComputeStateHash(_ context.Context) (string, error)          { return "", nil }
+func (s *stubAdapter) ComputeStateHash(_ context.Context) (string, error)         { return "", nil }
 func (s *stubAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
 	return nil, nil
 }
@@ -292,6 +294,9 @@ func (s *stubAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64
 	return 0, nil
 }
 func (s *stubAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *stubAdapter) GetPipelineStats(_ context.Context, _ int) (*database.PipelineStats, error) {
+	return &database.PipelineStats{}, nil
+}
 
 func TestMakeOutputEvent_HappyPath(t *testing.T) {
 	// Arrange

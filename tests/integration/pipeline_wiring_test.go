@@ -691,19 +691,19 @@ func (h *errorHandler) Process(_ context.Context, _ *database.Event) (*database.
 }
 
 func (m *memAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
-return nil
+	return nil
 }
 func (m *memAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
-return nil
+	return nil
 }
 func (m *memAdapter) GetShadowTradesByWindow(_ context.Context, _ int) ([]database.ShadowTrade, error) {
-return nil, nil
+	return nil, nil
 }
 func (m *memAdapter) GetLearningRecordsByWindow(_ context.Context, _ string, _, _ time.Time) ([]contracts.LearningRecordDTO, error) {
-return nil, nil
+	return nil, nil
 }
 func (m *memAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
-return nil, nil
+	return nil, nil
 }
 
 func (m *memAdapter) ComputeDrawdown(_ context.Context, _ int) (float64, error) {
@@ -773,7 +773,7 @@ func (m *memAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool, 
 }
 func (m *memAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error { return nil }
 func (m *memAdapter) IsSystemHalted(_ context.Context) (bool, string, error)     { return false, "", nil }
-func (m *memAdapter) ComputeStateHash(_ context.Context) (string, error)          { return "", nil }
+func (m *memAdapter) ComputeStateHash(_ context.Context) (string, error)         { return "", nil }
 func (m *memAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
 	return nil, nil
 }
@@ -810,3 +810,6 @@ func (m *memAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64,
 	return 0, nil
 }
 func (m *memAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }
+func (m *memAdapter) GetPipelineStats(_ context.Context, _ int) (*database.PipelineStats, error) {
+	return &database.PipelineStats{}, nil
+}

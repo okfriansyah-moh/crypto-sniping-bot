@@ -349,19 +349,19 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 }
 
 func (m *mockAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
-return nil
+	return nil
 }
 func (m *mockAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
-return nil
+	return nil
 }
 func (m *mockAdapter) GetShadowTradesByWindow(_ context.Context, _ int) ([]database.ShadowTrade, error) {
-return nil, nil
+	return nil, nil
 }
 func (m *mockAdapter) GetLearningRecordsByWindow(_ context.Context, _ string, _, _ time.Time) ([]contracts.LearningRecordDTO, error) {
-return nil, nil
+	return nil, nil
 }
 func (m *mockAdapter) GetEvaluationsByVersion(_ context.Context, _ string) ([]contracts.EvaluationDTO, error) {
-return nil, nil
+	return nil, nil
 }
 
 func (m *mockAdapter) ComputeDrawdown(_ context.Context, _ int) (float64, error) {
@@ -431,7 +431,7 @@ func (m *mockAdapter) DrainAndCheckPipelineIdle(_ context.Context, _ int) (bool,
 }
 func (m *mockAdapter) SetSystemHalt(_ context.Context, _ bool, _, _ string) error { return nil }
 func (m *mockAdapter) IsSystemHalted(_ context.Context) (bool, string, error)     { return false, "", nil }
-func (m *mockAdapter) ComputeStateHash(_ context.Context) (string, error)          { return "", nil }
+func (m *mockAdapter) ComputeStateHash(_ context.Context) (string, error)         { return "", nil }
 func (m *mockAdapter) ClaimPartitions(_ context.Context, _, _, _ string, _, _ int) ([]int, error) {
 	return nil, nil
 }
@@ -468,3 +468,6 @@ func (m *mockAdapter) GetUnprocessedCount(_ context.Context, _, _ string) (int64
 	return 0, nil
 }
 func (m *mockAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }
+func (m *mockAdapter) GetPipelineStats(_ context.Context, _ int) (*database.PipelineStats, error) {
+	return &database.PipelineStats{}, nil
+}

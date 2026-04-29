@@ -4429,6 +4429,58 @@ All updated DTOs continue to carry the four mandatory traceability fields per §
 
 Replace the five hardcoded `false` flags in `internal/modules/data_quality/data_quality.go` with real detectors. The goal is to make `RiskScore` a real signal and `ContractSafety` (the highest-weight feature in the probability model) reflect actual contract behavior rather than a constant lie.
 
+### Detector Interface (mandatory)
+
+Every detector under `internal/modules/data_quality/` implements **exactly** this interface — no variants, no helpers exposed in place of it:
+
+```go
+// internal/modules/data_quality/detector.go (NEW)
+package data_quality
+
+type Verdict int
+
+const (
+    VerdictPass         Verdict = iota // detector ran cleanly, no risk found
+    VerdictReject                       // detector ran cleanly, risk confirmed
+    VerdictRiskyPass                    // detector could not conclude (timeout / RPC error / unparseable) — treated as positive risk, never as safe
+)
+
+type TokenContext struct {
+    Chain        string
+    TokenAddress string
+    PoolAddress  string
+    Reserves     ReserveSnapshot
+    BlockNumber  uint64
+    BlockTime    int64
+    TraceID      string // propagated for log correlation
+}
+
+type DetectorResult struct {
+    Name        string  // "honeypot" | "tax" | "lp_lock" | "wash" | "rug_authority" | "contract_verified"
+    Verdict     Verdict
+    RiskWeight  float64 // [0,1] — contribution to RiskScore when Verdict != VerdictPass
+    LatencyMs   int64
+    FromCache   bool
+    Reason      string  // structured machine-readable code; empty on Pass
+    Err         error   // non-nil only on hard infra failure (still mapped to VerdictRiskyPass)
+}
+
+type Detector interface {
+    Name() string
+    Detect(ctx context.Context, token TokenContext) (DetectorResult, error)
+}
+```
+
+> **Rule.** A detector MUST NOT return `(zero-value DetectorResult, nil)`. On any failure path it MUST return `Verdict=VerdictRiskyPass` with a populated `Reason`. Silent passes are forbidden.
+
+### Execution Model (mandatory)
+
+- All detectors are launched in a single `errgroup.WithContext` fan-out — **one goroutine per detector**.
+- Concurrency cap: `dq.max_inflight_detectors` ∈ [5, 10] (default 6); enforced via a buffered semaphore.
+- **Per-detector hard timeout: `dq.detector_timeout_ms` ≤ 300 ms** (`context.WithTimeout` per call).
+- **Total DQ wall budget: `dq.total_budget_ms` ≤ 500 ms.** Budget enforced by the parent `errgroup` context; on expiry, every still-running detector returns `VerdictRiskyPass` with `Reason=budget_exceeded`.
+- The aggregator MUST collect results for **all** registered detectors (filling missing slots with `VerdictRiskyPass`) before emitting `data_quality_event`.
+
 ### Files
 
 ```
@@ -4479,24 +4531,57 @@ dqMod := data_quality.New(cfg.DataQuality, evmSim, solanaSim, cache, logger)
 
 ### Failure Handling
 
-| Failure                                      | Behavior                                                                                                                             |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| RPC timeout (`detector_timeout_ms` exceeded) | Mark detector as `Indeterminate`; degrade flag to `risky-pass` (treated as positive risk in `RiskScore` aggregation, never as safe). |
-| Etherscan API rate-limit                     | Cache last good `ContractVerified` result for `cache_ttl_sec`; on miss, treat as `Indeterminate` → risky-pass.                       |
-| Detector returns unparseable response        | Increment `dq_detector_errors_total{detector}` metric; treat as `Indeterminate`.                                                     |
-| Pool not yet indexed by RPC archive          | Treat as `Indeterminate` (token may simply be too new); set `ContractSafety = 0.5` rather than 0.0.                                  |
+| Failure                                      | Verdict                | Behavior                                                                                              |
+| -------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| Per-detector timeout (`detector_timeout_ms`) | `VerdictRiskyPass`     | `Reason=detector_timeout`. Counts as positive risk in `RiskScore`, never as safe.                     |
+| Total DQ budget exceeded (`total_budget_ms`) | `VerdictRiskyPass` (∀) | Parent ctx cancels; every unfinished detector emits `Reason=budget_exceeded`.                         |
+| RPC error (network / 5xx / decode)           | `VerdictRiskyPass`     | `Err` populated; structured warning emitted; `dq_detector_errors_total{detector,reason}` incremented. |
+| Etherscan / BscScan rate-limit               | last-good or RiskyPass | Serve last-good cached result if within TTL; else `VerdictRiskyPass` `Reason=verify_rate_limited`.    |
+| Unparseable RPC response                     | `VerdictRiskyPass`     | `Reason=decode_error`; increment `dq_detector_errors_total{detector,reason=decode}`.                  |
+| Pool not yet indexed by RPC archive          | `VerdictRiskyPass`     | `Reason=pool_not_indexed`. `ContractSafety` mapped to `0.5` (cold-start), never `1.0`.                |
 
-**Cache rules** (`detector_cache.go`):
+> **Universal rule:** RPC failure → `RISKY_PASS`, **never** `PASS`. The aggregator MUST treat `VerdictRiskyPass` as positive risk in `RiskScore`.
 
-- LRU keyed by `(chain, token_address, detector_name)`
-- TTL per-detector from `config/data_quality.yaml` (e.g., `lp_lock_ttl_sec: 300`, `contract_verified_ttl_sec: 3600`)
-- Cache hits MUST NOT count toward `dq_detector_calls_total{detector,result=cache_hit}` separately so SLO tracking remains honest
+### Caching (mandatory)
+
+- LRU keyed by `(chain, token_address, detector_name)`; size bound `dq.cache_max_entries` (default 8192).
+- TTL **per-detector** from `config/data_quality.yaml`, all in the **5–10 minute** band unless detector physics demands otherwise:
+  - `honeypot_ttl_sec: 300` (5m)
+  - `tax_ttl_sec: 300` (5m)
+  - `wash_ttl_sec: 300` (5m)
+  - `lp_lock_ttl_sec: 600` (10m)
+  - `rug_authority_ttl_sec: 600` (10m)
+  - `contract_verified_ttl_sec: 3600` (1h — source code does not change post-deploy)
+- Cache hits emit `dq_detector_calls_total{detector,result=cache_hit}` for SLO honesty.
+- Cache MUST be invalidated on `chain_reorg_event` for tokens within the reorged block range.
+
+### Output Mapping (mandatory)
+
+```
+RiskScore = Σ(detector.RiskWeight × indicator(Verdict ≠ Pass)) / Σ(detector.RiskWeight)
+
+Decision  = pass        if RiskScore ≤ dq.pass_threshold        (default 0.20) AND no Verdict=Reject
+          = risky-pass  if dq.pass_threshold < RiskScore < dq.reject_threshold (default 0.20–0.55)
+          = reject      if RiskScore ≥ dq.reject_threshold      (default 0.55) OR any Verdict=Reject
+
+Boolean flag mapping (DataQualityDTO):
+  IsHoneypot       = (honeypot.Verdict        == VerdictReject)
+  IsTaxAnomaly     = (tax.Verdict             == VerdictReject)
+  IsRugRisk        = (rug_authority.Verdict   == VerdictReject)
+  IsWashTrading    = (wash.Verdict            == VerdictReject)
+  LpLocked         = (lp_lock.Verdict         == VerdictPass)        // inverted: pass means locked
+  ContractVerified = (contract_verified.Verdict == VerdictPass)      // inverted: pass means verified
+```
+
+A `risky-pass` Decision propagates downstream — Selection / Capital observe `DataQualityDTO.RiskScore` and may downsize. Only `reject` short-circuits the pipeline to `REJECTED`.
 
 ### Hot-Path Performance Constraints
 
-- **No detector may block the worker for > `detector_timeout_ms` (default 800 ms).** Use `context.WithTimeout` per detector call.
-- **All detectors are launched concurrently** via `errgroup`; total wall time ≤ slowest detector ≤ `detector_timeout_ms`.
-- **Cache aggressively.** A detector hit on a token that was already evaluated within TTL adds < 1 ms to DQ wall time.
+- **Per-detector hard cap: `dq.detector_timeout_ms` ≤ 300 ms.**
+- **Total DQ wall budget: `dq.total_budget_ms` ≤ 500 ms** (p95 SLA).
+- All detectors run concurrently under a single `errgroup` with bounded semaphore (`dq.max_inflight_detectors`, 5–10).
+- Cache hit overhead < 1 ms per detector.
+- No detector performs more than 1 RPC round-trip on the hot path; multi-step probes (e.g., simulate-buy then simulate-sell) MUST be batched into a single `eth_call`/`simulateTransaction` where physically possible.
 
 ### Test Cases (mandatory)
 
@@ -4513,7 +4598,7 @@ dqMod := data_quality.New(cfg.DataQuality, evmSim, solanaSim, cache, logger)
 - [ ] All five scam-detector booleans (`IsHoneypot`, `IsTaxAnomaly`, `IsRugRisk`, `IsWashTrading`, `LpLocked`) are populated by real detectors — no `false` literals remain in `data_quality.go`
 - [ ] Average DQ `RiskScore` distribution over a 1h replay shows non-zero variance (`stddev > 0.1`) — proof the detectors discriminate
 - [ ] Honeypot contract from a curated test fixture is rejected at L1 in 100 % of replays
-- [ ] DQ wall-time p95 ≤ `detector_timeout_ms × 1.1` (concurrent detection budget)
+- [ ] DQ wall-time **p95 ≤ `dq.total_budget_ms` (500 ms)**; per-detector p95 ≤ `dq.detector_timeout_ms` (300 ms)
 - [ ] Cache hit ratio ≥ 60 % over a 24h replay (proves bounded RPC pressure)
 - [ ] Zero new entries in `internal/modules/data_quality/` import `database/` or `internal/rpc/` directly — RPC clients are injected only
 
@@ -4526,6 +4611,39 @@ dqMod := data_quality.New(cfg.DataQuality, evmSim, solanaSim, cache, logger)
 ### Objective
 
 Replace the five `0.5` stub assignments in `internal/modules/features/features.go` with real on-chain computations. Populate `LiquidityUsdRaw` so the slippage model (Layer 4) finally selects the correct bucket. Raise per-feature `Confidence` from `0.3` stubs to `0.7–0.9` once real data flows.
+
+### Canonical Formulas (mandatory — no variants)
+
+All features are computed from on-chain primitives only — no external oracles, no model inference at this layer, no random seeds. Every input must be reproducible from the event log + RPC archive at the input event's `BlockNumber`.
+
+```
+TxVelocity      = swaps_in_window(pool, [t-30s, t]) / 30                            // raw events/sec
+WalletEntropy   = unique_senders(pool, last_50_swaps) / total_senders(last_50)      // ∈ [0,1]
+VolumeMomentum  = volume_usd(pool, [t-30s, t]) / volume_usd(pool, [t-5min, t])      // ratio
+PriceMomentum   = (reserve_base/reserve_quote)_t  /  (reserve_base/reserve_quote)_{t-Δ} − 1
+TokenAge        = max(0, in.BlockTimestamp − pool_creation_blocktime)               // seconds
+LiquidityUsd    = reserve_base_decimal × native_token_price_usd                     // raw USD
+```
+
+After raw computation, **every feature** is normalized via the two-stage pipeline defined in `.github/skills/signal-normalizer/SKILL.md` (Z-score using the rolling cohort window → sigmoid to `[0, 1]`). The normalized result is what is written to the corresponding `FeatureDTO` field.
+
+**Determinism / replay requirements (B7):**
+
+- All windows are **time-bounded by `BlockTimestamp`**, never by wall clock — enables bit-for-bit replay.
+- All RPC reads are pinned to the input event's `BlockNumber` (or the closest archive snapshot for periodic reads).
+- All collections (logs, signatures) are sorted by `(BlockNumber, LogIndex)` (EVM) or `(Slot, SignatureIndex)` (Solana) before aggregation — no map-iteration reliance.
+- `now()` MUST NOT appear in any feature computation path.
+
+**Confidence (B8):**
+
+```
+FeatureConfidence.Field = base_confidence × completeness × freshness
+  base_confidence: 1.0 when computed from the canonical RPC, 0.0 when defaulted
+  completeness:    fraction of expected window samples actually observed (e.g., 18/20 swaps → 0.9)
+  freshness:       1.0 if window covers the full requested span, decay linearly otherwise
+```
+
+Per-feature targets when real data flows: confidence ∈ **[0.7, 0.9]**. Cold-start / fallback paths emit confidence ≤ 0.4 and MUST mark `Reason` accordingly so downstream learners can discount.
 
 ### Files
 
@@ -4563,6 +4681,21 @@ The exact computation per feature per chain is canonical in `docs/PROFITABILITY_
 
 > **Normalization is delegated to `signal-normalizer` skill.** Each feature MUST go through Z-score then sigmoid before being assigned to its `FeatureDTO` field. See `.github/skills/signal-normalizer/SKILL.md`.
 
+### Per-Feature Determinism Contract (mandatory)
+
+Every feature has exactly one canonical computation. The four columns below are the per-feature execution contract — any deviation is a bug.
+
+| Feature           | Data source (canonical)                                                                       | Time window (block-bounded)                                  | Fallback value (cold-start / failure)                  | Determinism rule                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `TxVelocityScore` | EVM: `eth_getLogs(pool, Swap, fromBlock, toBlock)`. Solana: `GetSignaturesForAddress(pool)`.  | Last **30 s** ending at `in.BlockTimestamp` (block-bounded). | `0.0`, `Confidence = 0.4`, `Reason=cold_start`.        | Sort log set by `(BlockNumber, LogIndex)` (EVM) or `(Slot, SignatureIndex)` (Solana) before counting. No `time.Now()`.    |
+| `WalletEntropy`   | Same log/signature stream as `TxVelocityScore`.                                               | Last **50 swaps** preceding `in.BlockTimestamp`.             | `0.0`, `Confidence = 0.4`, `Reason=cold_start`.        | Compute `unique_senders / total_senders` over the deterministic ordered stream. Sender hashes lowercased before deduping. |
+| `TokenAge`        | EVM: `eth_getBlockByNumber(pool_create_block).timestamp`. Solana: `MarketDataDTO.IngestedAt`. | `in.BlockTimestamp − pool_create_blocktime`.                 | `0`, `Confidence = 0.3`, `Reason=pool_not_indexed`.    | Pool-create block resolved once and cached forever per `(chain, pool_address)`. No re-resolution.                         |
+| `VolumeMomentum`  | EVM: `Sync` events on pool. Solana: two `getAccountInfo(pool)` snapshots.                     | `vol(t-30s,t) / vol(t-5min,t)` — both windows block-bounded. | `0.0`, `Confidence = 0.4`, `Reason=cold_start_window`. | Cache populated only by sequential block scans; no out-of-order writes. Ratio computed in pure decimal arithmetic.        |
+| `PriceMomentum`   | Same `Sync`/AMM source as `VolumeMomentum`.                                                   | `(reserve_ratio_t / reserve_ratio_{t-Δ}) − 1`, `Δ = 30s`.    | `0.0`, `Confidence = 0.4`, `Reason=cold_start_window`. | Reserve ratios computed from raw uint reserves (`reserveBase / reserveQuote`); no float intermediates.                    |
+| `LiquidityUsdRaw` | Pool reserves from `MarketDataDTO` × native-token price oracle.                               | Point-in-time at `in.BlockTimestamp`.                        | `0`, `Confidence = 0.2`, `Reason=native_price_stale`.  | Native price TTL ≤ 60 s; on stale, fallback emitted — never `now()` interpolation.                                        |
+
+> **Determinism rule (universal):** every feature is a pure function of `(in.BlockNumber, in.BlockTimestamp, RPC_archive_state_at_BlockNumber)`. Two replays of the same input event MUST produce bit-for-bit identical `FeatureDTO` payloads. No `time.Now()`, no `rand`, no map iteration order.
+
 ### Worker
 
 `internal/workers/run_features.go` exists from Phase 2. Phase 9 only changes the module wiring (RPC client + Sync-event cache injected at construction):
@@ -4586,10 +4719,11 @@ featMod := features.New(cfg.Features, evmRPC, solanaRPC, syncEventCache, normali
 
 ### Hot-Path Performance Constraints
 
-- All feature computations launched concurrently per `errgroup`
-- Per-feature timeout: `feature_timeout_ms` (default 500 ms)
-- Sync-event window cache (in-memory ring buffer per pool, capped at `sync_cache_size` per pool) prevents repeated `eth_getLogs` calls
-- No feature may add > 50 ms p95 to the worker hot path under cache-warm conditions
+- All feature computations launched concurrently per `errgroup`.
+- **Per-feature hard timeout: `feature.per_feature_timeout_ms` (default 150 ms)**.
+- **Total feature wall budget: `feature.total_budget_ms` ≤ 200 ms (p95 SLA)**.
+- Sync-event window cache (in-memory ring buffer per pool, capped at `sync_cache_size`) prevents repeated `eth_getLogs` calls.
+- No feature may add > 50 ms p95 to the worker hot path under cache-warm conditions.
 
 ### Test Cases (mandatory)
 
@@ -4631,17 +4765,27 @@ internal/orchestrator/
                                 // (no change expected; documented in test-only PR)
 ```
 
+### Pipeline Wiring (mandatory)
+
+```
+feature_event ──► probability_worker ──► probability_event ──┐
+                                                              ├─► validation_worker ──► validated_edge_event
+edge_event ───────────────────────────────────────────────────┘     (joins on TraceID)
+```
+
+The probability worker (`internal/workers/run_probability.go`, Phase 4) consumes `feature_event`, calls `models.ProbabilityModel.Predict(featureDTO)`, and emits `probability_event`. The validation worker joins `edge_event ⨝ probability_event` on `TraceID` before evaluating the EV gate. **No new event types, no new workers, no new join keys.**
+
+> **FORBIDDEN on the happy path:**
+>
+> ```go
+> p := m.cfg.PriorProbability  // ← this assignment must NOT appear except inside the documented fallback branch.
+> ```
+>
+> Any code review observing `cfg.PriorProbability` outside the explicit fallback block (with a `Reason=` tag emitted) MUST reject the change.
+
 ### DTO Flow
 
-Validation already consumes `EdgeDTO` (Phase 2). Phase 4 added `ProbabilityEstimateDTO` emission but never wired the consumer side. Phase 9 closes the loop:
-
-```
-edge_event ──┐
-             ├──► validation_worker ──► validated_edge_event
-prob_event ──┘   (joins on TraceID)
-```
-
-The join is already implemented — what's missing is the `validation.Process()` reading from `probDTO.Probability` instead of `cfg.PriorProbability`.
+Validation already consumes `EdgeDTO` (Phase 2). Phase 4 added `ProbabilityEstimateDTO` emission but never wired the consumer side. Phase 9 closes the loop using the join illustrated above. The join is already implemented — what's missing is the `validation.Process()` reading from `probDTO.Probability` instead of `cfg.PriorProbability`.
 
 ### Worker
 
@@ -4712,25 +4856,40 @@ internal/modules/capital/
 
 Input: `SelectionOutputDTO` on `selection_event` (carries `CombinedScore`, `IsExploration`). Output: `AllocationDTO` on `allocation_event` with `SizeUsd` now a function of `(score, probability, confidence, cohort, mode)` — clamped to `[min_size_usd, max_size_usd]` and bounded by the existing capital envelope (4 caps already enforced in Phase 6).
 
-### Sizing Formula
+### Sizing Formula (mandatory — drop-in spec)
 
 ```
-f_kelly = clamp((P × R − (1−P)) / R, 0, kelly_cap)
-   where R = PriorGainBps / PriorLossBps
-         P = probDTO.Probability   (joined from probability_event)
-         confidence = featDTO.Confidence.Aggregate
+# Step 1 — Kelly fraction (signed; may be negative pre-clamp)
+R       = expected_gain_bps / expected_loss_bps          // R > 0
+P       = probDTO.Probability                            // ∈ [0,1]
+f_raw   = (P × R − (1 − P)) / R
+
+# Step 2 — Hard reject negative-EV trades
+if f_raw < 0:
+    REJECT allocation with Reason=negative_kelly        // never size; never execute
+
+# Step 3 — Clamp Kelly fraction
+f_kelly = clamp(f_raw, 0, kelly_cap)                     // kelly_cap default 0.10
+                                                          // kelly_cap_exploration default 0.05
+
+# Step 4 — Compose final size
+confidence        = featDTO.Confidence.Aggregate          // ∈ [0,1]
+cohort_multiplier = StrategyVersion.CohortMultiplier(cohort_id)  // default 1.0
+mode_multiplier   = mode_table[SystemStateDTO.Mode]      // see table below
 
 size_raw   = base_size_usd × f_kelly × confidence × cohort_multiplier × mode_multiplier
-size_final = clamp(size_raw, min_size_usd, max_size_usd)
+size_final = clamp(size_raw, min_size_usd, max_size_usd) // existing Phase 6 envelope still applies AFTER this clamp
 ```
 
-**Mode multipliers** (from `config/capital.yaml`):
+**Mode multiplier table** (`config/capital.yaml mode_multipliers`):
 
-- `STRICT` → 0.5×
-- `BALANCED` → 1.0×
-- `EXPLORATION` → 1.3×, but with `f_kelly` ceiling at `kelly_cap_exploration` (default 0.05)
+| Mode          | Multiplier | Notes                                                                |
+| ------------- | ---------- | -------------------------------------------------------------------- |
+| `STRICT`      | **0.5**    | Conservative; halves all sizing.                                     |
+| `BALANCED`    | **1.0**    | Default operating mode.                                              |
+| `EXPLORATION` | **1.3**    | Wider sizing AND tighter Kelly cap (`kelly_cap_exploration = 0.05`). |
 
-**Exploration band** (per `docs/architecture.md` § 7): when `selectionDTO.IsExploration=true`, allocate `min_exploration_pct..max_exploration_pct` (default 1–5 %) of `total_capital_usd` regardless of edge score — this is how the system intentionally probes the FN frontier.
+**Exploration band** (per `docs/architecture.md` § 7): when `selectionDTO.IsExploration=true`, sizing is overridden to a uniform draw in `[min_exploration_pct, max_exploration_pct]` of `total_capital_usd` (default 1–5 %), regardless of edge score — the system intentionally probes the FN frontier within a bounded budget.
 
 ### Worker
 
@@ -4804,6 +4963,47 @@ internal/workers/
 
 Position polling is a **periodic** worker (per § 0.6) — no input event. It reads open positions from the adapter and emits `position_event` on TP/SL/Trail/Time triggers.
 
+### PriceClient Interface (mandatory — exact signature)
+
+The interface below is the **only** abstraction modules may use to read price. It already exists in `internal/modules/position/position.go` (verified 2026-04-29) — Phase 9 does not change it; it implements it.
+
+```go
+// internal/modules/position/position.go (UNCHANGED — reproduced here as the contract)
+package position
+
+type PriceClient interface {
+    // GetTokenPrice returns the current price of `tokenAddress` denominated in
+    // the chain's native token (ETH for ethereum, BNB for bsc, SOL for solana),
+    // as a base-10 decimal string. Implementations MUST:
+    //   - honor ctx cancellation
+    //   - return a non-nil error on RPC failure (callers convert to skip-cycle)
+    //   - never return a zero/empty string with a nil error
+    GetTokenPrice(ctx context.Context, tokenAddress, chain string) (string, error)
+}
+```
+
+Phase 9 adds three implementations and one factory — no other module is permitted to define a competing interface:
+
+```go
+// internal/rpc/price_fetcher.go (NEW)
+package rpc
+
+// EVMReservePriceFetcher implements position.PriceClient for ETH and BSC.
+// Uses getAmountsOut(router, 1e18, [token, native]) on a configured V2 router.
+type EVMReservePriceFetcher struct { /* router, client, decimalsCache */ }
+func (f *EVMReservePriceFetcher) GetTokenPrice(ctx context.Context, token, chain string) (string, error)
+
+// SolanaReservePriceFetcher implements position.PriceClient for Solana.
+// Uses getAccountInfo(poolAddress), decodes AMM layout (Raydium/PumpFun),
+// returns reserveBase / reserveToken as decimal string.
+type SolanaReservePriceFetcher struct { /* rpc, layoutRegistry, decimalsCache */ }
+func (f *SolanaReservePriceFetcher) GetTokenPrice(ctx context.Context, token, chain string) (string, error)
+
+// NewPriceClientForChain resolves the right implementation by chain id.
+// MUST return a non-nil PriceClient or an error — never (nil, nil).
+func NewPriceClientForChain(chain string, cfg *config.Config, sol SolanaRPC, evm EVMClient) (position.PriceClient, error)
+```
+
 ### Worker
 
 `internal/workers/run_position_poll.go` exists. Phase 9 changes:
@@ -4838,12 +5038,14 @@ The factory in `price_oracle_factory.go` resolves the right implementation by ch
 
 ### Failure Handling
 
-| Failure                            | Behavior                                                                                                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| RPC timeout per price fetch        | Skip this poll cycle for the position; on `consecutive_failures ≥ price_failure_threshold`, emit `position_event` with `Reason=price_feed_unavailable` and `level=warn` |
-| Native-token price stale           | Use last-known price up to `native_price_max_stale_sec`; beyond that, halt new TP/SL evaluations until refresh                                                          |
-| Pool drained between polls         | Reserve = 0 → emergency `IsRug=true` exit signal → trigger SL with `Reason=pool_drained`                                                                                |
-| Decode error on Solana pool layout | Increment `position_decode_errors_total`; treat as `Indeterminate`; do not fire TP/SL on this cycle                                                                     |
+| Failure                            | Behavior                                                                                                                                                                                                          |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RPC timeout per price fetch        | **Skip THIS cycle for THIS position** (do NOT force-exit). On `consecutive_failures ≥ price_failure_threshold`, emit `position_event` with `Reason=price_feed_unavailable` and `level=warn`; still no force exit. |
+| Native-token price stale           | Use last-known price up to `native_price_max_stale_sec`; beyond that, halt new TP/SL evaluations until refresh — positions remain open at the entry-price baseline.                                               |
+| Pool drained between polls         | Reserve = 0 → emergency `IsRug=true` exit signal → trigger SL with `Reason=pool_drained`. (This is an explicit rug detection, not a price-fetch failure.)                                                         |
+| Decode error on Solana pool layout | Increment `position_decode_errors_total`; treat as `Indeterminate`; do not fire TP/SL on this cycle. Same skip-not-force-exit rule.                                                                               |
+
+> **Universal rule:** missing or stale price → **skip the cycle**. NEVER use price-feed failure as a trigger to close a position; doing so converts an RPC outage into a guaranteed loss. Time-based exit (`max_hold_seconds`) remains the only failure-mode-driven exit.
 
 ### Hot-Path Performance Constraints
 
@@ -4892,6 +5094,44 @@ internal/modules/learning/
 ### DTO Flow
 
 `LearningRecordDTO` (Phase 5) is unchanged — it already carries the full `FeatureDTO`. Phase 9 changes only what flows _into_ the record (real features instead of stubs) and what the updater extracts from it.
+
+### Cohort Grouping (mandatory)
+
+Every `LearningRecord` is bucketed by **all three** axes. Cohort key = `(liquidity_band, tax_band, latency_band)`. Bands defined in `config/pipeline.yaml learning.cohorts`:
+
+| Axis             | Source field                         | Default bands                      |
+| ---------------- | ------------------------------------ | ---------------------------------- |
+| `liquidity_band` | `featDTO.LiquidityUsdRaw`            | `[<10k, 10k–50k, 50k–250k, ≥250k]` |
+| `tax_band`       | `dqDTO.BuyTaxBps + dqDTO.SellTaxBps` | `[0–100, 100–300, 300–600, ≥600]`  |
+| `latency_band`   | `latencyDTO.P95Ms`                   | `[<200, 200–500, 500–1000, ≥1000]` |
+
+Records whose cohort key cannot be resolved (missing field) are routed to `cohort=unknown` and EXCLUDED from cohort-multiplier updates.
+
+### Feature Importance (mandatory)
+
+Per cycle, the updater computes:
+
+```
+importance(feature_i) = pearson_corr(feature_i_normalized, realized_pnl_bps)
+                        over the last `learning.importance_window` records
+```
+
+Importances are emitted as a `system_event level=info Type=feature_importance` payload (no new event type — uses the existing observability channel). Importance MUST be computed **only over records whose `featDTO.Confidence.Aggregate ≥ learning.min_importance_confidence` (default 0.7)** — stub-confidence rows are excluded.
+
+### Stub-Feature Guard (mandatory)
+
+Before any update is applied, the updater filters records:
+
+```
+if record.featDTO.AllStubs() {                  // all five momentum/velocity = exactly 0.5 AND confidence ≤ 0.3
+    skip record; increment learning_records_skipped_total{reason=stub_input}
+}
+if record.featDTO.LiquidityUsdRaw == 0 {
+    skip record; increment learning_records_skipped_total{reason=missing_liquidity}
+}
+```
+
+This guard is non-negotiable: learning from stubbed inputs replays the pre-Phase-9 unprofitability into the strategy version permanently.
 
 ### Worker
 
@@ -4943,16 +5183,210 @@ No new worker. `internal/workers/run_updater.go` continues to operate. Phase 9 c
 
 > Per § 0.6, **no new event types are introduced.** The "new workers" listed in the original brief are clarified below — most are **enhancements to existing workers**, not new dispatchers. Phase 9 keeps the worker topology unchanged.
 
-| Worker File                             | Status                   | Phase 9 Change                                                 |
-| --------------------------------------- | ------------------------ | -------------------------------------------------------------- |
-| `internal/workers/run_data_quality.go`  | **enhanced** (Phase 2)   | Inject EVM/Solana RPC simulators + detector cache              |
-| `internal/workers/run_features.go`      | **enhanced** (Phase 2)   | Inject RPC clients + Sync-event cache + signal normalizer      |
-| `internal/workers/run_validation.go`    | **enhanced** (Phase 2/4) | Wire `probDTO.Probability` into EV gate; add fallback path     |
-| `internal/workers/run_capital.go`       | **enhanced** (Phase 2)   | Replace fixed size with Kelly-adjacent dynamic formula         |
-| `internal/workers/run_position_poll.go` | **enhanced** (Phase 2)   | Remove `priceClient == nil` early return; wire real price feed |
-| `internal/workers/run_updater.go`       | **enhanced** (Phase 5)   | Cohort centroid + feature-importance aggregation               |
+| Worker File                             | Status                   | Phase 9 Change                                                 | Consumer Group  | Event Types Claimed                        |
+| --------------------------------------- | ------------------------ | -------------------------------------------------------------- | --------------- | ------------------------------------------ |
+| `internal/workers/run_data_quality.go`  | **enhanced** (Phase 2)   | Inject EVM/Solana RPC simulators + detector cache              | `dq`            | `market_data_event`                        |
+| `internal/workers/run_features.go`      | **enhanced** (Phase 2)   | Inject RPC clients + Sync-event cache + signal normalizer      | `features`      | `data_quality_event`                       |
+| `internal/workers/run_probability.go`   | unchanged (Phase 4)      | None — already emits `probability_event`                       | `probability`   | `feature_event`                            |
+| `internal/workers/run_validation.go`    | **enhanced** (Phase 2/4) | Wire `probDTO.Probability` into EV gate; add fallback path     | `validation`    | `edge_event`, `probability_event` (joined) |
+| `internal/workers/run_capital.go`       | **enhanced** (Phase 2)   | Replace fixed size with Kelly-adjacent dynamic formula         | `capital`       | `selection_event`                          |
+| `internal/workers/run_position_poll.go` | **enhanced** (Phase 2)   | Remove `priceClient == nil` early return; wire real price feed | `position_poll` | (periodic — no input event)                |
+| `internal/workers/run_updater.go`       | **enhanced** (Phase 5)   | Cohort centroid + feature-importance aggregation               | `learning`      | `learning_record_event`                    |
 
-**No new worker files** are added in Phase 9.
+**No new worker files** are added in Phase 9. **No new consumer groups, no new event types, no duplicate consumers.** All workers continue using the `SELECT … FOR UPDATE SKIP LOCKED` pattern from Phase 0.
+
+### 9.7a Per-Worker `Process()` Contracts (mandatory — drop-in spec)
+
+Every Phase 9 worker handler conforms to the `StageHandler` interface from Phase 0:
+
+```go
+type StageHandler interface {
+    Process(ctx context.Context, evt *database.Event) (*database.Event, error)
+}
+```
+
+The contracts below specify, for every Phase-9-touched worker, the **input event type**, **output event type**, **exact in-process logic**, and **emission rule**. Reviewers MUST reject any implementation that deviates from these signatures or the documented body.
+
+#### `run_data_quality.go` — `dq` group
+
+```go
+// Input  event_type: "market_data_event"        → contracts.MarketDataDTO
+// Output event_type: "data_quality_event"       → contracts.DataQualityDTO
+
+func (h *dqHandler) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
+    md := contracts.MustDecodeMarketData(evt)                        // decode + traceability check
+    tctx := data_quality.TokenContext{Chain: md.Chain, TokenAddress: md.TokenAddress,
+        PoolAddress: md.PoolAddress, Reserves: md.Reserves,
+        BlockNumber: md.BlockNumber, BlockTime: md.BlockTimestamp, TraceID: md.TraceID}
+
+    // Fan-out all detectors under one errgroup with bounded semaphore.
+    results := h.module.RunDetectors(ctx, tctx)                      // ≤ dq.total_budget_ms wall
+
+    dq := h.module.Aggregate(results, md)                            // computes RiskScore + flags per § 9.1
+    return contracts.NewDataQualityEvent(evt, dq), nil               // CausationID = evt.EventID
+}
+```
+
+#### `run_features.go` — `features` group
+
+```go
+// Input  event_type: "data_quality_event"       → contracts.DataQualityDTO (carries MarketDataDTO)
+// Output event_type: "feature_event"            → contracts.FeatureDTO
+
+func (h *featuresHandler) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
+    dq := contracts.MustDecodeDataQuality(evt)
+    if dq.Decision == contracts.DecisionReject {                     // short-circuit per § 9.1
+        return nil, nil                                               // no emission; lifecycle already REJECTED
+    }
+    feat := h.module.Compute(ctx, dq, dq.MarketData)                  // concurrent; ≤ feature.total_budget_ms
+    return contracts.NewFeatureEvent(evt, feat), nil
+}
+```
+
+#### `run_probability.go` — `probability` group (Phase 4, unchanged in Phase 9)
+
+```go
+// Input  event_type: "feature_event"            → contracts.FeatureDTO
+// Output event_type: "probability_event"        → contracts.ProbabilityEstimateDTO
+
+func (h *probHandler) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
+    feat := contracts.MustDecodeFeature(evt)
+    p, conf := h.model.Predict(feat)                                  // pure in-process; ≤ probability.predict_budget_ms
+    pe := contracts.ProbabilityEstimateDTO{Probability: p, Confidence: conf, ModelVersion: h.model.Version}
+    return contracts.NewProbabilityEvent(evt, pe), nil
+}
+```
+
+#### `run_validation.go` — `validation` group (joins `edge_event` + `probability_event`)
+
+```go
+// Input  event_types: ["edge_event", "probability_event"] joined on TraceID
+// Output event_type:  "validated_edge_event"   → contracts.ValidatedEdgeDTO
+
+func (h *validationHandler) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
+    edge, prob, err := h.joiner.Await(ctx, evt, h.cfg.ProbJoinTimeoutMs) // 200 ms cap
+    if err != nil { return contracts.NewValidationReject(evt, "prob_join_timeout"), nil }
+
+    // === MANDATORY WIRING (replaces fixed prior) ===
+    var p float64
+    var reason string
+    switch {
+    case prob.Probability < 0 || prob.Probability > 1:
+        return contracts.NewValidationReject(evt, "invalid_probability"), nil
+    case prob.Confidence < h.cfg.MinModelConfidence:
+        p, reason = h.cfg.PriorProbability, "low_model_confidence"   // documented fallback only
+    default:
+        p = prob.Probability                                          // ← the Phase 9 fix
+    }
+
+    ev := p*edge.GainBps - (1-p)*edge.LossBps - edge.FeesBps - edge.SlippageBps
+    if ev <= h.cfg.MinEvBps { return contracts.NewValidationReject(evt, "ev_below_min"), nil }
+    return contracts.NewValidatedEdgeEvent(evt, edge, prob, p, reason), nil
+}
+```
+
+#### `run_capital.go` — `capital` group
+
+```go
+// Input  event_type: "selection_event"          → contracts.SelectionOutputDTO
+// Output event_type: "allocation_event"         → contracts.AllocationDTO
+
+func (h *capitalHandler) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
+    sel := contracts.MustDecodeSelection(evt)
+
+    // 1. Kelly fraction — pure math, no I/O
+    R := sel.ExpectedGainBps / sel.ExpectedLossBps
+    P := sel.Probability
+    fRaw := (P*R - (1 - P)) / R
+    if fRaw < 0 { return contracts.NewAllocationReject(evt, "negative_kelly"), nil }
+    fKelly := clamp(fRaw, 0, h.cfg.KellyCap)                          // exploration uses KellyCapExploration
+
+    // 2. Compose
+    mode := h.modeCache.Current()                                     // BALANCED if stale per § 9.4
+    sizeRaw := h.cfg.BaseSizeUsd * fKelly * sel.Confidence *
+        h.versionPin.CohortMultiplier(sel.CohortID) * h.modeMultiplier(mode)
+    size := clamp(sizeRaw, h.cfg.MinSizeUsd, h.cfg.MaxSizeUsd)
+
+    // 3. Exploration band override
+    if sel.IsExploration { size = h.explorationBandSize(h.totalCapitalUsd) }
+
+    // 4. Phase 6 envelope still authoritative
+    if rej := h.envelope.Check(size, sel); rej != nil {
+        return contracts.NewAllocationReject(evt, rej.Reason), nil
+    }
+    return contracts.NewAllocationEvent(evt, size, mode, sel), nil
+}
+```
+
+#### `run_position_poll.go` — `position_poll` group (periodic, no input event)
+
+```go
+// Input:  none (ticker @ position_poll_interval_ms)
+// Output: "position_event" on each TP/SL/Trail/Time trigger
+
+func (h *positionPollHandler) Tick(ctx context.Context) error {
+    if h.priceClient == nil {                                          // FORBIDDEN post-Phase-9
+        return errors.New("priceClient nil — Phase 9 wiring violated")
+    }
+    positions, _ := h.adapter.ListOpenPositions(ctx)
+    for _, pos := range positions {
+        cctx, cancel := context.WithTimeout(ctx, h.cfg.PriceFetchTimeoutMs)
+        priceStr, err := h.priceClient.GetTokenPrice(cctx, pos.Token, pos.Chain)
+        cancel()
+        if err != nil {                                                // SKIP cycle — never force exit
+            h.metrics.IncFailure(pos.ID, "price_fetch_timeout"); continue
+        }
+        decision := h.module.EvaluateExit(pos, priceStr)               // TP1/TP2/SL/Trail/Time
+        if decision.Trigger != position.TriggerNone {
+            h.adapter.EmitPositionEvent(ctx, pos, decision)
+        }
+    }
+    return nil
+}
+```
+
+#### `run_updater.go` — `learning` group
+
+```go
+// Input  event_type: "learning_record_event"    → contracts.LearningRecordDTO
+// Output event_type: "system_event" (Type=feature_importance | strategy_version_update)
+
+func (h *updaterHandler) Process(ctx context.Context, evt *database.Event) (*database.Event, error) {
+    rec := contracts.MustDecodeLearningRecord(evt)
+
+    // Stub-feature regression guard (mandatory per § 9.6)
+    if rec.Features.AllStubs() || rec.Features.LiquidityUsdRaw == 0 {
+        h.metrics.IncSkipped("stub_input"); return nil, nil
+    }
+    if !h.window.Append(rec) || h.window.Size() < h.cfg.MinSamplesForUpdate {
+        return nil, nil                                                // accumulate; emit on next tick
+    }
+    update := h.computer.Compute(h.window.Snapshot())                  // bounded, single-family
+    return contracts.NewSystemEvent(evt, update), nil
+}
+```
+
+> **Cross-cutting rule:** every `Process()` MUST treat `evt.EventID` as the `CausationID` of any emitted event and copy `TraceID`/`CorrelationID`/`VersionID` per § 0.3. A handler that returns `(nil, nil)` is signalling "input consumed, no downstream emission" and MUST also call `MarkEventProcessed` via the worker loop's standard tail.
+
+### Event-Bus Routing (Phase 9 — confirms § 0.6, no additions)
+
+```
+market_data_event  ──► dq           ──► data_quality_event
+data_quality_event ──► features     ──► feature_event
+feature_event      ──► probability  ──► probability_event
+                   ──► edge         ──► edge_event
+edge_event ⨝
+probability_event  ──► validation   ──► validated_edge_event   (join on TraceID)
+validated_edge_event ──► selection  ──► selection_event
+selection_event    ──► capital      ──► allocation_event
+allocation_event   ──► execution    ──► execution_event
+                                          ─► position_event (lifecycle)
+(periodic)         ──► position_poll ──► position_event (TP/SL/Trail/Time)
+position_event     ──► evaluation   ──► learning_record_event
+learning_record_event ──► learning  ──► strategy_version_update (system_event)
+```
+
+> No event type appears as **input** to more than one consumer group. The only join is `validation` consuming `(edge_event, probability_event)` on `TraceID` — already implemented in Phase 4.
 
 ---
 
@@ -4972,18 +5406,48 @@ Existing `config/chains.yaml` gains a per-chain `data_quality` block (closes GAP
 
 ---
 
-## 9.9 Performance Constraints (whole-phase)
+## 9.9 Performance Constraints (whole-phase SLA)
 
-| Subsystem        | Hot-path budget (p95)               | Mechanism                                                                           |
-| ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| DQ detectors     | ≤ `detector_timeout_ms` (800 ms)    | `errgroup` concurrent detection; bounded LRU cache; per-detector context timeout    |
-| Feature compute  | ≤ `feature_timeout_ms` (500 ms)     | Concurrent `errgroup`; in-memory Sync-event ring buffer; chunked `eth_getLogs` walk |
-| Probability join | ≤ `prob_join_timeout_ms` (200 ms)   | Fall back to prior on miss; never block validation indefinitely                     |
-| Capital sizing   | ≤ 5 ms                              | Pure in-memory math; no I/O                                                         |
-| Position price   | ≤ `price_fetch_timeout_ms` (500 ms) | Per-position context timeout; cycle wall budget cap                                 |
-| Learning update  | Periodic (1 min cadence)            | Off-hot-path; no impact on per-trade latency                                        |
+| Subsystem                             | Hot-path budget (p95)                         | Mechanism                                                                           |
+| ------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| DQ detectors                          | **≤ 500 ms** (`dq.total_budget_ms`)           | `errgroup` concurrent fan-out; per-detector cap 300 ms; bounded LRU; semaphore 5–10 |
+| Feature compute                       | **≤ 200 ms** (`feature.total_budget_ms`)      | Concurrent `errgroup`; per-feature cap 150 ms; in-memory Sync-event ring buffer     |
+| Probability                           | **≤ 50 ms** (`probability.predict_budget_ms`) | Pure in-process logistic eval over already-extracted FeatureDTO                     |
+| Probability join                      | ≤ `prob_join_timeout_ms` (200 ms)             | Fall back to prior on miss; never block validation indefinitely                     |
+| Capital sizing                        | ≤ 5 ms                                        | Pure in-memory math; no I/O                                                         |
+| Position price                        | ≤ `price_fetch_timeout_ms` (500 ms)           | Per-position context timeout; cycle wall budget cap                                 |
+| Learning update                       | Periodic (1 min cadence)                      | Off-hot-path; no impact on per-trade latency                                        |
+| **Total pipeline (DETECT → EXECUTE)** | **≤ 2000 ms** (p95)                           | Sum of above stages on critical path; verified by Phase 6 latency SLO               |
 
-> **Rule:** No Phase 9 change may regress the Phase 6 SLO `executed_trade_latency_p95 < 1500 ms`. Verified by load test in § 9.10 exit criteria.
+> **Rule:** No Phase 9 change may regress the Phase 6 SLO `executed_trade_latency_p95 < 1500 ms`, AND no Phase 9 stage may exceed its individual budget on p95. Verified by load test in § 9.10 exit criteria.
+
+---
+
+## 9.9a Master Failure-Mode Table (cross-module)
+
+Single-page reference for reviewers. Per-module tables in §§ 9.1–9.6 remain authoritative; this table is the consolidated cross-module view.
+
+| Module      | Failure                              | Action                                           | Reason tag emitted     |
+| ----------- | ------------------------------------ | ------------------------------------------------ | ---------------------- |
+| DQ          | RPC timeout (per detector)           | `VerdictRiskyPass`; aggregate as positive risk   | `detector_timeout`     |
+| DQ          | Total budget exceeded                | All unfinished detectors → `VerdictRiskyPass`    | `budget_exceeded`      |
+| DQ          | Etherscan rate-limit                 | Last-good cache or `VerdictRiskyPass`            | `verify_rate_limited`  |
+| DQ          | Pool not indexed                     | `VerdictRiskyPass`; `ContractSafety = 0.5`       | `pool_not_indexed`     |
+| Features    | `eth_getLogs` window empty           | Cold-start defaults; `Confidence ≤ 0.4`          | `cold_start`           |
+| Features    | Sync-cache miss (first event)        | Momentum features = 0.0; `Confidence = 0.4`      | `cold_start_momentum`  |
+| Features    | Native-token price stale > 5 min     | `LiquidityUsdRaw = 0`; `Confidence = 0.2`        | `native_price_stale`   |
+| Probability | `probability_event` missing for join | Fall back to `cfg.PriorProbability` after 200 ms | `prob_join_timeout`    |
+| Probability | `Probability` outside [0,1]          | Reject validated edge                            | `invalid_probability`  |
+| Probability | `Confidence < min_model_confidence`  | Fall back to prior                               | `low_model_confidence` |
+| Capital     | `f_kelly < 0`                        | Reject allocation; do NOT size                   | `negative_kelly`       |
+| Capital     | Probability missing                  | Reject allocation                                | `missing_probability`  |
+| Capital     | Mode lookup stale                    | Default to `BALANCED` multiplier; warn           | `mode_stale`           |
+| Position    | RPC price-fetch timeout              | **Skip cycle** — never force exit                | `price_fetch_timeout`  |
+| Position    | Native-price stale beyond max        | Halt new TP/SL evals; positions remain open      | `native_price_stale`   |
+| Position    | Pool drained (reserve = 0)           | SL exit with `IsRug=true`                        | `pool_drained`         |
+| Learning    | Stub-only feature record             | Skip record; metric `learning_records_skipped`   | `stub_input`           |
+| Learning    | `N < min_samples_for_update`         | Skip cycle                                       | `insufficient_samples` |
+| Learning    | Cohort centroid degenerate           | Skip cohort update                               | `degenerate_cohort`    |
 
 ---
 
@@ -4999,12 +5463,80 @@ Phase 9 is **complete** only when **all** of the following hold simultaneously o
 - [ ] **Learning improving** — cohort centroid variance `> 0.15`; feature-importance Spearman ρ ≥ 0.7 across two consecutive 24h windows; ≥ 1 successful A/B promotion in 7-day testnet window
 - [ ] **No architecture drift** — `git diff main..phase-9 -- contracts/` shows only additive changes; `git diff main..phase-9 -- database/adapter.go` is empty; `git diff main..phase-9 -- docs/architecture.md` is non-substantive (Phase-9 status note only)
 - [ ] **No SLO regression** — `executed_trade_latency_p95 < 1500 ms` holds (Phase 6 invariant)
+- [ ] **Per-stage SLAs respected** — DQ p95 ≤ 500 ms; Features p95 ≤ 200 ms; Probability predict p95 ≤ 50 ms; **total pipeline p95 ≤ 2000 ms**
+- [ ] **Stub-feature regression guard** — zero `LearningRecord` ingested with all-stub `FeatureDTO` over 24 h replay (per § 9.6 guard)
+- [ ] **Skip-not-force-exit verified** — under simulated 60 s RPC outage, no position is closed by `Reason=price_fetch_timeout`; `max_hold_seconds` remains the only failure-mode exit
 - [ ] **Test coverage** — every detector, every feature, every fallback branch has at least one unit test; integration suite covers the 6 critical fixtures (honeypot, legit token, RPC timeout, low confidence, exploration, real exit)
 - [ ] **Replay determinism preserved** — Phase 8 § 8.5 replay validation CI gate remains green with all Phase 9 changes merged
 
 > **Decision rule:** if any single bullet fails, Phase 9 is incomplete. There is no partial pass — Phase 9 closes the safety multiplier and signal-quality multipliers simultaneously, and a failure in either re-introduces the pre-Phase-9 unprofitability.
 
 ---
+
+## 9.11 Determinism Guarantee (mandatory — non-negotiable)
+
+Every Phase 9 module MUST satisfy the four invariants below. These are the contract enforced by the Phase 8 § 8.5 replay validation CI gate; Phase 9 inherits and tightens it.
+
+| Invariant                                 | Rule                                                                                                                                                                                                                                                                                   | Enforcement                                                                                                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **D1 — Same input ⇒ same output**         | For any input event `E`, replaying `E` twice on the same `StrategyVersion` produces bit-for-bit identical output events (same `EventID`, same payload, same emission order).                                                                                                           | CI: `scripts/replay_diff.sh` runs the 24h golden fixture twice; the resulting `events` rows MUST hash-equal. Drift fails the build.                       |
+| **D2 — Time windows are block-bounded**   | All windows in §§ 9.1–9.6 reference `in.BlockTimestamp` (event-derived) — never `time.Now()`, `monotonic`, or wall-clock. Periodic workers (position poll, updater) are exempt for ticks only — but their **decision logic** MUST still be a pure function of inputs read at the tick. | `grep -nE 'time\.Now                                                                                                                                      | time\.Since' internal/modules/data_quality/ internal/modules/features/ internal/modules/capital/ internal/modules/learning/` MUST return zero matches. |
+| **D3 — No randomness on the hot path**    | No `rand`, `crypto/rand`, `math/rand`, no probabilistic data structures (bloom/cuckoo) outside cache layers, no goroutine race-dependent ordering. All map iterations replaced by sorted-key iteration before output materialization.                                                  | `grep -nE 'math/rand                                                                                                                                      | rand\.' internal/modules/`MUST return zero matches. Code review rejects unsorted`range m` over maps that affect output payloads.                       |
+| **D4 — Replay parity with Phase 8 § 8.5** | The replay engine pattern (`replay-engine-pattern` skill) holds: prefix-isolated topics, no side-effects to external systems during replay, idempotent INSERT semantics. Phase 9 modules MUST NOT introduce stateful caches that cannot be rebuilt from the event log.                 | All caches in §§ 9.1–9.2 are explicitly TTL-bounded and rebuildable from RPC archive at `BlockNumber`. Phase 8 replay CI gate passes with Phase 9 merged. |
+
+### Concrete forbidden patterns (reviewers reject on sight)
+
+```go
+// ❌ wall-clock in feature window
+if time.Since(lastSwap) < 30*time.Second { ... }
+
+// ❌ random fallback
+if rand.Float64() < 0.1 { exploration = true }
+
+// ❌ map iteration into payload
+for k, v := range featureMap { dto.Features = append(dto.Features, ...) }
+
+// ❌ goroutine-order-dependent aggregation
+go func() { results <- detect(...) }()         // unsorted collection drives RiskScore
+
+// ❌ silent default to mid-prior
+if probDTO == nil { p = 0.5 }
+```
+
+### Concrete required patterns
+
+```go
+// ✅ block-bounded window
+windowStart := in.BlockTimestamp - 30
+swaps := logs.WhereBlockTimeIn(windowStart, in.BlockTimestamp)
+
+// ✅ deterministic exploration (selection layer, hash-bounded)
+isExploration := selection.IsExplorationByHash(traceID, cfg.ExplorationPct)
+
+// ✅ sorted iteration
+keys := slices.Sorted(maps.Keys(featureMap))
+for _, k := range keys { ... }
+
+// ✅ ordered fan-in for aggregation
+results := make([]DetectorResult, len(detectors))
+g, ctx := errgroup.WithContext(ctx)
+for i, d := range detectors {
+    i, d := i, d
+    g.Go(func() error { results[i] = d.Detect(ctx, tctx); return nil })
+}
+_ = g.Wait()                                   // results[] is positional → deterministic
+
+// ✅ explicit fallback with reason tag
+if probDTO.Confidence < cfg.MinModelConfidence {
+    p, reason = cfg.PriorProbability, "low_model_confidence"
+}
+```
+
+> **Final condition.** If any of D1–D4 cannot be demonstrated under CI on a feature branch, that branch MUST NOT merge. Phase 9 introduces no exceptions to the determinism contract — every signal-quality gain is conditioned on replay parity being preserved.
+
+---
+
+# Go-Live Checklist
 
 > All items must be checked before routing real capital on mainnet. Each item references the phase that introduces the requirement and has a deterministic pass/fail test.
 

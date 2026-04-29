@@ -28,8 +28,10 @@ func (a *dispatcherStubAdapter) InsertEvent(_ context.Context, _ database.Event)
 func (a *dispatcherStubAdapter) ClaimNextEvent(_ context.Context, _ string, _ []string) (*database.Event, error) {
 	return a.nextEvent, a.claimErr
 }
-func (a *dispatcherStubAdapter) MarkEventProcessed(_ context.Context, _ string) error { return a.markErr }
-func (a *dispatcherStubAdapter) ReleaseEventClaim(_ context.Context, _ string) error  { return nil }
+func (a *dispatcherStubAdapter) MarkEventProcessed(_ context.Context, _ string) error {
+	return a.markErr
+}
+func (a *dispatcherStubAdapter) ReleaseEventClaim(_ context.Context, _ string) error { return nil }
 func (a *dispatcherStubAdapter) GetEventByID(_ context.Context, _ string) (*database.Event, error) {
 	return nil, database.ErrNotFound
 }
@@ -160,7 +162,9 @@ func (a *dispatcherStubAdapter) GetActiveStrategy(_ context.Context) (*database.
 func (a *dispatcherStubAdapter) GetShadowStrategy(_ context.Context) (*database.StrategyVersion, error) {
 	return nil, database.ErrNotFound
 }
-func (a *dispatcherStubAdapter) ActivateStrategyVersion(_ context.Context, _ string) error { return nil }
+func (a *dispatcherStubAdapter) ActivateStrategyVersion(_ context.Context, _ string) error {
+	return nil
+}
 func (a *dispatcherStubAdapter) GetSystemState(_ context.Context) (*contracts.SystemStateDTO, error) {
 	return nil, database.ErrNotFound
 }
@@ -188,9 +192,11 @@ func (a *dispatcherStubAdapter) ArchiveEvents(_ context.Context, _ time.Time, _ 
 func (a *dispatcherStubAdapter) ComputeDrawdown(_ context.Context, _ int) (float64, error) {
 	return 0, nil
 }
-func (a *dispatcherStubAdapter) CreateRun(_ context.Context, _ database.PipelineRun) error { return nil }
-func (a *dispatcherStubAdapter) UpdateRunStage(_ context.Context, _, _ string) error       { return nil }
-func (a *dispatcherStubAdapter) UpdateRunStatus(_ context.Context, _, _ string) error      { return nil }
+func (a *dispatcherStubAdapter) CreateRun(_ context.Context, _ database.PipelineRun) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) UpdateRunStage(_ context.Context, _, _ string) error  { return nil }
+func (a *dispatcherStubAdapter) UpdateRunStatus(_ context.Context, _, _ string) error { return nil }
 func (a *dispatcherStubAdapter) GetRun(_ context.Context, _ string) (*database.PipelineRun, error) {
 	return nil, database.ErrNotFound
 }
@@ -306,6 +312,9 @@ func (a *dispatcherStubAdapter) GetUnprocessedCount(_ context.Context, _, _ stri
 	return 0, nil
 }
 func (a *dispatcherStubAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { return nil }
+func (a *dispatcherStubAdapter) GetPipelineStats(_ context.Context, _ int) (*database.PipelineStats, error) {
+	return &database.PipelineStats{}, nil
+}
 
 func TestNewDispatcher_NilLogger_DoesNotPanic(t *testing.T) {
 	adapter := &dispatcherStubAdapter{}
