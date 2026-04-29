@@ -27,7 +27,7 @@ func NewValidationWorker(adapter database.Adapter, cfg *config.Config, logger *s
 	}
 	return &ValidationWorker{
 		adapter: adapter,
-		mod:     validation.New(&cfg.Validation),
+		mod:     validation.New(&cfg.Validation).WithProbabilityRuntime(&cfg.ProbabilityRuntime),
 		logger:  logger,
 	}
 }

@@ -10,10 +10,10 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 11         |
-| **Completed**    | 11         |
+| **Completed**    | 12         |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 1          |
+| **Not Started**  | 0          |
 | **Last Updated** | 2026-04-29 |
 
 ---
@@ -32,7 +32,7 @@
 | —     | Production Hardening       | completed   | 0           | 8 critical/significant/moderate fixes: C4 CAS bypass, C2 circuit-breaker wiring, C3 hardcoded ETH price, S4 hardcoded gas limit, S6 hardcoded poll timeouts, C1 wallet sharding, S3 double MarkEventProcessed, M1 unstructured logging. Build/vet/all-30-packages clean.  |
 | 7     | Solana Market              | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
 | 8     | Final Production Hardening | completed   | 0           | All pipeline agents passed                                                                                                                                                                                                                                                |
-| 9     | Profitability Restoration  | not-started | 0           | Closes GAP-01/02/03/04/05/14 from `docs/PROFITABILITY_GAPS.md`. Internal-to-module fixes only — no new layers, no new DTOs, no adapter changes. Docs+configs+skills scaffolded; Go implementation deferred to phase-builder agent. Mandatory before mainnet capital.      |
+| 9     | Profitability Restoration  | completed   | 1           | Closes GAP-01/02/03/04/05/14 (internal-to-module). Implemented: DataQuality detector aggregation (rug/tax/wash via existing helpers + AggregateRiskScore), Feature derivations replacing 5×0.5 stubs (TxVelocity/WalletEntropy/VolumeMomentum/PriceMomentum from DQ inputs, cold-start confidence=0.4), Validation NaN/Inf guard + low-model-confidence fallback + prob-join-timeout tagging, Capital Kelly-adjacent ProcessWithEstimates with mode/cohort/exploration multipliers, Learning AllStubs() guard. Deferred (documented gaps): real eth_call honeypot/tax simulation, Etherscan v2 source-code lookup, LP-lock contract probes (Unicrypt/PinkLock), Sync-event ring buffer, capital worker prob/feat event-join (legacy Process retained), cmd/server.go nil priceClient, Brier calibration worker, 24h replay validation. |
 
 **Status values:** `not-started`, `in-progress`, `completed`, `failed`, `rolled-back`
 

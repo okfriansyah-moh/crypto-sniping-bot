@@ -37,6 +37,13 @@ type Config struct {
 	Budgets      BudgetsConfig          `yaml:"budgets"`
 	Hardening    HardeningConfig        `yaml:"hardening"` // Phase 8 production hardening
 
+	// Phase 9 (Profitability Restoration) — additive runtime configs.
+	// Loaded from config/data_quality.yaml, config/feature.yaml,
+	// config/probability.yaml. See internal/app/config/phase9.go.
+	DataQualityRuntime DataQualityRuntimeConfig `yaml:"data_quality"`
+	Feature            FeatureRuntimeConfig     `yaml:"feature"`
+	ProbabilityRuntime ProbabilityRuntimeConfig `yaml:"probability"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
 }
@@ -118,6 +125,20 @@ type CapitalConfig struct {
 	MaxConcurrentPositions int     `yaml:"max_concurrent_positions"`
 	MaxSizeUsd             float64 `yaml:"max_size_usd"`
 	TTLSeconds             int     `yaml:"ttl_seconds"`
+
+	// Phase 9 (Profitability Restoration § 9.4) — dynamic sizing fields.
+	// Mirror config/capital.yaml. Module code reads these directly; legacy
+	// FixedEntrySizeUsd is retained as documented fallback only.
+	UseDynamicSizing       bool                       `yaml:"use_dynamic_sizing"`
+	BaseSizeUsd            float64                    `yaml:"base_size_usd"`
+	MinSizeUsd             float64                    `yaml:"min_size_usd"`
+	Kelly                  CapitalKellyConfig         `yaml:"kelly"`
+	ModeMultipliers        map[string]float64         `yaml:"mode_multipliers"`
+	ModeFreshnessSec       int                        `yaml:"mode_freshness_sec"`
+	Cohort                 CapitalCohortConfig        `yaml:"cohort"`
+	Exploration            CapitalExplorationConfig   `yaml:"exploration"`
+	MinAggregateConfidence float64                    `yaml:"min_aggregate_confidence"`
+	FailurePolicy          CapitalFailurePolicyConfig `yaml:"failure_policy"`
 }
 
 // PositionConfig holds Phase 2 position management parameters.
@@ -394,12 +415,19 @@ func Load(paths ...string) (*Config, error) {
 		if _, statErr := os.Stat(executionPath); statErr == nil {
 			paths = append(paths, executionPath)
 		}
+		// Phase 9 — auto-discover the four profitability-restoration configs.
+		for _, name := range []string{"data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml"} {
+			p := filepath.Join(cwd, "config", name)
+			if _, statErr := os.Stat(p); statErr == nil {
+				paths = append(paths, p)
+			}
+		}
 	} else if len(paths) == 1 && strings.HasSuffix(paths[0], "pipeline.yaml") {
 		// When a single pipeline.yaml path is given (e.g. from findConfigPath),
 		// auto-discover sibling config files so budgets.yaml, chains.yaml,
 		// and execution.yaml are always merged in.
 		dir := filepath.Dir(paths[0])
-		for _, name := range []string{"chains.yaml", "budgets.yaml", "execution.yaml"} {
+		for _, name := range []string{"chains.yaml", "budgets.yaml", "execution.yaml", "data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml"} {
 			p := filepath.Join(dir, name)
 			if _, statErr := os.Stat(p); statErr == nil {
 				paths = append(paths, p)
