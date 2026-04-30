@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"crypto-sniping-bot/contracts"
+	"crypto-sniping-bot/internal/app/config"
 )
 
 // ProcessWithEstimates produces an AllocationDTO with Phase 9 dynamic sizing.
@@ -53,14 +54,18 @@ func (m *Module) ProcessWithEstimates(
 	}
 
 	// ── Probability resolution ────────────────────────────────────
-	p, probReject := resolveProbability(prob, m.cfg.FailurePolicy.OnMissingProbability)
+	p, probReject := resolveProbability(prob, m.cfg.FailurePolicy)
 	if probReject != "" {
 		return rejectedAllocation(in, chain, probReject, now), nil
 	}
 
 	// ── Aggregate confidence gate ─────────────────────────────────
+	// Phase 9 audit fix: when MinAggregateConfidence > 0, treat aggConf==0
+	// (nil features or all-zero/invalid components) as below-threshold.
+	// Previously aggConf==0 bypassed the gate and was later promoted to
+	// 1.0, which sized trades at full confidence on missing features.
 	aggConf := aggregateConfidence(feat)
-	if m.cfg.MinAggregateConfidence > 0 && aggConf > 0 && aggConf < m.cfg.MinAggregateConfidence {
+	if m.cfg.MinAggregateConfidence > 0 && aggConf < m.cfg.MinAggregateConfidence {
 		return rejectedAllocation(in, chain, "low_aggregate_confidence", now), nil
 	}
 
@@ -181,11 +186,18 @@ func rejectedAllocation(in contracts.SelectionOutputDTO, chain, reason, now stri
 
 // resolveProbability reads probability per failure policy. Returns
 // (effectiveP, rejectReason). When rejectReason != "", caller must reject.
-func resolveProbability(prob *contracts.ProbabilityEstimateDTO, onMissing string) (float64, string) {
+// The fallback prior is sourced from FailurePolicy.FallbackPriorProbability
+// (mirrors capital.yaml) — not hardcoded — and a missing/invalid value
+// causes a reject rather than a silent default.
+func resolveProbability(prob *contracts.ProbabilityEstimateDTO, fp config.CapitalFailurePolicyConfig) (float64, string) {
 	if prob == nil {
-		switch onMissing {
+		switch fp.OnMissingProbability {
 		case "fallback_prior":
-			return 0.35, "" // documented fallback prior
+			fp.FallbackPriorProbability = clampProbability(fp.FallbackPriorProbability)
+			if fp.FallbackPriorProbability <= 0 || fp.FallbackPriorProbability >= 1 {
+				return 0, "missing_fallback_prior"
+			}
+			return fp.FallbackPriorProbability, ""
 		case "reject", "":
 			return 0, "missing_probability"
 		}
@@ -196,6 +208,15 @@ func resolveProbability(prob *contracts.ProbabilityEstimateDTO, onMissing string
 		return 0, "invalid_probability"
 	}
 	return p, ""
+}
+
+// clampProbability returns 0 for NaN/Inf and otherwise the input unchanged.
+// Used to reject malformed configured priors at the boundary.
+func clampProbability(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
 }
 
 // aggregateConfidence collapses FeatureConfidence into a single [0,1] value

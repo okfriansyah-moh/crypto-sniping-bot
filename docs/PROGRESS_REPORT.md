@@ -10,7 +10,7 @@
 | Metric           | Value      |
 | ---------------- | ---------- |
 | **Total Phases** | 11         |
-| **Completed**    | 12         |
+| **Completed**    | 11         |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
 | **Not Started**  | 0          |

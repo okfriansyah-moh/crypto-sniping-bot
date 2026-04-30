@@ -107,10 +107,12 @@ func (m *Module) ProcessWithEstimates(
 		latencyGatePassed = false
 	}
 
-	// Append fallback diagnostic tags to RejectReason for traceability.
-	// This preserves backward-compat (REJECT only when rejectReason != "")
-	// while letting downstream observability consume the prefix.
-	if len(fallbackReasons) > 0 {
+	// Append fallback diagnostic tags to RejectReason ONLY when the decision
+	// is REJECT — the ValidatedEdgeDTO contract requires RejectReason to be
+	// empty on ACCEPT (see contracts/validated_edge.go). Fallback usage on an
+	// accepted edge is recorded via FallbackReasons (below) for downstream
+	// observability without violating the contract.
+	if decision == "REJECT" && len(fallbackReasons) > 0 {
 		tag := "fallback:" + strings.Join(fallbackReasons, ",")
 		if rejectReason == "" {
 			rejectReason = tag

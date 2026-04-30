@@ -31,6 +31,14 @@ type DataQualityDetectorFlags struct {
 }
 
 // DataQualityDetectorThresholds gates per-detector verdict math.
+//
+// NOTE: This struct is an *intentional subset* of config/data_quality.yaml
+// — only the keys actively consumed by Layer 1 detector code today.
+// The YAML file contains additional knobs (e.g. `rug_dangerous_selectors`,
+// `solana_require_mint_authority_renounced`,
+// `solana_require_freeze_authority_renounced`) that wire to detectors not
+// yet implemented. Those keys are silently ignored by yaml.Unmarshal until
+// their detectors land — DO NOT remove them from the YAML file.
 type DataQualityDetectorThresholds struct {
 	HoneypotRatioDeviationMax float64 `yaml:"honeypot_ratio_deviation_max"`
 	TaxTotalMaxBps            int32   `yaml:"tax_total_max_bps"`
@@ -168,6 +176,10 @@ type ProbabilityRuntimeConfig struct {
 	RejectNanOrInf          bool    `yaml:"reject_nan_or_inf"`
 	CalibrationWindowTrades int     `yaml:"calibration_window_trades"`
 	BrierMax                float64 `yaml:"brier_max"`
+	// Fallback observability — alert when validations fall back beyond the
+	// configured fraction within the window. Mirrors config/probability.yaml.
+	FallbackAlertPct       float64 `yaml:"fallback_alert_pct"`
+	FallbackAlertWindowSec int     `yaml:"fallback_alert_window_sec"`
 }
 
 // CapitalKellyConfig is the Kelly-fraction sub-block of CapitalConfig.
@@ -200,4 +212,8 @@ type CapitalFailurePolicyConfig struct {
 	OnMissingProbability string `yaml:"on_missing_probability"` // reject | fallback_prior
 	OnCohortLookupMiss   string `yaml:"on_cohort_lookup_miss"`  // use_default | reject
 	OnModeLookupStale    string `yaml:"on_mode_lookup_stale"`   // fallback_balanced | reject
+	// FallbackPriorProbability is the probability used when prob is nil and
+	// OnMissingProbability="fallback_prior". 0 means "unset" — module code
+	// must reject in that case rather than silently picking a hardcoded value.
+	FallbackPriorProbability float64 `yaml:"fallback_prior_probability"`
 }

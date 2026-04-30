@@ -141,22 +141,25 @@ func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contrac
 		isTaxAnomaly = DetectTaxAnomaly(buyTaxBps, sellTaxBps, m.cfg.MaxBuyTaxBps, m.cfg.MaxSellTaxBps)
 	}
 	if washEnabled {
-		// Without a holder count or pool age in MarketDataDTO, we conservatively
-		// pass the available swap-amount magnitude. This keeps the helper
-		// invoked (eliminating the all-false stub) while remaining truthful
-		// about cold-start data: tiny pools with single-trader bursts will be
-		// flagged once Phase 9.5 plumbs holder/pool-age enrichment.
-		if amount, ok := new(big.Int).SetString(in.Amount0Raw, 10); ok && amount != nil {
-			// Treat raw amount as proxy USD; helper rejects volume<=0 / holder=0.
-			isWashTrading = DetectWashTrading(0, 0, 0) || isWashTrading
-			_ = amount
-		}
+		// Phase 9.5 deferred: real wash-trading detection requires holder
+		// count and pool age, neither of which is present in MarketDataDTO
+		// today. Until that enrichment lands, leave isWashTrading=false
+		// rather than calling DetectWashTrading(0,0,0) which would always
+		// return false anyway and create the illusion of an active gate.
+		_ = isWashTrading
 	}
 
 	// Aggregate RiskScore via the shared helper (Phase 9 § 9.1).
+	// Pass per-detector weights from runtime config so YAML changes to
+	// `data_quality.risk_weights` actually take effect.
+	var weights *config.DataQualityRiskWeights
+	if m.runtime != nil {
+		weights = &m.runtime.RiskWeights
+	}
 	riskScore := AggregateRiskScore(
 		len(rejectReasons), 4,
 		isHoneypot, isFakeLiquidity, isWashTrading, isRugRisk, isTaxAnomaly,
+		weights,
 	)
 
 	// Sort reasons for determinism.

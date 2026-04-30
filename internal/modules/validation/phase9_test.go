@@ -61,11 +61,14 @@ func TestProcessWithEstimates_LowConfidence_FallsBack(t *testing.T) {
 	mod := New(validationCfg()).WithProbabilityRuntime(phase9ProbCfg())
 	prob := &contracts.ProbabilityEstimateDTO{Probability: 0.7, Calibration: 0.2}
 	got, _ := mod.ProcessWithEstimates(context.Background(), goodEdge(), prob, nil, nil)
-	// Should NOT be rejected purely by low_model_confidence — it's a tag.
-	if !strings.Contains(got.RejectReason, "low_model_confidence") {
-		t.Fatalf("expected low_model_confidence tag; got %q", got.RejectReason)
+	// low_model_confidence is a fallback signal, NOT a reject reason.
+	// Per contracts/validated_edge.go RejectReason MUST be empty on ACCEPT;
+	// the fallback is observable via ProbabilityUsed reverting to the prior.
+	if got.Decision == "ACCEPT" && got.RejectReason != "" {
+		t.Fatalf("RejectReason must be empty on ACCEPT; got %q", got.RejectReason)
 	}
-	// Probability used must be the prior, not 0.7.
+	// Probability used must be the prior, not 0.7 — this is the contract-
+	// preserving way to observe fallback behavior.
 	if math.Abs(got.ProbabilityUsed-0.55) > 1e-9 {
 		t.Errorf("expected fallback to prior 0.55; got %v", got.ProbabilityUsed)
 	}
@@ -74,8 +77,17 @@ func TestProcessWithEstimates_LowConfidence_FallsBack(t *testing.T) {
 func TestProcessWithEstimates_NilProb_TimeoutTag(t *testing.T) {
 	mod := New(validationCfg()).WithProbabilityRuntime(phase9ProbCfg())
 	got, _ := mod.ProcessWithEstimates(context.Background(), goodEdge(), nil, nil, nil)
-	if !strings.Contains(got.RejectReason, "prob_join_timeout") {
-		t.Fatalf("expected prob_join_timeout tag; got %q", got.RejectReason)
+	// prob_join_timeout is a fallback signal — same contract rule applies.
+	if got.Decision == "ACCEPT" && got.RejectReason != "" {
+		t.Fatalf("RejectReason must be empty on ACCEPT; got %q", got.RejectReason)
+	}
+	// On REJECT the fallback tag must be present for traceability.
+	if got.Decision == "REJECT" && !strings.Contains(got.RejectReason, "prob_join_timeout") {
+		t.Fatalf("REJECT must carry prob_join_timeout tag; got %q", got.RejectReason)
+	}
+	// Either way, the prior must have been used.
+	if math.Abs(got.ProbabilityUsed-0.55) > 1e-9 {
+		t.Errorf("expected prior 0.55 to be used on missing prob; got %v", got.ProbabilityUsed)
 	}
 }
 
