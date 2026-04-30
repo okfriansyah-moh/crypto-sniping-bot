@@ -234,3 +234,71 @@ func contains(slice []string, s string) bool {
 	}
 	return false
 }
+
+// TestProcess_PumpFunCreate_ZeroReserveNotRejected verifies that a brand-new
+// pump.fun token (EventTopic="PumpFunCreate", ReserveBaseRaw="0") passes the
+// reserve gate. Before this fix every pump.fun create got risk_score=0.45 and
+// was immediately rejected, making the bot blind to all pumpfun opportunities.
+func TestProcess_PumpFunCreate_ZeroReserveNotRejected(t *testing.T) {
+	m := New(defaultDQConfig(), nil)
+	in := contracts.MarketDataDTO{
+		EventID:         "mkt-pf-1",
+		TraceID:         "trace-pf-1",
+		CorrelationID:   "corr-pf-1",
+		VersionID:       "v1",
+		TokenAddress:    "BMcS31k3jDKfLdc9UmvA4drJKWK3kx3Jidvs8EJpump",
+		Chain:           "solana",
+		Market:          "solana-pumpfun",
+		EventTopic:      "PumpFunCreate",
+		ReserveBaseRaw:  "0",
+		ReserveTokenRaw: "0",
+		Reorged:         false,
+	}
+
+	out, err := m.Process(context.Background(), in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// New launches must not hit missing_reserves or be auto-rejected.
+	if out.Decision == "REJECT" {
+		t.Errorf("PumpFunCreate with zero reserves must not be REJECT; got Decision=%s RejectReasons=%v",
+			out.Decision, out.RejectReasons)
+	}
+	// Risk score must not include the false rug-risk contribution from a zero reserve.
+	// Prior buggy score was exactly 0.45 (0.25 base + 0.20 rug).
+	if out.RiskScore >= 0.45 {
+		t.Errorf("PumpFunCreate RiskScore should be < 0.45 (no reserve-based penalty), got %.4f", out.RiskScore)
+	}
+	if contains(out.RejectReasons, "missing_reserves") {
+		t.Error("PumpFunCreate must not produce a missing_reserves reject reason")
+	}
+}
+
+// TestProcess_NonLaunch_ZeroReserveStillRejected ensures the guard only
+// applies to new-launch events; existing behaviour for swaps/pool-inits is
+// preserved.
+func TestProcess_NonLaunch_ZeroReserveStillRejected(t *testing.T) {
+	m := New(defaultDQConfig(), nil)
+	in := contracts.MarketDataDTO{
+		EventID:        "mkt-swap-1",
+		TraceID:        "trace-swap-1",
+		CorrelationID:  "corr-swap-1",
+		VersionID:      "v1",
+		TokenAddress:   "0xTOKEN",
+		Chain:          "eth",
+		EventTopic:     "Swap",
+		ReserveBaseRaw: "0",
+		Reorged:        false,
+	}
+
+	out, err := m.Process(context.Background(), in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != "REJECT" {
+		t.Errorf("non-launch zero-reserve swap should still be REJECT; got %s", out.Decision)
+	}
+	if !contains(out.RejectReasons, "missing_reserves") {
+		t.Errorf("expected missing_reserves reason for non-launch zero reserve; got %v", out.RejectReasons)
+	}
+}

@@ -39,7 +39,9 @@ type Config struct {
 
 	// Phase 9 (Profitability Restoration) — additive runtime configs.
 	// Loaded from config/data_quality.yaml, config/feature.yaml,
-	// config/probability.yaml. See internal/app/config/phase9.go.
+	// config/probability.yaml. Structs defined in:
+	//   data_quality_runtime_config.go, feature_runtime_config.go,
+	//   probability_runtime_config.go, capital_runtime_config.go.
 	DataQualityRuntime DataQualityRuntimeConfig `yaml:"data_quality"`
 	Feature            FeatureRuntimeConfig     `yaml:"feature"`
 	ProbabilityRuntime ProbabilityRuntimeConfig `yaml:"probability"`
@@ -92,6 +94,17 @@ type EdgeConfig struct {
 	BaseWindowMs         int32   `yaml:"base_window_ms"`
 	WindowMomentumFactor float64 `yaml:"window_momentum_factor"`
 	TTLSeconds           int     `yaml:"ttl_seconds"`
+
+	// Phase 11 (Reference-Repo Improvements R2 — DETECT/EDGE).
+	// MaxDevBuyPctBps: reject EdgeDTO when EdgeDTO.DevBuyPctBps exceeds
+	//   this cap (m8s-lab heuristic; 0 = disabled).
+	// MaxCreatorRugCount: reject when the creator has at least this
+	//   many prior confirmed rugs (0 = disabled).
+	// MinDevWalletAgeSeconds: reject brand-new creator wallets younger
+	//   than this. AxisBot heuristic. 0 = disabled.
+	MaxDevBuyPctBps        int32 `yaml:"max_dev_buy_pct_bps"`
+	MaxCreatorRugCount     int32 `yaml:"max_creator_rug_count"`
+	MinDevWalletAgeSeconds int64 `yaml:"min_dev_wallet_age_seconds"`
 }
 
 // ValidationConfig holds Phase 2 EV gate parameters (fixed priors).
@@ -104,11 +117,42 @@ type ValidationConfig struct {
 	FixedCostsBps    int32   `yaml:"fixed_costs_bps"`
 	BuildSubmitP95Ms int32   `yaml:"build_submit_p95_ms"`
 	TTLSeconds       int     `yaml:"ttl_seconds"`
+
+	// Phase 10 (Reference-Repo Improvements / Task D) — consecutive-pass
+	// debounce gate. Mirrors mux's CONSECUTIVE_FILTER_MATCHES + window.
+	// When RequiredConsecutivePasses <= 1 the gate is disabled.
+	//
+	// NOTE (wiring): the pure debounce helper lives at
+	// internal/modules/validation/consecutive_debounce.go
+	// (Module.ProcessWithDebounce). It is intentionally NOT yet invoked
+	// from ValidationWorker because durable PriorPassState persistence
+	// (per token_lifecycle_id, with bounded TTL) requires an additive
+	// adapter method + side table that are scheduled for the next
+	// validation-pipeline phase. Until that wiring lands these fields
+	// remain inert — leaving them at 0 in YAML preserves legacy
+	// single-pass behaviour and is the only safe configuration today.
+	RequiredConsecutivePasses    int32 `yaml:"required_consecutive_passes"`
+	ConsecutivePassWindowSeconds int32 `yaml:"consecutive_pass_window_seconds"`
 }
 
 // SelectionConfig holds Phase 2 selection parameters.
 type SelectionConfig struct {
 	MaxOpenPositions int `yaml:"max_open_positions"`
+
+	// Phase 11 (Reference-Repo Improvements R2 — SELECT) — per-creator
+	// dedup. mux's pattern: at most this many open positions per
+	// creator wallet. 0 = disabled.
+	//
+	// NOTE (wiring): the pure helper lives at
+	// internal/modules/selection/per_creator_dedup.go
+	// (FilterByCreatorOpenPositions). It is intentionally NOT yet
+	// invoked from SelectionWorker because per-creator counting
+	// requires creator metadata to flow through ValidatedEdgeDTO and
+	// PositionStateDTO (additive DTO fields scheduled for the next
+	// selection-pipeline phase). Until that DTO+adapter wiring lands
+	// this field stays inert — leaving it at 0 in YAML preserves
+	// legacy behaviour and is the only safe configuration today.
+	MaxPositionsPerCreator int `yaml:"max_positions_per_creator"`
 }
 
 // CapitalConfig holds Phase 2 capital sizing parameters.
@@ -139,15 +183,40 @@ type CapitalConfig struct {
 	Exploration            CapitalExplorationConfig   `yaml:"exploration"`
 	MinAggregateConfidence float64                    `yaml:"min_aggregate_confidence"`
 	FailurePolicy          CapitalFailurePolicyConfig `yaml:"failure_policy"`
+
+	// Phase 10 (Reference-Repo Improvements / Task B) — de-hardcode
+	// AllocationDTO fields. Defaults preserve legacy behaviour:
+	//   * DefaultMaxSlippageBps == 0 → module uses legacy 200 bps.
+	//   * WalletShardCount  <= 0  → sharding disabled, wallet_shard=0
+	//                                emitted (legacy ShardIndex returns 0).
+	//   * DefaultCohortID   == "" → module uses legacy "default".
+	DefaultMaxSlippageBps int32  `yaml:"default_max_slippage_bps"`
+	WalletShardCount      int    `yaml:"wallet_shard_count"`
+	DefaultCohortID       string `yaml:"default_cohort_id"`
 }
 
 // PositionConfig holds Phase 2 position management parameters.
+// Phase 10 (Reference-Repo Improvements) extends this with trailing
+// stop, partial-TP1 scaling and volume-staleness time exit.
 type PositionConfig struct {
 	Tp1Bps              int32 `yaml:"tp1_bps"`
 	Tp2Bps              int32 `yaml:"tp2_bps"`
 	SlBps               int32 `yaml:"sl_bps"`
 	MaxHoldSeconds      int32 `yaml:"max_hold_seconds"`
 	PollIntervalSeconds int   `yaml:"poll_interval_seconds"`
+
+	// Phase 10 / Task A — Trailing stop activated AFTER TP1 hit.
+	// When 0, trailing stop is disabled (legacy behaviour).
+	TrailingStopBps       int32 `yaml:"trailing_stop_bps"`
+	Tp1FilledPctBps       int32 `yaml:"tp1_filled_pct_bps"` // 0..10000; e.g. 5000 = sell 50 % at TP1
+	TrailingActivateAtTp1 bool  `yaml:"trailing_activate_at_tp1"`
+
+	// Phase 10 / Task E — Volume-staleness time exit. When both > 0
+	// and the position has been held longer than VolumeStalenessSeconds
+	// while last 24h volume increased by less than
+	// VolumeStalenessMinDeltaPctBps, force exit (reason TIME_VOLUME_STALE).
+	VolumeStalenessSeconds        int32 `yaml:"volume_staleness_seconds"`
+	VolumeStalenessMinDeltaPctBps int32 `yaml:"volume_staleness_min_delta_pct_bps"`
 }
 
 // SolanaExecutionConfig holds Phase 7 Solana execution parameters.
@@ -198,6 +267,20 @@ type ExecutionConfig struct {
 	EthPriceUsd float64 `yaml:"eth_price_usd"`
 	// Phase 7: Solana execution parameters
 	Solana SolanaExecutionConfig `yaml:"solana"`
+
+	// Phase 10 (Reference-Repo Improvements / Task C) — adaptive priority fee.
+	// When mode == "adaptive", AdaptivePriorityFeeWei scales the RPC-suggested
+	// priority fee by (1 + latencyErrPct), clamped to [MinMultiplier, MaxMultiplier].
+	// mode == "static" (default) leaves the suggested fee untouched.
+	PriorityFee PriorityFeeConfig `yaml:"priority_fee"`
+}
+
+// PriorityFeeConfig governs the adaptive priority-fee policy used by the
+// EVM execution module. See internal/modules/execution/priority_fee.go.
+type PriorityFeeConfig struct {
+	Mode          string  `yaml:"mode"`           // "static" | "adaptive"
+	MinMultiplier float64 `yaml:"min_multiplier"` // e.g. 1.0
+	MaxMultiplier float64 `yaml:"max_multiplier"` // e.g. 3.0 (cap to avoid runaway)
 }
 
 // EvaluationConfig holds Phase 3 evaluation engine parameters.
@@ -205,6 +288,12 @@ type EvaluationConfig struct {
 	FPLossThresholdPct float64 `yaml:"fp_loss_threshold_pct"`
 	FNGainThresholdPct float64 `yaml:"fn_gain_threshold_pct"`
 	WindowSeconds      int     `yaml:"window_seconds"`
+
+	// Phase 11 (Reference-Repo Improvements R2 — EVALUATE) — enable the
+	// simulated-vs-realized variance computation when the orchestrator
+	// captures a pre-trade simulation. When false, ExecutionVarianceBps
+	// stays zero (legacy behaviour).
+	EnableSimulationDiff bool `yaml:"enable_simulation_diff"`
 }
 
 // StateMachineConfig holds Phase 3 state machine enforcement parameters.
@@ -259,6 +348,19 @@ type SlippageModelConfig struct {
 	FallbackP50Bps int32                  `yaml:"fallback_p50_bps"`
 	FallbackP95Bps int32                  `yaml:"fallback_p95_bps"`
 	ModelVersionID string                 `yaml:"model_version_id"`
+
+	// Phase 11 (Reference-Repo Improvements R2 — P/S/L MODELS) —
+	// congestion-aware multiplier. When enabled, the slippage model
+	// scales BaseP95 by 1 + clamp((latencyP95 - anchor) / anchor, 0,
+	// MaxMultiplier - 1). Disabled = always 1.0 (legacy).
+	Congestion SlippageCongestionConfig `yaml:"congestion"`
+}
+
+// SlippageCongestionConfig governs the latency-driven slippage uplift.
+type SlippageCongestionConfig struct {
+	Enabled         bool    `yaml:"enabled"`
+	LatencyAnchorMs int32   `yaml:"latency_anchor_ms"` // baseline RPC latency (e.g. 200)
+	MaxMultiplier   float64 `yaml:"max_multiplier"`    // hard cap (e.g. 2.0)
 }
 
 // SlippageBucketConfig is a single (liquidity, size) calibration entry.
@@ -303,6 +405,19 @@ type LearningConfig struct {
 	FnGainThresholdPct float64 `yaml:"fn_gain_threshold_pct"`
 	// RollbackCheckIntervalSeconds is how often the rollback watchdog runs (default: 300).
 	RollbackCheckIntervalSeconds int `yaml:"rollback_check_interval_seconds"`
+
+	// Phase 11 (Reference-Repo Improvements R2 — LEARN) — creator
+	// blacklist plumbing. When Enabled, every confirmed rug observation
+	// for a creator increments creator_blacklist.rug_count; the Edge
+	// module rejects future tokens once the count reaches
+	// MinRugsForBlacklist (paired with EdgeConfig.MaxCreatorRugCount).
+	CreatorBlacklist CreatorBlacklistConfig `yaml:"creator_blacklist"`
+}
+
+// CreatorBlacklistConfig governs Layer-10 creator-rug blacklist updates.
+type CreatorBlacklistConfig struct {
+	Enabled             bool  `yaml:"enabled"`
+	MinRugsForBlacklist int32 `yaml:"min_rugs_for_blacklist"` // typically 1
 }
 
 // RiskConfig holds Phase 6 global kill-switch / drawdown risk parameters.

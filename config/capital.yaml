@@ -64,3 +64,10 @@ capital:
     # "unset" — engine rejects rather than picking a hardcoded value.
     # Mirrors probability.prior_probability so both engines share intent.
     fallback_prior_probability: 0.35
+
+  # ── Phase 10 (Reference-Repo Improvements / Task B) ───────────
+  # De-hardcode AllocationDTO fields. When unset (0/empty), module
+  # falls back to legacy values: 200 / 1 / "default".
+  default_max_slippage_bps: 200 # AllocationDTO.MaxSlippageBps
+  wallet_shard_count: 1 # 1 = no sharding; >1 enables hash(token)%n routing
+  default_cohort_id: "default" # AllocationDTO.CohortID until learning supplies one

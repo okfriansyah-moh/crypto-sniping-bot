@@ -14,13 +14,18 @@ event_weights:
 
 # Phase 3: State machine enforcement parameters.
 state_machine:
-  quarantine_threshold: 3     # violations before QuarantineToken
+  quarantine_threshold: 3 # violations before QuarantineToken
 
 # Phase 3: Evaluation engine parameters.
 evaluation:
-  fp_loss_threshold_pct: -5.0   # PnlPct below this = false positive
-  fn_gain_threshold_pct: 20.0   # shadow trade gain above this = false negative
-  window_seconds: 3600          # rolling window for cohort Expectancy
+  fp_loss_threshold_pct: -5.0 # PnlPct below this = false positive
+  fn_gain_threshold_pct: 20.0 # shadow trade gain above this = false negative
+  window_seconds: 3600 # rolling window for cohort Expectancy
+  # Phase 11 (Reference-Repo R2 — EVALUATE) — when true, the evaluator
+  # computes simulated-vs-realized output variance (bps) and writes it
+  # to EvaluationDTO.ExecutionVarianceBps. Requires the orchestrator
+  # to populate SimulatedExpectedOutAmount before execution.
+  enable_simulation_diff: false
 
 # Phase 3: Execution retry / replacement parameters (merged with execution.yaml).
 # These are additive keys — do not remove execution.yaml keys.

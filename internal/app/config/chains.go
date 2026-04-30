@@ -86,4 +86,30 @@ type SolanaConfig struct {
 	// RateLimitBackoffMs is how long (ms) to suppress getTransaction calls
 	// after receiving an RPC -32003 daily-quota error. Default: 60000 (60s).
 	RateLimitBackoffMs int `yaml:"rate_limit_backoff_ms"`
+	// ProcessingWorkers controls how many concurrent goroutines may process
+	// notifications per program (calling getTransaction + normalize + emit).
+	// 0 or negative falls back to a safe default. Pump.fun in log-decode mode
+	// does not consume worker slots.
+	ProcessingWorkers int `yaml:"processing_workers"`
+	// PumpfunDecodeFromLogs toggles the log-only decoding path for Pump.fun
+	// CreateEvent. When true, no getTransaction RPC is issued for pumpfun
+	// notifications — all DTO fields are derived from the WS log payload.
+	// Default true (set explicitly in config/chains.yaml).
+	PumpfunDecodeFromLogs bool `yaml:"pumpfun_decode_from_logs"`
+
+	// Phase 11 (Reference-Repo Improvements R2 — INGEST) — hybrid
+	// transport. Mode "rpc" (default, legacy) uses the existing
+	// websocket+RPC stack. Mode "grpc" prefers a Yellowstone/Geyser
+	// gRPC stream; on N consecutive errors it falls back to RPC when
+	// FallbackOnError is true. GrpcEndpoint is empty in legacy mode.
+	Transport IngestionTransportConfig `yaml:"transport"`
+}
+
+// IngestionTransportConfig governs Solana streaming transport selection.
+type IngestionTransportConfig struct {
+	Mode            string `yaml:"mode"`          // "rpc" | "grpc" | "hybrid"
+	GrpcEndpoint    string `yaml:"grpc_endpoint"` // host:port
+	GrpcAuthToken   string `yaml:"grpc_auth_token" json:"-"`
+	FallbackOnError bool   `yaml:"fallback_on_error"` // hybrid → fall back to rpc
+	FallbackErrorN  int    `yaml:"fallback_error_n"`  // consecutive errors before fallback
 }

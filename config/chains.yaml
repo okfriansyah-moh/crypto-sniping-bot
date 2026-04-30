@@ -106,6 +106,18 @@ solana:
   # rate_limit_backoff_ms: how long to suppress getTransaction calls after a
   # -32003 daily-quota error. Default 60s; increase if quota resets take longer.
   rate_limit_backoff_ms: 60000
+  # processing_workers: bounded goroutine pool for non-pumpfun families
+  # (raydium-v4) so that slow getTransaction calls do not block the WS read
+  # loop and create a notification backlog. Pump.fun runs entirely from log
+  # decoding and does not consume these slots.
+  processing_workers: 8
+  # pumpfun_decode_from_logs: when true, derive Pump.fun CreateEvent fields
+  # directly from the logsSubscribe `Program data:` payload (Anchor self-CPI
+  # event) and skip the getTransaction round-trip. Eliminates RPC rate-limit
+  # pressure for pumpfun and removes the head-of-line blocking that previously
+  # produced events_emitted=0 in heartbeats. Set false to fall back to the
+  # tx-fetch path.
+  pumpfun_decode_from_logs: true
   ingestion_backoff:
     initial_ms: 200
     max_ms: 30000
@@ -117,3 +129,14 @@ solana:
     error_rate_failover_threshold: 0.1
     consecutive_ws_failures_threshold: 3
     circuit_open_cooldown_ms: 30000
+  # Phase 11 (Reference-Repo R2 — INGEST) — pluggable transport.
+  # Mode: "rpc" (default WS), "grpc" (Yellowstone/Geyser, not yet
+  # implemented), or "hybrid" (gRPC primary, RPC fallback after
+  # fallback_error_n consecutive errors). The grpc_auth_token is
+  # marshaled with json:"-" to avoid leaking into structured logs.
+  transport:
+    mode: "rpc"
+    grpc_endpoint: ""
+    grpc_auth_token: ""
+    fallback_on_error: true
+    fallback_error_n: 5

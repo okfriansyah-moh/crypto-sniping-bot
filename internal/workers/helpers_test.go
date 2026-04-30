@@ -724,3 +724,11 @@ func TestChainFromCorrelation_NoMarketDataEvent_ReturnsEmpty(t *testing.T) {
 		t.Errorf("expected empty when no market_data_event, got %q", got)
 	}
 }
+
+// Phase 11 (Reference-Repo R2 — LEARN) creator-blacklist stubs.
+func (s *stubAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.CreatorRugObservation) error {
+	return nil
+}
+func (s *stubAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
+	return nil, nil
+}

@@ -149,13 +149,13 @@ func (m *Module) ProcessWithEstimates(
 		ExecutionID:    executionID,
 		SizeUsd:        sizeUsd,
 		SizeBaseRaw:    "0",
-		MaxSlippageBps: 200,
+		MaxSlippageBps: m.effectiveMaxSlippageBps(),
 		WalletAddress:  m.cfg.WalletAddress,
-		WalletShard:    0,
+		WalletShard:    m.effectiveWalletShard(in.TokenAddress),
 
 		Rejected:     false,
 		RejectReason: "",
-		CohortID:     "default",
+		CohortID:     m.effectiveCohortID(),
 
 		ExpiresAt:   expiresAt,
 		AllocatedAt: now,

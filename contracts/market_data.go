@@ -49,4 +49,10 @@ type MarketDataDTO struct {
 	// Empty string for EVM and Raydium pool-init events.
 	Symbol string `json:"symbol,omitempty"`
 	Name   string `json:"name,omitempty"`
+
+	// Phase 10 (Reference-Repo Improvements / Task F) — Solana bonding
+	// curve progress in bps (0..10000). Populated by ingestion_solana for
+	// pump.fun / bonk.fun curve markets; 0 (the default) means "not
+	// applicable". Used by Layer 1 to reject already-graduated curves.
+	BondingCurveProgressBps int32 `json:"bonding_curve_progress_bps,omitempty"`
 }

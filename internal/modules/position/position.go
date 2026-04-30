@@ -109,26 +109,50 @@ func (m *Module) OpenPosition(
 }
 
 // PollExit checks whether the position should be exited and emits an updated snapshot.
-// evaluatedAt is the explicit evaluation timestamp passed by the polling worker;
-// using it instead of time.Now() ensures snapshot EventIDs are content-addressable
-// and that deterministic replay produces bit-for-bit identical outputs.
-// Returns the updated PositionStateDTO with ExitReason set if exit is triggered.
+// Backward-compatible wrapper for callers that do not yet supply 24h volume.
+// Phase 10 / Tasks A + E call PollExitWithVolume directly.
 func (m *Module) PollExit(
-	_ context.Context,
+	ctx context.Context,
 	pos contracts.PositionStateDTO,
 	currentPriceStr string,
 	evaluatedAt time.Time,
 ) (contracts.PositionStateDTO, error) {
+	return m.PollExitWithVolume(ctx, pos, currentPriceStr, 0, evaluatedAt)
+}
+
+// PollExitWithVolume is the Phase 10 evaluation entry point.
+// evaluatedAt is the explicit evaluation timestamp passed by the polling
+// worker; using it instead of time.Now() keeps replay bit-for-bit
+// deterministic. volumeUsd is the most recent observed 24h volume in USD
+// (0 disables the volume-staleness gate, Task E).
+//
+// Exit priority (Phase 10):
+//
+//  1. TP2 (full)
+//  2. TP1 (partial fill if cfg.Tp1FilledPctBps > 0, else full)
+//  3. SL (full)
+//  4. TRAILING (only after partial TP1 — peak-relative drop)
+//  5. TIME_VOLUME_STALE (cfg.VolumeStalenessSeconds elapsed AND volume Δ < threshold)
+//  6. TIME (max hold reached)
+//
+// Peak price is monotonically non-decreasing across the position's
+// lifetime — see skill monitoring-loop-engine.
+func (m *Module) PollExitWithVolume(
+	_ context.Context,
+	pos contracts.PositionStateDTO,
+	currentPriceStr string,
+	volumeUsd float64,
+	evaluatedAt time.Time,
+) (contracts.PositionStateDTO, error) {
 	now := evaluatedAt.UTC().Format(time.RFC3339Nano)
 
-	// Update snapshot price.
+	// Snapshot baseline. Carry forward all Phase 10 fields.
 	updated := pos
 	updated.CurrentPrice = currentPriceStr
 	updated.SnapshotAt = now
 
 	entryPrice, err := parsePrice(pos.EntryPrice)
 	if err != nil || entryPrice == 0 {
-		// Can't evaluate without entry price; emit price-only update.
 		updated.EventID = contracts.ContentIDFromString(fmt.Sprintf("pos-snap:%s:%s", pos.PositionID, now))
 		return updated, nil
 	}
@@ -139,33 +163,107 @@ func (m *Module) PollExit(
 		return updated, nil
 	}
 
+	// Peak tracking — monotonically non-decreasing.
+	prevPeak, _ := parsePrice(pos.PeakPrice)
+	if currentPrice > prevPeak {
+		updated.PeakPrice = currentPriceStr
+		updated.PeakObservedAt = now
+	}
+
+	// Volume snapshot for staleness gate (Task E).
+	if volumeUsd > 0 {
+		updated.LastVolumeUsd = volumeUsd
+		updated.LastVolumeCheckAt = now
+	}
+
 	pricePct := (currentPrice - entryPrice) / entryPrice
 
-	// TP2 check (higher threshold — must be evaluated before TP1).
+	// 1. TP2 (full exit).
 	tp2Threshold := float64(pos.Tp2Bps) / 10000.0
 	if pricePct >= tp2Threshold {
-		return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TP2", now), nil
+		return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TP2", now), nil
 	}
 
-	// TP1 check.
+	// 2. TP1 — partial fill marker if configured, else full exit.
 	tp1Threshold := float64(pos.Tp1Bps) / 10000.0
 	if pricePct >= tp1Threshold {
-		return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TP1", now), nil
+		// Already partial-filled? Skip TP1 branch; fall through to trailing/time.
+		if pos.Tp1FilledPctBps == 0 {
+			if m.cfg != nil && m.cfg.Tp1FilledPctBps > 0 && m.cfg.Tp1FilledPctBps < 10000 {
+				// Partial fill: stay open, mark Tp1FilledPctBps + activate trailing.
+				updated.Tp1FilledPctBps = m.cfg.Tp1FilledPctBps
+				if m.cfg.TrailingActivateAtTp1 && m.cfg.TrailingStopBps > 0 {
+					updated.TrailingStopBps = m.cfg.TrailingStopBps
+				}
+				updated.EventID = contracts.ContentIDFromString(
+					fmt.Sprintf("pos-tp1-partial:%s:%s", pos.PositionID, now))
+				return updated, nil
+			}
+			// Legacy: full exit at TP1.
+			return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TP1", now), nil
+		}
 	}
 
-	// Stop-loss check.
+	// 3. SL (full exit).
 	slThreshold := -float64(pos.SlBps) / 10000.0
 	if pricePct <= slThreshold {
-		return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "SL", now), nil
+		return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "SL", now), nil
 	}
 
-	// Time-based exit.
+	// 4. Trailing stop — only active after TP1 partial fill.
+	if pos.Tp1FilledPctBps > 0 && pos.TrailingStopBps > 0 {
+		peak, _ := parsePrice(updated.PeakPrice)
+		if peak > 0 {
+			trailingFloor := peak * (1.0 - float64(pos.TrailingStopBps)/10000.0)
+			if currentPrice <= trailingFloor {
+				return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TRAILING", now), nil
+			}
+		}
+	}
+
+	// 5. Volume-staleness time exit (Task E).
+	// Triggers only when:
+	//   - cfg enables it (VolumeStalenessSeconds > 0)
+	//   - we have a current volume sample AND a prior one to diff against
+	//   - the prior sample (LastVolumeCheckAt) is at least
+	//     VolumeStalenessSeconds old, so the delta covers a real window
+	//     instead of a single poll interval
+	//   - delta% over the window is below the configured floor (in bps).
+	if m.cfg != nil && m.cfg.VolumeStalenessSeconds > 0 && volumeUsd > 0 &&
+		pos.LastVolumeUsd > 0 && pos.LastVolumeCheckAt != "" {
+		lastCheckAt, parseErr := time.Parse(time.RFC3339Nano, pos.LastVolumeCheckAt)
+		if parseErr == nil {
+			windowAge := evaluatedAt.Sub(lastCheckAt)
+			if windowAge >= time.Duration(m.cfg.VolumeStalenessSeconds)*time.Second {
+				// Compute delta% in bps (float64) and clamp before
+				// converting to int32. Out-of-range float→int casts in
+				// Go are implementation-defined, so we defensively
+				// clamp to the int32 domain — same pattern used in
+				// ComputeExecutionVariance.
+				deltaPctF := ((volumeUsd - pos.LastVolumeUsd) / pos.LastVolumeUsd) * 10000.0
+				const maxBps = float64(math.MaxInt32)
+				const minBps = float64(math.MinInt32)
+				switch {
+				case deltaPctF > maxBps:
+					deltaPctF = maxBps
+				case deltaPctF < minBps:
+					deltaPctF = minBps
+				}
+				deltaPctBps := int32(deltaPctF)
+				if deltaPctBps < m.cfg.VolumeStalenessMinDeltaPctBps {
+					return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TIME_VOLUME_STALE", now), nil
+				}
+			}
+		}
+	}
+
+	// 6. Hard time exit.
 	if pos.OpenedAt != "" {
 		openedAt, parseErr := time.Parse(time.RFC3339Nano, pos.OpenedAt)
 		if parseErr == nil {
 			age := evaluatedAt.Sub(openedAt)
 			if age >= time.Duration(pos.MaxHoldSeconds)*time.Second {
-				return m.buildExit(pos, currentPriceStr, currentPrice, entryPrice, "TIME", now), nil
+				return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TIME", now), nil
 			}
 		}
 	}
@@ -211,6 +309,15 @@ func (m *Module) buildExit(
 		Tp2Bps:         pos.Tp2Bps,
 		SlBps:          pos.SlBps,
 		MaxHoldSeconds: pos.MaxHoldSeconds,
+
+		// Phase 10 — propagate trailing/peak/volume so analytics + replay
+		// can reconstruct the path without joining a separate snapshot.
+		PeakPrice:         pos.PeakPrice,
+		PeakObservedAt:    pos.PeakObservedAt,
+		TrailingStopBps:   pos.TrailingStopBps,
+		Tp1FilledPctBps:   pos.Tp1FilledPctBps,
+		LastVolumeUsd:     pos.LastVolumeUsd,
+		LastVolumeCheckAt: pos.LastVolumeCheckAt,
 
 		OpenedAt:   pos.OpenedAt,
 		ExitedAt:   now,

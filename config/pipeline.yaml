@@ -34,6 +34,12 @@ edge:
   base_window_ms: 4000 # base opportunity window in milliseconds
   window_momentum_factor: 0.5 # scales window by edge strength
   ttl_seconds: 8 # EdgeDTO TTL before expiry
+  # Phase 11 (Reference-Repo R2 — DETECT/EDGE) — creator-wallet hygiene
+  # gates. Set any value to 0 to DISABLE that specific gate. All three
+  # are AND'd: any failure rejects the edge with the matching reason.
+  max_dev_buy_pct_bps: 0 # reject if dev buys > N bps of supply at launch (0=off)
+  max_creator_rug_count: 0 # reject if creator wallet has ≥N prior rugs (0=off)
+  min_dev_wallet_age_seconds: 0 # reject if creator wallet age < N seconds (0=off)
 
 validation:
   prior_probability: 0.35 # fixed prior P(success) — Phase 2 simplification
@@ -44,9 +50,19 @@ validation:
   fixed_costs_bps: 150 # gas + protocol fees
   build_submit_p95_ms: 500 # estimated build+submit latency overhead
   ttl_seconds: 5 # ValidatedEdgeDTO TTL before expiry
+  # Phase 10 (Reference-Repo Improvements / Task D) — consecutive-pass
+  # debounce gate. An edge must pass EV+latency this many times in a
+  # row within the rolling window before being promoted to ACCEPT.
+  # Set to 1 to disable (default behaviour).
+  required_consecutive_passes: 1
+  consecutive_pass_window_seconds: 60
 
 selection:
   max_open_positions: 1 # Phase 2: one concurrent position only
+  # Phase 11 (Reference-Repo R2 — SELECT) — per-creator dedup gate.
+  # Caps concurrent open positions originating from the same creator
+  # wallet across the candidate pool. 0 disables the gate.
+  max_positions_per_creator: 0
 
 capital:
   wallet_address: "" # EIP-55 wallet address (set via env or config)
@@ -130,6 +146,15 @@ models:
     fallback_p50_ms: 250
     fallback_p95_ms: 800
 
+  # Phase 11 (Reference-Repo R2 — P/S/L MODELS) — congestion-aware
+  # slippage uplift. When latency_p95 exceeds anchor_ms, the slippage
+  # estimator multiplies p95 by (1 + excess/anchor), capped at
+  # max_multiplier. Disabled when enabled=false or anchor_ms<=0.
+  congestion:
+    enabled: false
+    latency_anchor_ms: 800
+    max_multiplier: 2.0
+
 execution:
   mode: "live" # "live" | "shadow" (Phase 5 placeholder)
   private_route_threshold_usd: 0 # 0 disables private routing in Phase 4
@@ -153,18 +178,25 @@ learning:
   observation_window_seconds: 3600 # how long to track a rejected token's return
   fn_gain_threshold_pct: 0.10 # minimum return to classify rejected trade as FN
   rollback_check_interval_seconds: 300 # how often the rollback watchdog runs
+  # Phase 11 (Reference-Repo R2 — LEARN) — creator blacklist auto-build.
+  # Confirmed-rug LearningRecords bump the creator's rug counter; once
+  # the counter reaches min_rugs_for_blacklist, the edge gate
+  # (max_creator_rug_count) starts rejecting that creator. 0 disables.
+  creator_blacklist:
+    enabled: false
+    min_rugs_for_blacklist: 2
 
 # ── Phase 8: Production Hardening Configuration ───────────────────────────────
 
 hardening:
-  reconciliation_interval_ms: 30000       # 30 seconds between reconciliation cycles
-  reconciliation_tolerance_bps: 50        # 0.5% on-chain vs DB discrepancy tolerance
-  partition_lease_ttl_sec: 60             # how long a partition lease is valid
-  partition_renew_interval_sec: 30        # how often workers renew leases
-  max_transient_retries: 5               # DLQ: max retries for transient errors
-  max_application_retries: 3             # DLQ: max retries for application errors
-  event_claim_batch_size: 10             # ClaimNextEvents batch size per call
-  drain_timeout_sec: 60                  # PromoteStrategyVersion drain timeout
-  evaluation_deadline_sec: 3600          # seconds after execution before eval overdue
-  recovery_grace_sec: 300                # seconds before marking a tx as lost
-  max_reorg_depth: 12                    # EVM max safe reorg depth before halt
+  reconciliation_interval_ms: 30000 # 30 seconds between reconciliation cycles
+  reconciliation_tolerance_bps: 50 # 0.5% on-chain vs DB discrepancy tolerance
+  partition_lease_ttl_sec: 60 # how long a partition lease is valid
+  partition_renew_interval_sec: 30 # how often workers renew leases
+  max_transient_retries: 5 # DLQ: max retries for transient errors
+  max_application_retries: 3 # DLQ: max retries for application errors
+  event_claim_batch_size: 10 # ClaimNextEvents batch size per call
+  drain_timeout_sec: 60 # PromoteStrategyVersion drain timeout
+  evaluation_deadline_sec: 3600 # seconds after execution before eval overdue
+  recovery_grace_sec: 300 # seconds before marking a tx as lost
+  max_reorg_depth: 12 # EVM max safe reorg depth before halt

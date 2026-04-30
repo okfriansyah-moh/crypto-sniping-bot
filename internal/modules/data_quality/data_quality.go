@@ -110,10 +110,19 @@ func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contrac
 		taxEnabled = m.runtime.Detectors.TaxAnomaly
 	}
 
+	// isNewLaunch is true for brand-new bonding-curve events (Pump.fun
+	// CreateEvent). These tokens start with zero reserves by design — the
+	// bonding curve fills as buyers come in. Applying a missing_reserves
+	// gate would reject every single new launch before anyone can trade,
+	// making the bot blind to all pump.fun opportunities.
+	// For all other event types (pool inits, swaps) reserves ARE expected.
+	isNewLaunch := in.EventTopic == "PumpFunCreate"
+
 	// Check 1: Missing reserve data → reject.
-	if in.ReserveBaseRaw == "" || in.ReserveBaseRaw == "0" {
+	// Skipped for new-launch events (zero reserves expected).
+	if !isNewLaunch && (in.ReserveBaseRaw == "" || in.ReserveBaseRaw == "0") {
 		rejectReasons = append(rejectReasons, "missing_reserves")
-	} else {
+	} else if !isNewLaunch {
 		// Check 2: Minimum reserve threshold.
 		reserveBase, ok := new(big.Int).SetString(in.ReserveBaseRaw, 10)
 		minReserve, _ := new(big.Int).SetString(m.cfg.MinReserveBaseWei, 10)
@@ -133,9 +142,26 @@ func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contrac
 		rejectReasons = append(rejectReasons, "missing_token_address")
 	}
 
+	// Phase 10 (Reference-Repo Improvements / Task F) — Solana bonding
+	// curve progress filter. Reject pump.fun / bonk.fun markets whose
+	// bonding curve has already advanced past the configured cap (a
+	// late-curve buy has limited remaining upside before graduation).
+	// Skipped when the threshold is unset (0) or the event has no curve
+	// progress (EVM events leave BondingCurveProgressBps == 0).
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxBondingCurveProgressBps > 0 &&
+		in.BondingCurveProgressBps > m.runtime.Thresholds.MaxBondingCurveProgressBps {
+		rejectReasons = append(rejectReasons, "bonding_curve_too_advanced")
+	}
+
 	// Phase 9 (§ 9.1) — invoke real detector helpers.
 	if rugEnabled {
-		isRugRisk = DetectRugRisk(lpLocked, in.ReserveBaseRaw, m.cfg.MinReserveBaseWei)
+		// For new-launch events, DetectRugRisk would always fire (reserve=0 < threshold)
+		// which is a tautology for a freshly minted bonding-curve token.
+		// Only apply the rug-risk reserve gate to events where liquidity is expected.
+		if !isNewLaunch {
+			isRugRisk = DetectRugRisk(lpLocked, in.ReserveBaseRaw, m.cfg.MinReserveBaseWei)
+		}
 	}
 	if taxEnabled {
 		isTaxAnomaly = DetectTaxAnomaly(buyTaxBps, sellTaxBps, m.cfg.MaxBuyTaxBps, m.cfg.MaxSellTaxBps)

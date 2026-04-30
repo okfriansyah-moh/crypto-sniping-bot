@@ -63,36 +63,81 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and invar
 
 ```
 crypto-sniping-bot/
-├── cmd/                        # Entry points (serve, migrate)
-├── contracts/
-│   └── contracts.go            # Immutable DTO definitions — the ONLY inter-module coupling
+├── cmd/                        # Entry points (serve, migrate, telegram)
+├── contracts/                  # Immutable DTO definitions — the ONLY inter-module coupling
+│   ├── contracts.go            # Base types and shared constants
+│   ├── market_data.go          # MarketDataDTO (Layer 0 output)
+│   ├── data_quality.go         # DataQualityDTO (Layer 1 output)
+│   ├── feature.go              # FeatureDTO + FeatureConfidence (Layer 2 output)
+│   ├── edge.go                 # EdgeDTO (Layer 3 output)
+│   ├── probability.go          # ProbabilityEstimateDTO (Layer 4 output)
+│   ├── validated_edge.go       # ValidatedEdgeDTO (Layer 5 output)
+│   ├── selection.go            # SelectionOutput (Layer 6 output)
+│   ├── allocation.go           # AllocationDTO (Layer 7 output)
+│   ├── execution.go            # ExecutionResultDTO (Layer 8 output)
+│   ├── position.go             # PositionState (Layer 9 output)
+│   └── learning_record.go      # LearningRecord (Layer 10 output)
 ├── database/
 │   ├── adapter.go              # Single DB access interface (all modules use this)
-│   └── migrations/             # Append-only SQL migrations
+│   ├── engines/postgres/       # PostgreSQL adapter implementation
+│   └── migrations/             # Append-only SQL migrations (17 files)
 ├── internal/
 │   ├── app/
-│   │   ├── config/config.go    # Application config wiring
-│   │   └── web/server.go       # HTTP server bootstrap
+│   │   ├── config/             # Application config structs (YAML-backed)
+│   │   └── web/server.go       # HTTP server + health check endpoint
 │   ├── modules/                # Domain modules — one package per pipeline stage
-│   │   └── health/             # Reference implementation (vertical slice pattern)
+│   │   ├── ingestion/          # Layer 0: EVM DEX event subscription
+│   │   ├── ingestion_solana/   # Layer 0: Solana Raydium/PumpFun event subscription
+│   │   ├── data_quality/       # Layer 1: Scam/rug/honeypot/wash detection
+│   │   ├── features/           # Layer 2: Feature extraction + normalization
+│   │   ├── edge/               # Layer 3: Edge detection + creator filters
+│   │   ├── models/             # Layer 4: Probability, slippage, latency, congestion models
+│   │   ├── validation/         # Layer 5: EV gate + consecutive-pass debounce
+│   │   ├── selection/          # Layer 6: Top-K greedy + per-creator dedup
+│   │   ├── capital/            # Layer 7: Kelly sizing + cohort multipliers
+│   │   ├── execution/          # Layer 8: EVM wallet sharding + tx submission
+│   │   ├── execution_solana/   # Layer 8: Solana swap execution
+│   │   ├── position/           # Layer 9: TP1/TP2/SL/trailing stop monitoring
+│   │   ├── evaluation/         # Layer 9→10: Trade outcome evaluation + sim-diff
+│   │   ├── learning/           # Layer 10: Adaptive learning + creator blacklist
+│   │   ├── state_machine/      # Token lifecycle state machine
+│   │   ├── traceability/       # Four-field trace contract enforcement
+│   │   └── health/             # Health check module
 │   ├── orchestrator/           # Pipeline orchestration + checkpointing
+│   ├── rpc/                    # Multi-endpoint RPC pool + circuit breaker
+│   ├── resource_control/       # Drawdown protection + kill switch
+│   ├── telegram/               # Event-bus-only Telegram dispatcher
 │   └── workers/                # Event bus worker dispatchers
-├── config/
+├── config/                     # All tunable parameters — no hardcoded values in code
+│   ├── pipeline.yaml           # Pipeline metadata, position, validation, edge, selection
+│   ├── capital.yaml            # Kelly sizing, cohort multipliers, exploration budget
+│   ├── chains.yaml             # EVM + Solana chain config, RPC endpoints, factories
+│   ├── data_quality.yaml       # Scam detector flags, thresholds, risk weights
+│   ├── feature.yaml            # Feature extractor config + Phase 11 holder/social
+│   ├── probability.yaml        # Probability model consumption rules
+│   ├── execution.yaml          # Wallet sharding, concurrency, Solana exec params
+│   ├── gas.yaml                # Gas strategy, fee bump config
+│   ├── budgets.yaml            # Daily trade budgets per chain/market
+│   ├── priority.yaml           # Event priority weights, evaluation flags
 │   └── phases.yaml             # Phase definitions, complexity scores, skill assignments
 ├── scripts/
 │   └── run_parallel.sh         # Parallel development orchestrator (3-mode)
 ├── docs/                       # Architecture specs and implementation roadmap
 │   ├── architecture.md         # Single source of truth — system design
 │   ├── implementation_roadmap.md # Phase-by-phase build guide (execution-grade)
-│   ├── dto_contracts.md        # DTO registry — field-level definitions
-│   ├── db_adapter_spec.md      # Database adapter interface and migration strategy
+│   ├── dto_contracts.md        # DTO registry — all fields, types, constraints
+│   ├── db_adapter_spec.md      # Database adapter interface + migration strategy
 │   ├── orchestrator_spec.md    # Orchestrator execution model, checkpointing, resume
 │   ├── PARALLEL_DEV.md         # Parallel development operator guide
 │   ├── AGENTS_AND_SKILLS.md    # Agent and skill registry
 │   ├── PROGRESS_REPORT.md      # Implementation phase progress tracking
-│   └── STARTER_GUIDE.md        # Getting started playbook
+│   └── STARTER_GUIDE.md        # Getting started playbook (beginner-friendly)
+├── tests/
+│   ├── unit/                   # Unit tests per module
+│   ├── integration/            # End-to-end pipeline wiring tests
+│   └── modules/                # Module-level contract tests
 ├── .github/
-│   ├── skills/                 # 41 skills — pre-digested knowledge packages for agents
+│   ├── skills/                 # 50+ skills — pre-digested knowledge packages for agents
 │   └── copilot-instructions.md # Agent architectural constraints
 └── output/                     # Generated artifacts (gitignored)
 ```
@@ -101,17 +146,22 @@ crypto-sniping-bot/
 
 ## Implementation Phases
 
-| Phase | Name                   | Group | Description                                                    |
-| ----- | ---------------------- | ----- | -------------------------------------------------------------- |
-| 0     | core-infrastructure    | A     | DB, event bus, adapter, orchestrator, migrations               |
-| 1     | dex-ingestion          | A     | DEX scanner, RPC pool, `MarketDataDTO` → event bus             |
-| 2     | first-trade-pipeline   | A     | End-to-end: DQ → Feature → Edge → Capital → Execute → Position |
-| 3     | evaluation-correctness | B     | Learning records, strategy versioning, replay engine           |
-| 4     | signal-quality         | B     | Full probability models, feature stability, anti-manipulation  |
-| 5     | learning-engine        | B     | Adaptive learning, strategy decay detection, auto-disable      |
-| 6     | production-hardening   | C     | Observability, drawdown protection, wallet sharding, Telegram  |
+| Phase | Name                      | Group | Description                                                                                           |
+| ----- | ------------------------- | ----- | ----------------------------------------------------------------------------------------------------- |
+| 0     | core-infrastructure       | A     | DB, event bus, adapter, orchestrator, migrations                                                      |
+| 1     | dex-ingestion             | A     | DEX scanner, RPC pool, `MarketDataDTO` → event bus                                                    |
+| 2     | first-trade-pipeline      | A     | End-to-end: DQ → Feature → Edge → Capital → Execute → Position                                        |
+| 3     | evaluation-correctness    | B     | Learning records, strategy versioning, replay engine                                                  |
+| 4     | signal-quality            | B     | Full probability models, feature stability, anti-manipulation                                         |
+| 5     | learning-engine           | B     | Adaptive learning, strategy decay detection, auto-disable                                             |
+| 6     | production-hardening      | C     | Observability, drawdown protection, wallet sharding, Telegram                                         |
+| 7     | solana-market             | C     | Solana Raydium/PumpFun ingestion + execution, hybrid transport                                        |
+| 8     | production-hardening-r2   | C     | Reconciliation, partition leasing, DLQ, crash recovery, reorg guard                                   |
+| 9     | profitability-restoration | D     | Real scam detection, live features, Kelly sizing, price-feed monitor                                  |
+| 10    | reference-repo-r1         | D     | Trailing stop, consecutive-pass gate, bonding curve filter                                            |
+| 11    | reference-repo-r2         | D     | Creator hygiene, holder concentration, social links, congestion slippage, per-creator dedup, sim-diff |
 
-**Group rules:** Group A phases are sequential (each requires the prior). Group B phases (3–5) may run in parallel. Group C runs only after all Group B phases pass.
+**Group rules:** Groups A → B → C → D are sequential. Phases within the same group may run in parallel.
 
 See [`docs/implementation_roadmap.md`](docs/implementation_roadmap.md) for exact file paths, function signatures, and exit criteria per phase.
 
@@ -160,8 +210,21 @@ All thresholds, paths, and tunable parameters live in `config/`. No hardcoded va
 
 Key files:
 
-- `config/phases.yaml` — phase definitions, complexity scores, group assignments, per-phase skills
-- See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION`)
+| File                       | Purpose                                                                   |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `config/pipeline.yaml`     | Pipeline metadata, position exits, edge thresholds, validation, selection |
+| `config/capital.yaml`      | Kelly sizing, cohort multipliers, exploration budget, failure policy      |
+| `config/chains.yaml`       | EVM chain RPC endpoints, factory addresses; Solana programs + transport   |
+| `config/data_quality.yaml` | Scam detector flags, thresholds, risk weights (Layer 1)                   |
+| `config/feature.yaml`      | Feature extractor config incl. holder concentration and social links      |
+| `config/probability.yaml`  | Probability model consumption rules, fallback alerts                      |
+| `config/execution.yaml`    | Wallet sharding, concurrency limits, Solana execution params              |
+| `config/gas.yaml`          | Gas strategy, fee bump config, priority fee settings                      |
+| `config/budgets.yaml`      | Daily trade budgets per chain/market                                      |
+| `config/priority.yaml`     | Event priority weights, evaluation flags (e.g. `enable_simulation_diff`)  |
+| `config/phases.yaml`       | Phase definitions, complexity scores, group assignments, per-phase skills |
+
+See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION`).
 
 ---
 
