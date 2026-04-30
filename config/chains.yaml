@@ -78,18 +78,22 @@ solana:
       priority: 1
       kind: http
       region: us-east
+      provider: quicknode # primary: QuickNode
     - url: "${SOLANA_WS_1}"
       priority: 1
       kind: ws
       region: us-east
+      provider: quicknode
     - url: "${SOLANA_RPC_HTTP_2}"
       priority: 2
       kind: http
       region: us-east
+      provider: helius # fallback: Helius
     - url: "${SOLANA_WS_2}"
       priority: 2
       kind: ws
       region: us-east
+      provider: helius
   programs:
     - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
       family: raydium-v4

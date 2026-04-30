@@ -36,19 +36,29 @@ import (
 const (
 	solanaRequestTimeout   = 10 * time.Second
 	solanaWSConnectTimeout = 20 * time.Second
-	solanaWSReadDeadline   = 90 * time.Second // extended: ping every 20s keeps it alive
-	solanaWSPingInterval   = 20 * time.Second // client-side keepalive ping interval
+	solanaWSReadDeadline   = 90 * time.Second // extended: pings keep it alive
 	solanaMaxResponseBytes = 4 << 20          // 4 MiB per RPC response
+	// solanaWSPingInterval removed: each provider dialect owns its own value.
 )
 
+// endpointEntry pairs an RPC endpoint URL with the provider dialect that
+// governs its rate-limit codes, ping cadence, and other behaviours.
+type endpointEntry struct {
+	URL     string
+	Dialect ProviderDialect
+}
+
 // SolanaClient implements ingestion_solana.SolanaRPCClient.
-// Supports multi-endpoint failover: on a -32003 rate-limit error the client
+// Supports multi-endpoint failover: on a provider rate-limit error the client
 // rotates to the next configured endpoint so the caller's retry hits a
 // different provider (e.g. QuickNode → Helius).
+// Each endpoint carries a ProviderDialect that captures provider-specific
+// behaviours (rate-limit codes, WS ping interval) — the core client logic is
+// provider-agnostic.
 type SolanaClient struct {
-	wsEndpoints   []string // all configured ws endpoints, priority order
-	httpEndpoints []string // all configured http endpoints, priority order
-	// wsIdx / httpIdx are atomically incremented on -32003 errors.
+	wsEndpoints   []endpointEntry // all configured ws endpoints, priority order
+	httpEndpoints []endpointEntry // all configured http endpoints, priority order
+	// wsIdx / httpIdx are atomically incremented on provider rate-limit errors.
 	// activeWS / activeHTTP mod-wrap so the index cycles through all endpoints.
 	wsIdx      atomic.Int64
 	httpIdx    atomic.Int64
@@ -56,31 +66,26 @@ type SolanaClient struct {
 	logger     *slog.Logger
 	idCounter  atomic.Int64
 	// txRateLimiter throttles getTransaction calls to the configured req/s cap.
-	// Waiting for a tick before each call prevents -32013 rate-limit errors.
+	// Waiting for a tick before each call prevents rate-limit errors.
 	txRateLimiter <-chan time.Time
 }
 
-// activeWS returns the current WebSocket endpoint.
-func (c *SolanaClient) activeWS() string {
+// activeWS returns the current WebSocket endpoint entry.
+// Returns a zero-value endpointEntry (empty URL) if no WS endpoints are configured.
+func (c *SolanaClient) activeWS() endpointEntry {
 	if len(c.wsEndpoints) == 0 {
-		return ""
+		return endpointEntry{}
 	}
 	return c.wsEndpoints[int(c.wsIdx.Load())%len(c.wsEndpoints)]
 }
 
-// activeHTTP returns the current HTTP endpoint.
-func (c *SolanaClient) activeHTTP() string {
+// activeHTTP returns the current HTTP endpoint entry.
+// Returns a zero-value endpointEntry (empty URL) if no HTTP endpoints are configured.
+func (c *SolanaClient) activeHTTP() endpointEntry {
 	if len(c.httpEndpoints) == 0 {
-		return ""
+		return endpointEntry{}
 	}
 	return c.httpEndpoints[int(c.httpIdx.Load())%len(c.httpEndpoints)]
-}
-
-// isWSRateLimited returns true when the RPC error is a -32003 quota error on the WS path.
-// When true the caller should rotate and return the error so the reconnect loop retries
-// on the next endpoint.
-func isWSRateLimited(e *rpcError) bool {
-	return e != nil && e.Code == -32003
 }
 
 // NewSolanaClient returns a SolanaClient built from the given SolanaConfig.
@@ -94,17 +99,21 @@ func NewSolanaClient(cfg config.SolanaConfig, logger *slog.Logger) (*SolanaClien
 
 	// Collect endpoints by kind, preserving the order they appear in config
 	// (config is already sorted by priority in chains.yaml).
-	var wsEPs, httpEPs []string
+	// Each entry carries a ProviderDialect derived from the provider hint or URL.
+	var wsEPs, httpEPs []endpointEntry
 	for _, ep := range cfg.RPCEndpoints {
+		if ep.URL == "" {
+			continue
+		}
+		entry := endpointEntry{
+			URL:     ep.URL,
+			Dialect: detectDialect(ep.Provider, ep.URL),
+		}
 		switch ep.Kind {
 		case "http":
-			if ep.URL != "" {
-				httpEPs = append(httpEPs, ep.URL)
-			}
+			httpEPs = append(httpEPs, entry)
 		case "ws":
-			if ep.URL != "" {
-				wsEPs = append(wsEPs, ep.URL)
-			}
+			wsEPs = append(wsEPs, entry)
 		}
 	}
 
@@ -112,11 +121,15 @@ func NewSolanaClient(cfg config.SolanaConfig, logger *slog.Logger) (*SolanaClien
 		return nil, fmt.Errorf("solana_client: no RPC endpoints configured in chains.yaml")
 	}
 
-	if len(wsEPs) > 1 {
-		logger.Info("solana_client_endpoints_loaded",
-			"ws_count", len(wsEPs),
-			"http_count", len(httpEPs),
-		)
+	logger.Info("solana_client_endpoints_loaded",
+		"ws_count", len(wsEPs),
+		"http_count", len(httpEPs),
+	)
+	for i, e := range wsEPs {
+		logger.Info("solana_ws_endpoint", "index", i, "provider", e.Dialect.Name())
+	}
+	for i, e := range httpEPs {
+		logger.Info("solana_http_endpoint", "index", i, "provider", e.Dialect.Name())
 	}
 
 	return &SolanaClient{
@@ -174,11 +187,11 @@ func (c *SolanaClient) nextID() int64 {
 
 // httpRPC sends a single JSON-RPC request to the active HTTP endpoint and
 // unmarshals the result into result (must be a pointer).
-// On a -32003 rate-limit error the HTTP endpoint index is rotated so the next
-// call uses the fallback provider.
+// On a provider rate-limit error (dialect-specific code) the HTTP endpoint
+// index is rotated so the next call uses the fallback provider.
 func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []interface{}, result interface{}) error {
-	httpEP := c.activeHTTP()
-	if httpEP == "" {
+	entry := c.activeHTTP()
+	if entry.URL == "" {
 		return fmt.Errorf("solana_client: no HTTP endpoint configured")
 	}
 
@@ -193,7 +206,7 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 		return fmt.Errorf("solana_client: marshal %s request: %w", method, err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpEP, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, entry.URL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("solana_client: build %s request: %w", method, err)
 	}
@@ -215,12 +228,15 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 		return fmt.Errorf("solana_client: parse %s response: %w", method, err)
 	}
 	if rpcResp.Error != nil {
-		if rpcResp.Error.Code == -32003 {
+		if entry.Dialect.IsRateLimited(rpcResp.Error.Code) {
 			newIdx := c.httpIdx.Add(1)
+			nextEntry := c.httpEndpoints[int(newIdx)%len(c.httpEndpoints)]
 			c.logger.Warn("solana_http_rate_limited_rotating",
 				"method", method,
-				"from", httpEP,
-				"to", c.httpEndpoints[int(newIdx)%len(c.httpEndpoints)],
+				"provider", entry.Dialect.Name(),
+				"from", entry.URL,
+				"to_provider", nextEntry.Dialect.Name(),
+				"to", nextEntry.URL,
 				"total_endpoints", len(c.httpEndpoints),
 			)
 		}
@@ -241,16 +257,18 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 //   - ctx is cancelled, or
 //   - the WebSocket connection drops (channel is closed; caller should reconnect).
 //
-// When the server returns -32003 (rate limit) the active WS endpoint is rotated
-// so that the next call from runProgramLoop's reconnect loop hits the fallback
-// provider (e.g. QuickNode → Helius).
+// When the provider returns a rate-limit error the active WS endpoint is
+// rotated so that the next call from runProgramLoop's reconnect loop hits the
+// fallback provider (e.g. QuickNode → Helius).
 func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-chan ingestion_solana.LogsNotification, error) {
-	wsEP := c.activeWS()
-	if wsEP == "" {
+	// Capture the current endpoint entry — dialect and URL are bound for the
+	// lifetime of this subscription session.
+	wsEntry := c.activeWS()
+	if wsEntry.URL == "" {
 		return nil, fmt.Errorf("solana_client: no WebSocket endpoint configured")
 	}
 
-	conn, err := dialWS(wsEP, solanaWSConnectTimeout)
+	conn, err := dialWS(wsEntry.URL, solanaWSConnectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("solana_client: ws connect: %w", err)
 	}
@@ -284,12 +302,15 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 	}
 	if subResp.Error != nil {
 		conn.Close()
-		if isWSRateLimited(subResp.Error) {
+		if wsEntry.Dialect.IsRateLimited(subResp.Error.Code) {
 			newIdx := c.wsIdx.Add(1)
+			nextEntry := c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
 			c.logger.Warn("solana_ws_rate_limited_rotating",
 				"program", programID,
-				"from", wsEP,
-				"to", c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)],
+				"provider", wsEntry.Dialect.Name(),
+				"from", wsEntry.URL,
+				"to_provider", nextEntry.Dialect.Name(),
+				"to", nextEntry.URL,
 				"total_endpoints", len(c.wsEndpoints),
 			)
 		}
@@ -309,15 +330,15 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 		defer close(ch)
 		c.logger.Info("solana_ws_subscribed",
 			"program", programID,
+			"provider", wsEntry.Dialect.Name(),
 			"subscription_id", subID,
 		)
 
-		// Keepalive: send a ping every solanaWSPingInterval so the server
-		// responds with a pong. ReadJSON consumes pongs silently, which
-		// means each pong arrival resets the effective idle window and
-		// prevents the 90 s read-deadline from firing on quiet slots.
+		// Keepalive: send pings at the provider's recommended interval.
+		// Each pong resets the read deadline, preventing the 90 s window
+		// from firing on quiet slots.
 		go func() {
-			ticker := time.NewTicker(solanaWSPingInterval)
+			ticker := time.NewTicker(wsEntry.Dialect.WSPingInterval())
 			defer ticker.Stop()
 			for {
 				select {
@@ -516,11 +537,25 @@ type solanaTransactionJSON struct {
 	// Meta.LoadedAddresses is populated for v0 transactions that use Address
 	// Lookup Tables (ALTs).  Account indices in instructions refer into the
 	// combined list: static keys + ALT writable + ALT readonly.
+	// Meta.InnerInstructions is populated when a top-level instruction triggers
+	// CPI calls. Pump.fun "create" is frequently invoked via CPI (e.g. from
+	// launchpad wrappers), so inner instructions must be parsed to avoid
+	// silently missing token creation events.
 	Meta struct {
 		LoadedAddresses struct {
 			Writable []string `json:"writable"`
 			Readonly []string `json:"readonly"`
 		} `json:"loadedAddresses"`
+		InnerInstructions []struct {
+			// Index is the position of the outer instruction that triggered
+			// these CPI calls. Used only to assign a stable InstructionData.Index.
+			Index        int `json:"index"`
+			Instructions []struct {
+				ProgramIDIndex int    `json:"programIdIndex"`
+				Accounts       []int  `json:"accounts"`
+				Data           string `json:"data"` // base58
+			} `json:"instructions"`
+		} `json:"innerInstructions"`
 	} `json:"meta"`
 }
 
@@ -547,25 +582,47 @@ func parseGetTransactionResponse(signature string, raw json.RawMessage) (*ingest
 	keys = append(keys, tx.Meta.LoadedAddresses.Writable...)
 	keys = append(keys, tx.Meta.LoadedAddresses.Readonly...)
 
-	instrs := make([]ingestion_solana.InstructionData, 0, len(msg.Instructions))
-	for i, instr := range msg.Instructions {
-		if instr.ProgramIDIndex < 0 || instr.ProgramIDIndex >= len(keys) {
-			continue
+	// decodeInstr is a shared helper that resolves a single instruction's
+	// programID, accounts, and data bytes from the combined account key list.
+	decodeInstr := func(programIDIndex int, accountIndices []int, data string, index int) (ingestion_solana.InstructionData, bool) {
+		if programIDIndex < 0 || programIDIndex >= len(keys) {
+			return ingestion_solana.InstructionData{}, false
 		}
-		accounts := make([]string, 0, len(instr.Accounts))
-		for _, idx := range instr.Accounts {
+		accounts := make([]string, 0, len(accountIndices))
+		for _, idx := range accountIndices {
 			if idx >= 0 && idx < len(keys) {
 				accounts = append(accounts, keys[idx])
 			}
 		}
-		// Data is base58 in the JSON API; store as raw bytes for the normalizer.
-		data := decodeBase58(instr.Data)
-		instrs = append(instrs, ingestion_solana.InstructionData{
-			ProgramID: keys[instr.ProgramIDIndex],
+		return ingestion_solana.InstructionData{
+			ProgramID: keys[programIDIndex],
 			Accounts:  accounts,
-			Data:      data,
-			Index:     i,
-		})
+			Data:      decodeBase58(data),
+			Index:     index,
+		}, true
+	}
+
+	instrs := make([]ingestion_solana.InstructionData, 0, len(msg.Instructions))
+	for i, instr := range msg.Instructions {
+		if d, ok := decodeInstr(instr.ProgramIDIndex, instr.Accounts, instr.Data, i); ok {
+			instrs = append(instrs, d)
+		}
+	}
+
+	// Append inner instructions (CPI calls) so normalizers can detect programs
+	// like Pump.fun "create" that are frequently invoked via CPI from wrappers.
+	// Inner instruction indices are encoded as <outer_index>.<inner_position>
+	// multiplied to avoid collisions with top-level indices; the exact value is
+	// only used for content-addressable EventID generation.
+	for _, outer := range tx.Meta.InnerInstructions {
+		for j, instr := range outer.Instructions {
+			// Use a stable index derived from outer position and inner offset.
+			// Offset by len(msg.Instructions) to prevent collisions with outer indices.
+			innerIndex := len(msg.Instructions) + outer.Index*1000 + j
+			if d, ok := decodeInstr(instr.ProgramIDIndex, instr.Accounts, instr.Data, innerIndex); ok {
+				instrs = append(instrs, d)
+			}
+		}
 	}
 
 	return &ingestion_solana.TransactionResult{

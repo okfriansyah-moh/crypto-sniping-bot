@@ -42,6 +42,10 @@ type SolanaRPCEndpoint struct {
 	Priority int    `yaml:"priority"` // 1 = primary; higher = lower priority
 	Kind     string `yaml:"kind"`     // ws | http
 	Region   string `yaml:"region"`
+	// Provider identifies the RPC provider for dialect selection.
+	// Supported values: "quicknode" (or "qn"), "helius".
+	// When empty the provider is auto-detected from the endpoint URL.
+	Provider string `yaml:"provider"`
 }
 
 // SolanaProgramConfig is a tracked Solana program (Raydium, Pump.fun, etc.).
