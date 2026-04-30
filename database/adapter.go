@@ -170,6 +170,26 @@ type Adapter interface {
 	// GetEvaluationsByVersion returns all EvaluationDTOs for a version, ordered by evaluated_at DESC.
 	GetEvaluationsByVersion(ctx context.Context, versionID string) ([]contracts.EvaluationDTO, error)
 
+	// ── Phase 11: Creator Blacklist (Reference-Repo Improvements R2) ─────────
+
+	// UpsertCreatorRugObservation increments the rug counter for a creator
+	// wallet on a given chain. Idempotent at the row level: a duplicate
+	// observation_id is ignored, but the canonical contract is "one call
+	// per confirmed rug LearningRecord".
+	//
+	// Postgres implementation:
+	//   INSERT … (creator_address, chain, rug_count=1, …)
+	//   ON CONFLICT (creator_address, chain) DO UPDATE SET
+	//     rug_count = creator_blacklist.rug_count + 1,
+	//     last_seen_at = NOW(),
+	//     last_token_address = EXCLUDED.last_token_address,
+	//     strategy_version_id = EXCLUDED.strategy_version_id;
+	UpsertCreatorRugObservation(ctx context.Context, obs CreatorRugObservation) error
+
+	// GetCreatorBlacklistEntry returns the blacklist row for a creator on
+	// a chain. Returns (nil, nil) when absent.
+	GetCreatorBlacklistEntry(ctx context.Context, creatorAddress string, chain string) (*CreatorBlacklistEntry, error)
+
 	// ── Execution: Nonce Manager ─────────────────────────────────────────────
 
 	// AllocateNonce atomically reserves the next nonce for a wallet.
@@ -607,6 +627,27 @@ type ShadowTrade struct {
 	Classification      string // TN | FN
 	LearningRecordID    string // FK to learning_records.record_id
 	VersionID           string
+}
+
+// CreatorRugObservation is a single confirmed-rug observation. Phase 11.
+// Produced by the Learning Engine when a LearningRecordDTO is classified
+// as a rug; consumed by Adapter.UpsertCreatorRugObservation.
+type CreatorRugObservation struct {
+	CreatorAddress    string // dev wallet (mint authority on Solana, deployer on EVM)
+	Chain             string // e.g. "ethereum", "bsc", "solana-mainnet"
+	TokenAddress      string // token from the rug observation; informational
+	StrategyVersionID string // version active when the rug was confirmed
+}
+
+// CreatorBlacklistEntry is a row from the creator_blacklist table. Phase 11.
+type CreatorBlacklistEntry struct {
+	CreatorAddress    string
+	Chain             string
+	RugCount          int32
+	FirstSeenAt       string // ISO 8601
+	LastSeenAt        string // ISO 8601
+	LastTokenAddress  string
+	StrategyVersionID string
 }
 
 // ── Phase 7: Solana Domain Types ─────────────────────────────────────────────

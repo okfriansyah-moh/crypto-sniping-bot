@@ -236,3 +236,11 @@ func TestPositionOpenWorker_DuplicateExecution_Suppressed(t *testing.T) {
 			adapter.insertPosCalls)
 	}
 }
+
+// Phase 11 (Reference-Repo R2 — LEARN) creator-blacklist stubs.
+func (a *exactlyOnceAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.CreatorRugObservation) error {
+	return nil
+}
+func (a *exactlyOnceAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
+	return nil, nil
+}

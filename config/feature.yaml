@@ -82,3 +82,23 @@ feature:
   confidence_aggregate:
     method: "mean"
     min_features_required: 4 # < this → Aggregate = 0.3 (cold start)
+
+  # ── Phase 11 (Reference-Repo R2 — FEATURES) ───────────────────
+  # Holder concentration: top-N holder share as a risk signal.
+  # Adapted from chainstacklabs/pumpfun-bonkfun-bot. When enabled,
+  # FeatureDTO.HolderTopNPctBps captures the top-N share in bps;
+  # confidence reflects the freshness of the holder snapshot. Disabled
+  # blocks emit zero with confidence 0.
+  holder_concentration:
+    enabled: false
+    top_n: 10
+    max_acceptable_bps: 6000 # ≥ this → score collapses toward 0
+    confidence_target: 0.80
+
+  # Social presence: token has at least one of website/twitter/telegram.
+  # Boolean signal copied to FeatureDTO.HasSocialLinks; confidence
+  # captures whether the metadata fetch succeeded. Off by default
+  # because not every chain exposes metadata cheaply.
+  social_links:
+    enabled: false
+    confidence_target: 0.70

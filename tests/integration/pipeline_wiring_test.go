@@ -813,3 +813,11 @@ func (m *memAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { re
 func (m *memAdapter) GetPipelineStats(_ context.Context, _ int) (*database.PipelineStats, error) {
 	return &database.PipelineStats{}, nil
 }
+
+// Phase 11 (Reference-Repo R2 — LEARN) creator-blacklist stubs.
+func (m *memAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.CreatorRugObservation) error {
+	return nil
+}
+func (m *memAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
+	return nil, nil
+}

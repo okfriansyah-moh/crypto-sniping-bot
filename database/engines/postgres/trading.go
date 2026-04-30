@@ -284,14 +284,18 @@ INSERT INTO positions (
     status, entry_price, entry_size_usd, current_price,
     exit_price, exit_reason, pnl_usd, pnl_pct,
     tp1_bps, tp2_bps, sl_bps, max_hold_seconds,
-    expires_at, priority, opened_at, exited_at, snapshot_at
+    expires_at, priority, opened_at, exited_at, snapshot_at,
+    peak_price, peak_observed_at, trailing_stop_bps, tp1_filled_pct_bps,
+    last_volume_usd, last_volume_check_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17, $18,
     $19, $20, $21, $22,
-    $23, $24, $25, $26, $27
+    $23, $24, $25, $26, $27,
+    $28, $29, $30, $31,
+    $32, $33
 )
 ON CONFLICT (event_id) DO NOTHING`
 
@@ -302,6 +306,8 @@ ON CONFLICT (event_id) DO NOTHING`
 		dto.ExitPrice, dto.ExitReason, dto.PnlUsd, dto.PnlPct,
 		dto.Tp1Bps, dto.Tp2Bps, dto.SlBps, dto.MaxHoldSeconds,
 		nullableString(dto.ExpiresAt), dto.Priority, dto.OpenedAt, dto.ExitedAt, dto.SnapshotAt,
+		dto.PeakPrice, dto.PeakObservedAt, dto.TrailingStopBps, dto.Tp1FilledPctBps,
+		dto.LastVolumeUsd, dto.LastVolumeCheckAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert position state: %w", err)

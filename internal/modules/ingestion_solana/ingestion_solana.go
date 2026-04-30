@@ -197,7 +197,37 @@ func (m *Module) runProgramLoop(ctx context.Context, prog config.SolanaProgramCo
 // can confirm events are flowing even when no qualifying creates appear.
 const solanaHeartbeatInterval = 60 * time.Second
 
+// defaultProcessingWorkers is the fallback concurrency for the per-program
+// worker pool when SolanaConfig.ProcessingWorkers is unset or non-positive.
+const defaultProcessingWorkers = 8
+
+// workerCount returns the configured processing-worker count or the default.
+func workerCount(cfg config.SolanaConfig) int {
+	if cfg.ProcessingWorkers > 0 {
+		return cfg.ProcessingWorkers
+	}
+	return defaultProcessingWorkers
+}
+
+// nowUTC returns the current wall-clock time formatted as RFC3339 in UTC.
+// Isolated as a var so tests can override for deterministic ingest_at fields.
+var nowUTC = func() string { return time.Now().UTC().Format(time.RFC3339) }
+
 // runSubscribeLoop opens a single logsSubscribe session and processes events.
+//
+// Two processing paths run inside this loop:
+//
+//  1. Pump.fun log-decode (fast path). When prog.Family == "pumpfun" and
+//     SolanaConfig.PumpfunDecodeFromLogs is true, the CreateEvent is decoded
+//     directly from the WS log payload and emitted synchronously. No
+//     getTransaction RPC is issued. This eliminates the rate-limit-induced
+//     backlog that previously caused events_emitted=0 heartbeats.
+//
+//  2. Worker-pool tx-fetch (slow path). For Raydium-V4 (and Pump.fun when the
+//     decode flag is off) each notification is dispatched to a bounded
+//     goroutine pool (size = SolanaConfig.ProcessingWorkers). This prevents a
+//     single slow getTransaction from blocking the WS read loop and lets
+//     concurrent fetches drain the rate-limiter in parallel.
 func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgramConfig) error {
 	notifs, err := m.client.SubscribeLogs(ctx, prog.ProgramID)
 	if err != nil {
@@ -212,9 +242,24 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 	var logFilterSkip atomic.Int64
 	// rateLimitSkip counts notifications skipped during an active rate-limit backoff.
 	var rateLimitSkip atomic.Int64
+	// dtoNilSkip counts instructions that matched the program ID but produced
+	// a (nil, nil) DTO from the family-specific normalizer (i.e. matched the
+	// program but not the target instruction discriminator).
+	var dtoNilSkip atomic.Int64
+	// emittedFromLogs counts events produced by the Pump.fun log-decode path.
+	var emittedFromLogs atomic.Int64
 	// sampleSeq is incremented for every successfully-fetched notification
 	// and used to gate 1-in-sampleRate INFO log lines.
 	var sampleSeq atomic.Int64
+
+	workers := workerCount(m.cfg)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	// Drain in-flight worker goroutines before returning so counters are
+	// monotonic across heartbeats and the pool does not leak on reconnect.
+	defer wg.Wait()
+
+	logPath := prog.Family == "pumpfun" && m.cfg.PumpfunDecodeFromLogs
 
 	heartbeat := time.NewTicker(solanaHeartbeatInterval)
 	defer heartbeat.Stop()
@@ -235,8 +280,12 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				"nil_tx", nilTx.Load(),
 				"no_instr_match", noInstrMatch.Load(),
 				"normalize_skip", normalizeSkip.Load(),
+				"dto_nil_skip", dtoNilSkip.Load(),
 				"process_errors", processErrors.Load(),
+				"in_flight", len(sem),
 				"events_emitted", emitted.Load(),
+				"events_emitted_from_logs", emittedFromLogs.Load(),
+				"path", pathLabel(logPath),
 			)
 
 		case notif, ok := <-notifs:
@@ -252,22 +301,100 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				)
 				continue
 			}
-			// Log pre-filter: skip GetTransaction if log content makes it clear
-			// this notification is not a pool-init/create instruction.
+
+			if logPath {
+				m.handlePumpfunFromLogs(ctx, notif, prog, &emitted, &emittedFromLogs, &logFilterSkip, &processErrors)
+				continue
+			}
+
+			// Slow path: log pre-filter + tx fetch + normalize.
 			if !ShouldFetchTransaction(notif, prog) {
 				logFilterSkip.Add(1)
 				continue
 			}
 			seq := sampleSeq.Add(1)
-			if err := m.processNotification(ctx, notif, prog, seq, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip); err != nil {
-				processErrors.Add(1)
-				m.logger.Warn("solana_ingestion_process_error",
-					"signature", notif.Signature,
-					"error", err,
-				)
+
+			// Acquire a worker slot. Block on the semaphore so back-pressure
+			// flows naturally to the WS reader; ctx cancel unblocks promptly.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return nil
 			}
+			wg.Add(1)
+			go func(n LogsNotification, s int64) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if err := m.processNotification(ctx, n, prog, s, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip); err != nil {
+					processErrors.Add(1)
+					m.logger.Warn("solana_ingestion_process_error",
+						"signature", n.Signature,
+						"error", err,
+					)
+				}
+			}(notif, seq)
 		}
 	}
+}
+
+// pathLabel returns the heartbeat path tag corresponding to the active
+// processing mode.
+func pathLabel(logPath bool) string {
+	if logPath {
+		return "logs_only"
+	}
+	return "tx_fetch"
+}
+
+// handlePumpfunFromLogs processes a logsSubscribe notification entirely from
+// its log payload. No getTransaction RPC is issued. The function is
+// synchronous; it executes on the WS reader goroutine because log decoding
+// is CPU-bound and microsecond-fast.
+func (m *Module) handlePumpfunFromLogs(
+	ctx context.Context,
+	notif LogsNotification,
+	prog config.SolanaProgramConfig,
+	emitted, emittedFromLogs, logFilterSkip, processErrors *atomic.Int64,
+) {
+	event, err := DecodePumpFunCreateFromLogs(notif.Logs)
+	if err != nil {
+		processErrors.Add(1)
+		m.logger.Warn("solana_pumpfun_log_decode_error",
+			"signature", notif.Signature,
+			"slot", notif.Slot,
+			"error", err,
+		)
+		return
+	}
+	if event == nil {
+		// Most notifications are buys/sells/withdraws — no CreateEvent.
+		logFilterSkip.Add(1)
+		return
+	}
+	dto := NormalizePumpFunCreateFromLogs(notif.Signature, notif.Slot, event, m.versionID, nowUTC())
+	if dto == nil {
+		return
+	}
+	if err := m.emit(ctx, *dto); err != nil {
+		processErrors.Add(1)
+		m.logger.Warn("solana_ingestion_emit_error",
+			"signature", notif.Signature,
+			"error", err,
+		)
+		return
+	}
+	emitted.Add(1)
+	emittedFromLogs.Add(1)
+	m.logger.Info("solana_ingestion_emitted",
+		"event_id", dto.EventID,
+		"market", dto.Market,
+		"token", dto.TokenAddress,
+		"symbol", dto.Symbol,
+		"name", dto.Name,
+		"tx", notif.Signature,
+		"slot", notif.Slot,
+		"path", "logs_only",
+	)
 }
 
 // solanaLogSampleRate controls how often activity is sampled to INFO.
@@ -282,7 +409,7 @@ func (m *Module) processNotification(
 	notif LogsNotification,
 	prog config.SolanaProgramConfig,
 	seq int64,
-	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip *atomic.Int64,
+	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip *atomic.Int64,
 ) error {
 	// Circuit breaker: skip GetTransaction during an active rate-limit backoff.
 	if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
@@ -371,6 +498,10 @@ func (m *Module) processNotification(
 			continue
 		}
 		if dto == nil {
+			// Discriminator matched program ID but instruction was not a
+			// target event (e.g. SetParams, Withdraw). Tracked so heartbeat
+			// math reconciles instead of silently dropping the notification.
+			dtoNilSkip.Add(1)
 			continue
 		}
 

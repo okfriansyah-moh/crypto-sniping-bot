@@ -39,6 +39,12 @@ data_quality:
     lp_lock_required: true
     lp_lock_min_days: 30
 
+    # Phase 10 (Reference-Repo Improvements / Task F) — Solana bonding
+    # curve progress filter. Reject MarketDataDTO when
+    # BondingCurveProgressBps > this cap (0..10000 = 0..100%).
+    # Set to 0 to disable (default — EVM events always carry 0).
+    max_bonding_curve_progress_bps: 0
+
     # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
     rug_dangerous_selectors:
       - "mint"

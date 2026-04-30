@@ -37,7 +37,7 @@
 10. [Monitoring & Health Check](#10-monitoring--health-check)
 11. [Common Errors and Fixes](#11-common-errors-and-fixes)
 12. [Reference — All Environment Variables](#12-reference--all-environment-variables)
-13. [Phase 7, 8 & 9 Features Overview](#13-phase-7-8--9-features-overview)
+13. [Phase 7 – 11 Features Overview](#13-phase-7--11-features-overview)
 
 ---
 
@@ -1081,6 +1081,21 @@ solana:
 If you do not set `SOLANA_RPC_HTTP_1` / `SOLANA_WS_1`, the Solana ingestion worker will not
 start — this is safe and does not affect EVM chains.
 
+**Solana hybrid transport (Phase 11)** — optional high-performance gRPC stream:
+
+```yaml
+# config/chains.yaml (Phase 11 addition)
+solana:
+  transport:
+    mode: rpc # "rpc" (default) or "grpc" (Triton One / Helius Business)
+    grpc_endpoint: "" # Required when mode=grpc; loaded from env var preferred
+    fallback_on_error: true # Fall back to WebSocket RPC if gRPC fails
+    fallback_error_n: 5 # Fall back after N consecutive gRPC errors
+```
+
+> Leave `mode: rpc` unless you have a gRPC Solana provider. The WebSocket transport is
+> production-ready for most use cases.
+
 #### `config/pipeline.yaml` — Core trading parameters
 
 The most important settings for beginners:
@@ -1108,6 +1123,43 @@ position:
 
   # Maximum time to hold a position (seconds) — 3600 = 1 hour
   max_hold_seconds: 3600
+
+  # Phase 10: Trailing stop — activates only after TP1 is hit
+  trailing_stop_bps: 500 # Exit if price drops 5% from peak after TP1 (0 = disabled)
+  trailing_activate_at_tp1: true # Only arm trailing stop after TP1 fires
+  tp1_filled_pct_bps: 5000 # Sell 50% of position at TP1
+
+  # Phase 10: Volume-staleness time exit
+  volume_staleness_seconds: 1800 # Check after 30 min hold (0 = disabled)
+  volume_staleness_min_delta_pct_bps: 200 # Exit if 24h volume grew < 2%
+
+# Phase 11: Creator hygiene filters
+edge:
+  max_dev_buy_pct_bps: 2000 # Reject if creator bought > 20% supply (0 = disabled)
+  max_creator_rug_count: 2 # Reject if creator has ≥ 2 prior rugs (0 = disabled)
+  min_dev_wallet_age_seconds: 86400 # Reject wallets < 24 hours old (0 = disabled)
+
+# Phase 10: Consecutive-pass gate
+validation:
+  required_consecutive_passes: 2 # Token must pass EV gate twice in a row
+  consecutive_pass_window_seconds: 30 # Both passes must occur within 30 seconds
+
+# Phase 11: Per-creator dedup
+selection:
+  max_positions_per_creator: 1 # At most 1 open position per creator wallet (0 = disabled)
+
+# Phase 11: Congestion-aware slippage
+models:
+  congestion:
+    enabled: true
+    latency_anchor_ms: 200 # Normal latency baseline
+    max_multiplier: 2.5 # Cap slippage multiplier under congestion
+
+# Phase 11: Creator blacklist (auto-populated by learning engine)
+learning:
+  creator_blacklist:
+    enabled: true
+    auto_blacklist_rug_count: 3 # Auto-blacklist after N confirmed rugs
 ```
 
 > **Tip for beginners:** Start with `fixed_entry_size_usd: 10.0` and `max_concurrent_positions: 1`
@@ -1260,12 +1312,10 @@ You should see output like:
 Running migration: 20260101000001_initial_schema.sql ... OK
 Running migration: 20260101000002_add_claimed_at.sql ... OK
 ...
-Running migration: 20260101000011_phase6_hardening.sql ... OK
-Running migration: 20260101000012_solana_tables.sql ... OK
-Running migration: 20260101000013_production_hardening.sql ... OK
-Running migration: 20260101000014_pr_fixes.sql ... OK
 Running migration: 20260101000015_market_data_symbol.sql ... OK
-All 13 migrations applied successfully
+Running migration: 20260101000016_phase10_additions.sql ... OK
+Running migration: 20260101000017_phase11_creator_blacklist.sql ... OK
+All 17 migrations applied successfully
 ```
 
 If you see a connection error, check that:
@@ -1282,7 +1332,7 @@ psql -U sniper -d sniper -c "\dt"
 
 You should see a list of tables including `events`, `consumer_offsets`, `strategy_versions`,
 `pipeline_runs`, `token_lifecycle`, `positions`, `learning_records`, `solana_slot_cursors`,
-`execution_receipts`, `dlq_events`, `partition_leases`, and others.
+`execution_receipts`, `dlq_events`, `partition_leases`, `creator_blacklist`, and others.
 
 ---
 
@@ -1872,7 +1922,7 @@ cause startup failure if not set.
 
 ---
 
-## 13. Phase 7, 8 & 9 Features Overview
+## 13. Phase 7 – 11 Features Overview
 
 This section explains what was added in Phase 7 (Solana Market), Phase 8 (Production Hardening),
 and Phase 9 (Profitability Restoration & Signal Integrity) so you can understand what the bot
@@ -2095,6 +2145,18 @@ feature:
     sweet_spot_max_sec:
       300 # Token 30s–5min old: score 1.0 (ideal window)
       # Token older than 5min: score 0.6 (cooling down)
+
+  # Phase 11: Holder concentration (top-N wallet analysis)
+  holder_concentration:
+    enabled: true
+    top_n: 10 # Check the top 10 holder wallets
+    max_acceptable_bps: 5000 # Score drops if top-10 hold > 50% of supply
+    confidence_target: 0.80
+
+  # Phase 11: Social presence (Twitter / Telegram / website)
+  social_links:
+    enabled: true
+    confidence_target: 0.70
 ```
 
 > **Beginner tip:** The `feature_timeout_ms` setting is important if your RPC is slow. If you see
@@ -2233,6 +2295,219 @@ modification — they match what was previously hardcoded:
 
 **Nothing is required before your first run.** Review these files after your first 50 live trades
 and tune based on what you observe in the Telegram alerts and database.
+
+---
+
+### 13.5 Phase 10 — Reference-Repo Improvements (R1)
+
+Phase 10 is a targeted improvement pass that ports several high-impact techniques from
+production-grade open-source sniper bots. Each change is individually gated so it can be disabled
+without affecting the rest of the pipeline.
+
+#### 13.5.1 Trailing Stop after TP1 — `config/pipeline.yaml` (Layer 9)
+
+Before Phase 10, the bot had fixed take-profit levels. After TP1 hit, it would simply wait for
+TP2. If the price reversed sharply after TP1, the open portion could give back all gains.
+
+Phase 10 adds a **trailing stop** that activates only after TP1 fires:
+
+```yaml
+# config/pipeline.yaml
+position:
+  tp1_bps: 2000 # Still take 50% at +20%
+  tp1_filled_pct_bps: 5000 # Sell exactly 50% at TP1
+  trailing_stop_bps: 500 # Trailing stop: lock in profits — exit if price drops 5% from peak
+  trailing_activate_at_tp1: true # Only activate trailing stop after TP1 is hit
+```
+
+> **Beginner tip:** The default `trailing_stop_bps: 500` (5%) is conservative. If you want to
+> let winners run longer, try `800` (8%). If you keep getting stopped out on small pullbacks,
+> try `300` (3%). Set `trailing_stop_bps: 0` to disable entirely (legacy behaviour).
+
+#### 13.5.2 Consecutive-Pass Gate — `config/pipeline.yaml` (Layer 5)
+
+Phase 10 adds a **debounce filter** to the edge validation layer: a token must pass the EV gate
+on multiple consecutive evaluations within a time window before a position is entered.
+
+This eliminates single-spike false positives where a token scores well on one snapshot but
+the signal is not sustained.
+
+```yaml
+# config/pipeline.yaml
+validation:
+  required_consecutive_passes: 2 # Token must pass the EV gate twice in a row
+  consecutive_pass_window_seconds: 30 # Both passes must occur within 30 seconds
+  # Set required_consecutive_passes: 1 (or 0) to disable (single-pass, legacy behaviour)
+```
+
+#### 13.5.3 Bonding Curve Progress Filter — `config/data_quality.yaml` (Layer 1, Solana)
+
+For Solana PumpFun tokens, Phase 10 adds a filter that rejects tokens that have already
+progressed too far along their bonding curve. Tokens near 100% completion are about to migrate
+to Raydium — the sniping window has closed.
+
+```yaml
+# config/data_quality.yaml
+thresholds:
+  max_bonding_curve_progress_bps: 8000 # Reject if > 80% bonded (0 = disabled)
+```
+
+#### 13.5.4 Volume-Staleness Time Exit — `config/pipeline.yaml` (Layer 9)
+
+Phase 10 adds a time-based exit trigger for positions where the token's trading volume has
+gone stale — the token is still alive but no longer moving.
+
+```yaml
+# config/pipeline.yaml
+position:
+  volume_staleness_seconds: 1800 # Check staleness after 30 min hold
+  volume_staleness_min_delta_pct_bps: 200 # Exit if 24h volume grew < 2% (stale)
+  # Set volume_staleness_seconds: 0 to disable
+```
+
+---
+
+### 13.6 Phase 11 — Reference-Repo Improvements (R2)
+
+Phase 11 ports the remaining high-signal techniques from the reference implementations.
+All six features are independently togglable. The defaults are conservative (most off) to
+preserve legacy behaviour on first deploy.
+
+#### 13.6.1 Creator Hygiene Filters — `config/pipeline.yaml` (Layer 3)
+
+Phase 11 adds three creator-level filters to the edge detection layer. These prevent the bot
+from trading tokens launched by wallets with a history of rugs or suspicious activity.
+
+```yaml
+# config/pipeline.yaml
+edge:
+  max_dev_buy_pct_bps: 2000 # Reject if creator bought > 20% of supply at launch (0 = disabled)
+  max_creator_rug_count: 2 # Reject if creator has ≥ 2 confirmed prior rugs (0 = disabled)
+  min_dev_wallet_age_seconds: 86400 # Reject wallets younger than 24 hours (0 = disabled)
+```
+
+> **How the rug count works:** Every time a position closes as `RUG`, the learning engine records
+> a `CreatorRugObservation` in the `creator_blacklist` database table. Next time a token from
+> the same creator address is evaluated, `max_creator_rug_count` is checked against that count.
+> The threshold is per-chain (ETH rugs don't count against BSC creators).
+
+#### 13.6.2 Per-Creator Position Deduplication — `config/pipeline.yaml` (Layer 6)
+
+Phase 11 prevents the bot from holding multiple open positions in tokens launched by the
+same creator wallet simultaneously. This prevents correlated loss if a creator rugs multiple
+tokens at once.
+
+```yaml
+# config/pipeline.yaml
+selection:
+  max_positions_per_creator: 1 # At most 1 open position per creator wallet (0 = disabled)
+```
+
+#### 13.6.3 Holder Concentration Filter — `config/feature.yaml` (Layer 2)
+
+Phase 11 adds a holder concentration extractor that scores tokens where the top N wallets
+hold an unusually large percentage of the supply. High concentration means a few wallets can
+dump at any time.
+
+```yaml
+# config/feature.yaml
+feature:
+  holder_concentration:
+    enabled: true
+    top_n: 10 # Check the top 10 holders
+    max_acceptable_bps: 5000 # Score drops if top-10 hold > 50% of supply
+    confidence_target: 0.80
+```
+
+> **Beginner note:** This feature requires an on-chain `balanceOf` call per unique holder —
+> it adds ~1–2 RPC calls per token. On a free-tier plan this is negligible. Enable it for
+> better signal quality.
+
+#### 13.6.4 Social Links Presence — `config/feature.yaml` (Layer 2)
+
+Phase 11 adds a feature that checks whether a token's contract metadata includes social links
+(Twitter, Telegram, website). Tokens with zero social presence are statistically more likely to
+be rug pulls.
+
+```yaml
+# config/feature.yaml
+feature:
+  social_links:
+    enabled: true
+    confidence_target: 0.70
+```
+
+> **Note:** This is a soft signal — it contributes to the feature score but does not alone
+> reject a token. Use it in combination with other filters.
+
+#### 13.6.5 Congestion-Aware Slippage — `config/pipeline.yaml` (Layer 4)
+
+Phase 11 adds a congestion multiplier to the slippage model. When on-chain latency is elevated
+(network is congested), the slippage estimate is scaled up proportionally to ensure the EV
+gate rejects marginal trades that would be unprofitable under actual congestion conditions.
+
+```yaml
+# config/pipeline.yaml
+models:
+  congestion:
+    enabled: true
+    latency_anchor_ms: 200 # "Normal" latency — no adjustment below this
+    max_multiplier: 2.5 # Cap the congestion multiplier at 2.5× base slippage
+```
+
+> **Beginner note:** Leave these at defaults. The congestion multiplier is derived from the
+> RPC latency the bot measures in real time — you do not need to set a fixed value for it.
+
+#### 13.6.6 Simulation Diff Evaluation — `config/priority.yaml` (Layer 9→10)
+
+Phase 11 adds a `ComputeExecutionVariance` step to the evaluation layer. After each trade
+completes, it compares the simulated swap output (predicted by the slippage model) against the
+realized output (what actually happened on-chain). The variance (in basis points) is stored in
+the `LearningRecord` and used by the learning engine to improve future slippage estimates.
+
+```yaml
+# config/priority.yaml
+evaluation:
+  enable_simulation_diff: true # Record simulated vs realized slippage variance
+```
+
+#### 13.6.7 Solana Hybrid Transport — `config/chains.yaml`
+
+Phase 11 adds a hybrid transport layer for Solana ingestion. When `mode: grpc` is configured
+(Triton One or Helius gRPC stream), the bot uses gRPC for ultra-low latency log delivery.
+If gRPC fails `fallback_error_n` consecutive times, it automatically falls back to the standard
+WebSocket transport without restarting.
+
+```yaml
+# config/chains.yaml
+solana:
+  transport:
+    mode: rpc # "rpc" (default WebSocket) or "grpc"
+    grpc_endpoint: "" # Required if mode=grpc: e.g. "your-triton-endpoint:443"
+    # grpc_auth_token is loaded from env var SOLANA_GRPC_AUTH_TOKEN (never put in YAML)
+    fallback_on_error: true # Automatically fall back to RPC if gRPC fails
+    fallback_error_n: 5 # Fall back after this many consecutive gRPC errors
+```
+
+> **Beginner recommendation:** Leave `mode: rpc` unless you have a gRPC-capable Solana provider
+> (Triton One or Helius Business tier). The WebSocket transport is production-ready for most
+> use cases. gRPC provides ~10–20ms lower latency for high-frequency sniping.
+
+#### 13.6.8 Phase 11 Config Summary
+
+| Config file            | New keys added                                                                    | Purpose                           |
+| ---------------------- | --------------------------------------------------------------------------------- | --------------------------------- |
+| `config/pipeline.yaml` | `edge.max_dev_buy_pct_bps`, `max_creator_rug_count`, `min_dev_wallet_age_seconds` | Creator hygiene gates             |
+| `config/pipeline.yaml` | `selection.max_positions_per_creator`                                             | Per-creator dedup                 |
+| `config/pipeline.yaml` | `models.congestion` block                                                         | Congestion slippage adjustment    |
+| `config/pipeline.yaml` | `learning.creator_blacklist` block                                                | Creator blacklist persistence     |
+| `config/feature.yaml`  | `feature.holder_concentration` block                                              | Top-N holder concentration filter |
+| `config/feature.yaml`  | `feature.social_links` block                                                      | Social presence signal            |
+| `config/chains.yaml`   | `solana.transport` block                                                          | Hybrid gRPC/WebSocket transport   |
+| `config/priority.yaml` | `evaluation.enable_simulation_diff`                                               | Sim-diff variance tracking        |
+
+**All new keys have safe defaults and are independently disableable.** No changes are required
+before your first run. Enable them gradually after validating baseline behaviour.
 
 ---
 

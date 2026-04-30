@@ -471,3 +471,11 @@ func (m *mockAdapter) RecordDrop(_ context.Context, _, _, _, _ string) error { r
 func (m *mockAdapter) GetPipelineStats(_ context.Context, _ int) (*database.PipelineStats, error) {
 	return &database.PipelineStats{}, nil
 }
+
+// Phase 11 (Reference-Repo R2 — LEARN) creator-blacklist stubs.
+func (m *mockAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.CreatorRugObservation) error {
+	return nil
+}
+func (m *mockAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
+	return nil, nil
+}

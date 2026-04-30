@@ -397,3 +397,11 @@ func TestDispatcher_Run_ProcessesEvent(t *testing.T) {
 		t.Fatal("Run did not exit within timeout")
 	}
 }
+
+// Phase 11 (Reference-Repo R2 — LEARN) creator-blacklist stubs.
+func (s *dispatcherStubAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.CreatorRugObservation) error {
+	return nil
+}
+func (s *dispatcherStubAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
+	return nil, nil
+}

@@ -168,6 +168,68 @@ func NormalizeRaydiumPoolInit(tx *TransactionResult, instr InstructionData, vers
 	return dto, nil
 }
 
+// NormalizePumpFunCreateFromLogs builds a MarketDataDTO directly from a
+// Pump.fun CreateEvent decoded from logsSubscribe log lines, bypassing the
+// getTransaction RPC round-trip entirely.
+//
+// EventID determinism: this path uses the canonical instruction-index 0 in
+// the EventID schema (`solana|<sig>|0`) — the same schema the slow
+// tx-fetch path produces for top-level Pump.fun create instructions. This
+// guarantees that toggling pumpfun_decode_from_logs at runtime, or having
+// gap-recovery reprocess the same tx via getTransaction, produces an
+// identical EventID and the consumer dedups correctly. Pump.fun creates
+// are virtually always the top-level (index 0) instruction in the carrier
+// tx; the rare CPI-nested case still resolves to a unique-per-tx ID, so
+// downstream uniqueness is preserved.
+//
+// BlockTimestamp is left empty because logsSubscribe does not carry blockTime;
+// downstream features that need it must derive it from `slot * 400ms` or
+// fetch on demand. The slot itself is sufficient for ordering.
+func NormalizePumpFunCreateFromLogs(
+	signature string,
+	slot uint64,
+	event *PumpFunLogCreateEvent,
+	versionID string,
+	ingestedAt string,
+) *contracts.MarketDataDTO {
+	const wrappedSOL = "So11111111111111111111111111111111111111112"
+	eventID := solanaEventID(signature, 0)
+
+	return &contracts.MarketDataDTO{
+		EventID:           eventID,
+		TraceID:           eventID,
+		CorrelationID:     eventID,
+		CausationID:       "", // Layer 0 root event
+		VersionID:         versionID,
+		Chain:             "solana",
+		Market:            "solana-pumpfun",
+		BlockNumber:       slot,
+		BlockHash:         "", // not available without getTransaction
+		TxHash:            signature,
+		LogIndex:          0,
+		EventTopic:        "PumpFunCreate",
+		PoolAddress:       event.BondingCurve,
+		TokenAddress:      event.Mint,
+		BaseAddress:       wrappedSOL,
+		Token0Address:     event.Mint,
+		Token1Address:     wrappedSOL,
+		Amount0Raw:        "0",
+		Amount1Raw:        "0",
+		ReserveBaseRaw:    "0",
+		ReserveTokenRaw:   "0",
+		BlockTimestamp:    "", // unavailable in log-only path; see doc above
+		IngestedAt:        ingestedAt,
+		RpcEndpoint:       "",
+		Transport:         "ws",
+		ConfirmationDepth: 0,
+		Reorged:           false,
+		ExpiresAt:         "",
+		Priority:          0,
+		Symbol:            event.Symbol,
+		Name:              event.Name,
+	}
+}
+
 // NormalizeRaydiumSwap normalizes a Raydium V4 swap instruction.
 // Returns nil if not a swap instruction.
 func NormalizeRaydiumSwap(tx *TransactionResult, instr InstructionData, versionID string) (*contracts.MarketDataDTO, error) {

@@ -38,6 +38,16 @@ execution:
     confirm_timeout_ms: 15000
     receipt_poll_interval_ms: 400
     max_send_attempts: 3
+
+  # Phase 10 (Reference-Repo Improvements / Task C) — adaptive priority
+  # fee. mode="static" leaves the RPC-suggested fee unchanged.
+  # mode="adaptive" scales by (1 + observed_latency_err_pct), clamped to
+  # [min_multiplier, max_multiplier]. Bounded per learning-engine rules
+  # (max_multiplier <= 3.0 caps single-cycle fee growth).
+  priority_fee:
+    mode: static
+    min_multiplier: 1.0
+    max_multiplier: 2.0
     compute_unit_limit_buffer: 20000
     priority_fee_lamports: 5000
     wallet_key_paths:
