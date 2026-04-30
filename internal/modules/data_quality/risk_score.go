@@ -62,4 +62,3 @@ func isZeroWeights(w config.DataQualityRiskWeights) bool {
 	return w.Honeypot == 0 && w.TaxAnomaly == 0 && w.RugAuthority == 0 &&
 		w.LpLockMissing == 0 && w.WashTrading == 0 && w.ContractUnverified == 0
 }
-

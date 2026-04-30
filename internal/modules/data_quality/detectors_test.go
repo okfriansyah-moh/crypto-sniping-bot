@@ -4,11 +4,11 @@ import "testing"
 
 func TestDetectWashTrading(t *testing.T) {
 	cases := []struct {
-		name           string
-		volume         float64
-		holders        int32
-		ageSeconds     int32
-		want           bool
+		name       string
+		volume     float64
+		holders    int32
+		ageSeconds int32
+		want       bool
 	}{
 		{"high_per_holder_few_holders_new_pool", 200_000, 20, 600, true},
 		{"too_many_holders", 200_000, 100, 600, false},

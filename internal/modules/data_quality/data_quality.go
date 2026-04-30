@@ -89,7 +89,7 @@ func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contrac
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	var rejectReasons []string
-	isHoneypot := false       // requires eth_call simulation (deferred)
+	isHoneypot := false // requires eth_call simulation (deferred)
 	isFakeLiquidity := false
 	isWashTrading := false
 	isRugRisk := false

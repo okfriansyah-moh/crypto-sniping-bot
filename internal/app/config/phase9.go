@@ -79,41 +79,41 @@ type DataQualityFailurePolicyConfig struct {
 
 // FeatureRuntimeConfig mirrors config/feature.yaml.
 type FeatureRuntimeConfig struct {
-	FeatureTimeoutMs   int                              `yaml:"feature_timeout_ms"`
-	TotalBudgetMs      int                              `yaml:"total_budget_ms"`
-	SyncCache          FeatureSyncCacheConfig           `yaml:"sync_cache"`
-	TxVelocity         FeatureTxVelocityConfig          `yaml:"tx_velocity"`
-	WalletEntropy      FeatureWalletEntropyConfig       `yaml:"wallet_entropy"`
-	TokenAge           FeatureTokenAgeConfig            `yaml:"token_age"`
-	VolumeMomentum     FeatureMomentumConfig            `yaml:"volume_momentum"`
-	PriceMomentum      FeatureMomentumConfig            `yaml:"price_momentum"`
-	LiquidityUsd       FeatureLiquidityUsdConfig        `yaml:"liquidity_usd"`
-	EthGetLogs         FeatureEthGetLogsConfig          `yaml:"eth_getlogs"`
-	Normalization      FeatureNormalizationConfig       `yaml:"normalization"`
+	FeatureTimeoutMs    int                              `yaml:"feature_timeout_ms"`
+	TotalBudgetMs       int                              `yaml:"total_budget_ms"`
+	SyncCache           FeatureSyncCacheConfig           `yaml:"sync_cache"`
+	TxVelocity          FeatureTxVelocityConfig          `yaml:"tx_velocity"`
+	WalletEntropy       FeatureWalletEntropyConfig       `yaml:"wallet_entropy"`
+	TokenAge            FeatureTokenAgeConfig            `yaml:"token_age"`
+	VolumeMomentum      FeatureMomentumConfig            `yaml:"volume_momentum"`
+	PriceMomentum       FeatureMomentumConfig            `yaml:"price_momentum"`
+	LiquidityUsd        FeatureLiquidityUsdConfig        `yaml:"liquidity_usd"`
+	EthGetLogs          FeatureEthGetLogsConfig          `yaml:"eth_getlogs"`
+	Normalization       FeatureNormalizationConfig       `yaml:"normalization"`
 	ConfidenceAggregate FeatureConfidenceAggregateConfig `yaml:"confidence_aggregate"`
 }
 
 // FeatureSyncCacheConfig bounds the per-pool Sync-event ring buffer.
 type FeatureSyncCacheConfig struct {
-	SizePerPool       int    `yaml:"size_per_pool"`
-	EvictionStrategy  string `yaml:"eviction_strategy"`
-	RefreshOnNewSwap  bool   `yaml:"refresh_on_new_swap"`
+	SizePerPool      int    `yaml:"size_per_pool"`
+	EvictionStrategy string `yaml:"eviction_strategy"`
+	RefreshOnNewSwap bool   `yaml:"refresh_on_new_swap"`
 }
 
 // FeatureTxVelocityConfig drives the swap-rate normalization.
 type FeatureTxVelocityConfig struct {
-	WindowSec               int     `yaml:"window_sec"`
-	SwapCountNormalizeHigh  int     `yaml:"swap_count_normalize_high"`
-	SwapCountNormalizeLow   int     `yaml:"swap_count_normalize_low"`
-	ConfidenceTarget        float64 `yaml:"confidence_target"`
+	WindowSec              int     `yaml:"window_sec"`
+	SwapCountNormalizeHigh int     `yaml:"swap_count_normalize_high"`
+	SwapCountNormalizeLow  int     `yaml:"swap_count_normalize_low"`
+	ConfidenceTarget       float64 `yaml:"confidence_target"`
 }
 
 // FeatureWalletEntropyConfig drives unique-sender ratio scoring.
 type FeatureWalletEntropyConfig struct {
-	RecentSwapsWindow    int     `yaml:"recent_swaps_window"`
-	ConfidenceTarget     float64 `yaml:"confidence_target"`
-	ColdStartDefault     float64 `yaml:"cold_start_default"`
-	ColdStartConfidence  float64 `yaml:"cold_start_confidence"`
+	RecentSwapsWindow   int     `yaml:"recent_swaps_window"`
+	ConfidenceTarget    float64 `yaml:"confidence_target"`
+	ColdStartDefault    float64 `yaml:"cold_start_default"`
+	ColdStartConfidence float64 `yaml:"cold_start_confidence"`
 }
 
 // FeatureTokenAgeConfig drives the piecewise age scoring.
@@ -159,8 +159,8 @@ type FeatureNormalizationConfig struct {
 
 // FeatureConfidenceAggregateConfig configures per-feature aggregation.
 type FeatureConfidenceAggregateConfig struct {
-	Method               string `yaml:"method"`
-	MinFeaturesRequired  int    `yaml:"min_features_required"`
+	Method              string `yaml:"method"`
+	MinFeaturesRequired int    `yaml:"min_features_required"`
 }
 
 // ProbabilityRuntimeConfig mirrors config/probability.yaml. Note: the
@@ -184,12 +184,12 @@ type ProbabilityRuntimeConfig struct {
 
 // CapitalKellyConfig is the Kelly-fraction sub-block of CapitalConfig.
 type CapitalKellyConfig struct {
-	Cap             float64 `yaml:"cap"`
-	CapExploration  float64 `yaml:"cap_exploration"`
-	CapStrict       float64 `yaml:"cap_strict"`
-	PriorGainBps    int32   `yaml:"prior_gain_bps"`
-	PriorLossBps    int32   `yaml:"prior_loss_bps"`
-	RejectNegative  bool    `yaml:"reject_negative"`
+	Cap            float64 `yaml:"cap"`
+	CapExploration float64 `yaml:"cap_exploration"`
+	CapStrict      float64 `yaml:"cap_strict"`
+	PriorGainBps   int32   `yaml:"prior_gain_bps"`
+	PriorLossBps   int32   `yaml:"prior_loss_bps"`
+	RejectNegative bool    `yaml:"reject_negative"`
 }
 
 // CapitalCohortConfig governs cohort multiplier lookup defaults.
@@ -201,10 +201,10 @@ type CapitalCohortConfig struct {
 
 // CapitalExplorationConfig governs the bounded exploration band.
 type CapitalExplorationConfig struct {
-	Enabled         bool    `yaml:"enabled"`
-	MinPctOfTotal   float64 `yaml:"min_pct_of_total"`
-	MaxPctOfTotal   float64 `yaml:"max_pct_of_total"`
-	DailyBudgetPct  float64 `yaml:"daily_budget_pct"`
+	Enabled        bool    `yaml:"enabled"`
+	MinPctOfTotal  float64 `yaml:"min_pct_of_total"`
+	MaxPctOfTotal  float64 `yaml:"max_pct_of_total"`
+	DailyBudgetPct float64 `yaml:"daily_budget_pct"`
 }
 
 // CapitalFailurePolicyConfig governs deterministic capital-engine failure handling.
