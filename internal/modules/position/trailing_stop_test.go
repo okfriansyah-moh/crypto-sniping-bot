@@ -124,6 +124,10 @@ func TestPollExit_VolumeStalenessTimeExit(t *testing.T) {
 
 	pos := basePos(t)
 	pos.LastVolumeUsd = 10000.0 // prior sample
+	// Prior sample taken 90s before evalAt — covers the full
+	// VolumeStalenessSeconds window so the staleness gate can fire.
+	pos.LastVolumeCheckAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).
+		Format(time.RFC3339Nano)
 
 	// Evaluate 90s after open; current volume essentially flat (< 1%).
 	evalAt := time.Date(2026, 1, 1, 0, 1, 30, 0, time.UTC)

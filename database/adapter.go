@@ -173,9 +173,20 @@ type Adapter interface {
 	// ── Phase 11: Creator Blacklist (Reference-Repo Improvements R2) ─────────
 
 	// UpsertCreatorRugObservation increments the rug counter for a creator
-	// wallet on a given chain. Idempotent at the row level: a duplicate
-	// observation_id is ignored, but the canonical contract is "one call
-	// per confirmed rug LearningRecord".
+	// wallet on a given chain.
+	//
+	// Semantics: each successful call records one additional confirmed rug
+	// for the (creator_address, chain) row. CreatorRugObservation does NOT
+	// carry an observation_id / learning_record_id, so this method is NOT
+	// idempotent for repeated calls representing the same logical
+	// observation — the SQL increments rug_count on every call.
+	//
+	// Callers MUST therefore invoke this method at most once per confirmed
+	// rug LearningRecord. The Learning Engine relies on its own
+	// at-least-once de-duplication (LearningRecord EventID + the events
+	// log) before reaching the adapter. A future change may extend
+	// CreatorRugObservation with an idempotency key so the adapter can
+	// de-duplicate on its own.
 	//
 	// Postgres implementation:
 	//   INSERT … (creator_address, chain, rug_count=1, …)

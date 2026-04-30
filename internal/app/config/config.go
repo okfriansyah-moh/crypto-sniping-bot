@@ -121,6 +121,16 @@ type ValidationConfig struct {
 	// Phase 10 (Reference-Repo Improvements / Task D) — consecutive-pass
 	// debounce gate. Mirrors mux's CONSECUTIVE_FILTER_MATCHES + window.
 	// When RequiredConsecutivePasses <= 1 the gate is disabled.
+	//
+	// NOTE (wiring): the pure debounce helper lives at
+	// internal/modules/validation/consecutive_debounce.go
+	// (Module.ProcessWithDebounce). It is intentionally NOT yet invoked
+	// from ValidationWorker because durable PriorPassState persistence
+	// (per token_lifecycle_id, with bounded TTL) requires an additive
+	// adapter method + side table that are scheduled for the next
+	// validation-pipeline phase. Until that wiring lands these fields
+	// remain inert — leaving them at 0 in YAML preserves legacy
+	// single-pass behaviour and is the only safe configuration today.
 	RequiredConsecutivePasses    int32 `yaml:"required_consecutive_passes"`
 	ConsecutivePassWindowSeconds int32 `yaml:"consecutive_pass_window_seconds"`
 }
@@ -132,6 +142,16 @@ type SelectionConfig struct {
 	// Phase 11 (Reference-Repo Improvements R2 — SELECT) — per-creator
 	// dedup. mux's pattern: at most this many open positions per
 	// creator wallet. 0 = disabled.
+	//
+	// NOTE (wiring): the pure helper lives at
+	// internal/modules/selection/per_creator_dedup.go
+	// (FilterByCreatorOpenPositions). It is intentionally NOT yet
+	// invoked from SelectionWorker because per-creator counting
+	// requires creator metadata to flow through ValidatedEdgeDTO and
+	// PositionStateDTO (additive DTO fields scheduled for the next
+	// selection-pipeline phase). Until that DTO+adapter wiring lands
+	// this field stays inert — leaving it at 0 in YAML preserves
+	// legacy behaviour and is the only safe configuration today.
 	MaxPositionsPerCreator int `yaml:"max_positions_per_creator"`
 }
 
@@ -165,8 +185,11 @@ type CapitalConfig struct {
 	FailurePolicy          CapitalFailurePolicyConfig `yaml:"failure_policy"`
 
 	// Phase 10 (Reference-Repo Improvements / Task B) — de-hardcode
-	// AllocationDTO fields. Defaults (when 0/empty): legacy 200 / 1 /
-	// "default" preserved at module construction.
+	// AllocationDTO fields. Defaults preserve legacy behaviour:
+	//   * DefaultMaxSlippageBps == 0 → module uses legacy 200 bps.
+	//   * WalletShardCount  <= 0  → sharding disabled, wallet_shard=0
+	//                                emitted (legacy ShardIndex returns 0).
+	//   * DefaultCohortID   == "" → module uses legacy "default".
 	DefaultMaxSlippageBps int32  `yaml:"default_max_slippage_bps"`
 	WalletShardCount      int    `yaml:"wallet_shard_count"`
 	DefaultCohortID       string `yaml:"default_cohort_id"`

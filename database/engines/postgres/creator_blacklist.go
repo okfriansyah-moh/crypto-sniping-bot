@@ -15,12 +15,14 @@ import (
 )
 
 // UpsertCreatorRugObservation atomically increments rug_count for the given
-// creator on the given chain. Idempotent at the SQL level: re-running with
-// the same observation always converges to (rug_count = N+1, last_seen=now).
+// creator on the given chain.
 //
-// SQL is portable Postgres. ON CONFLICT increments the existing counter
-// rather than ignoring the conflict — the row is the *aggregate*, not an
-// event log.
+// NOT idempotent for repeated calls representing the same logical
+// observation: the ON CONFLICT branch increments rug_count and refreshes
+// last_seen_at on every call. CreatorRugObservation carries no
+// observation_id / learning_record_id, so the adapter cannot de-duplicate.
+// Callers (Learning Engine) MUST guarantee at-most-once invocation per
+// confirmed rug LearningRecord — see Adapter.UpsertCreatorRugObservation.
 func (d *DB) UpsertCreatorRugObservation(ctx context.Context, obs database.CreatorRugObservation) error {
 	if obs.CreatorAddress == "" || obs.Chain == "" {
 		return fmt.Errorf("upsert creator rug: empty creator_address or chain")

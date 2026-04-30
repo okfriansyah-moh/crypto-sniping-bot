@@ -225,15 +225,31 @@ func (m *Module) PollExitWithVolume(
 	// Triggers only when:
 	//   - cfg enables it (VolumeStalenessSeconds > 0)
 	//   - we have a current volume sample AND a prior one to diff against
-	//   - position has been open at least VolumeStalenessSeconds
+	//   - the prior sample (LastVolumeCheckAt) is at least
+	//     VolumeStalenessSeconds old, so the delta covers a real window
+	//     instead of a single poll interval
 	//   - delta% over the window is below the configured floor (in bps).
 	if m.cfg != nil && m.cfg.VolumeStalenessSeconds > 0 && volumeUsd > 0 &&
-		pos.LastVolumeUsd > 0 && pos.OpenedAt != "" {
-		openedAt, parseErr := time.Parse(time.RFC3339Nano, pos.OpenedAt)
+		pos.LastVolumeUsd > 0 && pos.LastVolumeCheckAt != "" {
+		lastCheckAt, parseErr := time.Parse(time.RFC3339Nano, pos.LastVolumeCheckAt)
 		if parseErr == nil {
-			age := evaluatedAt.Sub(openedAt)
-			if age >= time.Duration(m.cfg.VolumeStalenessSeconds)*time.Second {
-				deltaPctBps := int32(((volumeUsd - pos.LastVolumeUsd) / pos.LastVolumeUsd) * 10000.0)
+			windowAge := evaluatedAt.Sub(lastCheckAt)
+			if windowAge >= time.Duration(m.cfg.VolumeStalenessSeconds)*time.Second {
+				// Compute delta% in bps (float64) and clamp before
+				// converting to int32. Out-of-range float→int casts in
+				// Go are implementation-defined, so we defensively
+				// clamp to the int32 domain — same pattern used in
+				// ComputeExecutionVariance.
+				deltaPctF := ((volumeUsd - pos.LastVolumeUsd) / pos.LastVolumeUsd) * 10000.0
+				const maxBps = float64(math.MaxInt32)
+				const minBps = float64(math.MinInt32)
+				switch {
+				case deltaPctF > maxBps:
+					deltaPctF = maxBps
+				case deltaPctF < minBps:
+					deltaPctF = minBps
+				}
+				deltaPctBps := int32(deltaPctF)
 				if deltaPctBps < m.cfg.VolumeStalenessMinDeltaPctBps {
 					return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TIME_VOLUME_STALE", now), nil
 				}

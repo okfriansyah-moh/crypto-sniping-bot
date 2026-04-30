@@ -41,7 +41,10 @@ type EdgeDTO struct {
 	// rug-likelihood. m8s-lab uses ~5000 bps as the cap.
 	// CreatorRugCount: number of confirmed rugs previously attributable to
 	// CreatorAddress. Populated from the creator_blacklist table.
-	// DevWalletAgeSeconds: 0 = brand-new wallet (highest risk).
+	// DevWalletAgeSeconds: wall-clock age of the creator wallet in
+	// seconds. 0 means "unknown / not populated" — the
+	// MinDevWalletAgeSeconds gate explicitly skips rejection on 0 so
+	// that missing creator metadata never blocks a candidate.
 	CreatorAddress      string `json:"creator_address,omitempty"`
 	DevBuyPctBps        int32  `json:"dev_buy_pct_bps,omitempty"`
 	CreatorRugCount     int32  `json:"creator_rug_count,omitempty"`
