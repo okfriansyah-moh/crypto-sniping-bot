@@ -37,7 +37,7 @@
 10. [Monitoring & Health Check](#10-monitoring--health-check)
 11. [Common Errors and Fixes](#11-common-errors-and-fixes)
 12. [Reference — All Environment Variables](#12-reference--all-environment-variables)
-13. [Phase 7 & 8 Features Overview](#13-phase-7--8-features-overview)
+13. [Phase 7, 8 & 9 Features Overview](#13-phase-7-8--9-features-overview)
 
 ---
 
@@ -1135,6 +1135,64 @@ solana:
     - "${SOLANA_WALLET_KEY_1}" # File path to keypair JSON
 ```
 
+#### `config/data_quality.yaml` — Scam detection (Phase 9)
+
+Controls which scam detectors are active and how much each one contributes to the overall risk
+score. **Default values are safe to use without changes.**
+
+```yaml
+data_quality:
+  detectors:
+    honeypot_simulation: true # Simulate buy+sell on-chain — most important check
+    tax_anomaly: true # Flag tokens with > 10% buy/sell tax
+    lp_lock: true # Require liquidity locked for 30+ days
+    wash_trading: true # Detect same-wallet circular trading
+    rug_authority: true # Detect mint/pause/blacklist functions
+
+  risk_weights:
+    honeypot: 0.30 # 30% of risk score comes from honeypot check
+    tax_anomaly: 0.20 # 20% from tax anomaly
+    rug_authority: 0.20 # 20% from dangerous contract functions
+    lp_lock_missing: 0.15
+    wash_trading: 0.10
+    contract_unverified: 0.05
+```
+
+#### `config/capital.yaml` — Position sizing (Phase 9)
+
+Controls how much money the bot bets per trade. Phase 9 introduced dynamic (Kelly-fraction)
+sizing. **Start with the defaults and adjust after observing live behavior.**
+
+```yaml
+capital:
+  use_dynamic_sizing: true # Phase 9: size ∝ edge × probability × confidence
+  base_size_usd: 50.0 # Starting point for Kelly calculation
+  min_size_usd: 5.0 # Minimum trade size
+  max_size_usd: 500.0 # Maximum trade size cap
+
+  kelly:
+    cap: 0.25 # Use at most 25% of Kelly-optimal size (conservative)
+
+  failure_policy:
+    on_missing_probability: "reject" # Safest: skip trades with no probability score
+    fallback_prior_probability: 0.35 # Only used if above is "fallback_prior"
+```
+
+#### `config/probability.yaml` — Trade probability (Phase 9)
+
+Controls how the bot uses its probability model to score each trade opportunity.
+
+```yaml
+probability:
+  use_model_output: true # Use real model output (Phase 9: default on)
+  prior_probability: 0.35 # Conservative fallback for unscored tokens
+  min_model_confidence: 0.40 # If model is < 40% confident, use prior instead
+
+  # Telegram alert if > 5% of trades in the last hour used the fallback
+  fallback_alert_pct: 0.05
+  fallback_alert_window_sec: 3600
+```
+
 ---
 
 ## 6. Database Setup
@@ -1206,7 +1264,8 @@ Running migration: 20260101000011_phase6_hardening.sql ... OK
 Running migration: 20260101000012_solana_tables.sql ... OK
 Running migration: 20260101000013_production_hardening.sql ... OK
 Running migration: 20260101000014_pr_fixes.sql ... OK
-All 14 migrations applied successfully
+Running migration: 20260101000015_market_data_symbol.sql ... OK
+All 13 migrations applied successfully
 ```
 
 If you see a connection error, check that:
@@ -1266,7 +1325,7 @@ You should see structured JSON log output like:
 ```json
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Config loaded","schema_version":"1"}
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Database connected","host":"localhost"}
-{"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Migrations OK","count":11}
+{"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Migrations OK","count":13}
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"HTTP server started","port":8080}
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Orchestrator started"}
 ```
@@ -1813,10 +1872,11 @@ cause startup failure if not set.
 
 ---
 
-## 13. Phase 7 & 8 Features Overview
+## 13. Phase 7, 8 & 9 Features Overview
 
-This section explains what was added in Phase 7 (Solana Market) and Phase 8 (Production Hardening)
-so you can understand what the bot is doing under the hood.
+This section explains what was added in Phase 7 (Solana Market), Phase 8 (Production Hardening),
+and Phase 9 (Profitability Restoration & Signal Integrity) so you can understand what the bot
+is doing under the hood.
 
 ---
 
@@ -1933,6 +1993,246 @@ through the PostgreSQL event bus \u2014 modules never call Telegram directly.
 > **Note:** `/kill` and `/resume` are destructive commands. They are logged with timestamp and
 > require confirmation. The kill switch also fires automatically when daily drawdown exceeds the
 > `halt_drawdown_pct` threshold (default: 10%).
+
+---
+
+### 13.4 Phase 9 — Profitability Restoration & Signal Integrity
+
+Phase 9 is the **most important phase for profitability**. Phases 0–8 made the bot _functional_;
+Phase 9 makes it _profitable_. Before Phase 9, several critical components used hardcoded stubs
+(returning fixed values like `0.5` or `0.35`) instead of real on-chain data. Phase 9 replaces
+those stubs with real computation and moves every tunable parameter into YAML config files.
+
+The architecture profit formula is:
+
+```
+Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality
+```
+
+Phase 9 addresses the four factors that were near-zero before it: **DataQuality**, **Probability**,
+**Capital**, and **AdaptationQuality**.
+
+---
+
+#### 13.4.1 Real Scam Detection — `config/data_quality.yaml` (Layer 1)
+
+Before Phase 9, the Data Quality Engine checked tokens for scams but used hardcoded weights to
+combine the results. Now every weight comes from `config/data_quality.yaml`.
+
+**What scam checks does the bot run?**
+
+| Detector            | What it checks                                                          | Cost       |
+| ------------------- | ----------------------------------------------------------------------- | ---------- |
+| Honeypot simulation | Simulates a buy-then-sell on-chain — if you can't sell, it's a honeypot | 1 RPC call |
+| Tax anomaly         | Checks if buy/sell tax exceeds 10% (a common rug pattern)               | 1 RPC call |
+| LP lock             | Verifies liquidity is locked (Unicrypt/PinkLock) for at least 30 days   | 1 API call |
+| Wash trading        | Checks if the same wallets keep trading with themselves                 | 1 RPC call |
+| Rug authority       | Checks if the contract has dangerous functions (mint, pause, blacklist) | 1 RPC call |
+| Contract verified   | Checks if the source code is public on Etherscan/BscScan                | 1 API call |
+
+**What you can tune:**
+
+The `risk_weights` section in `config/data_quality.yaml` controls how much each detector
+contributes to the overall scam risk score (0.0 = ignored, higher = more weight):
+
+```yaml
+# config/data_quality.yaml
+data_quality:
+  risk_weights:
+    honeypot: 0.30 # Honeypot is the most reliable signal — highest weight
+    tax_anomaly: 0.20 # High tax is a strong rug indicator
+    rug_authority: 0.20 # Dangerous contract functions
+    lp_lock_missing: 0.15 # Unlocked LP can be pulled at any time
+    wash_trading: 0.10 # Wash trading pattern
+    contract_unverified: 0.05 # Unverified contract (weaker signal alone)
+```
+
+> **Beginner tip:** If the bot is rejecting tokens you believe are safe, lower `honeypot` to
+> `0.20`. If it is letting through too many rugs, raise `honeypot` to `0.40`. The default values
+> match what was previously hardcoded — they are safe to use as-is.
+
+The bot also lets you tune per-detector thresholds:
+
+```yaml
+thresholds:
+  tax_total_max_bps: 1000 # Reject if total buy+sell tax > 10%
+  wash_unique_ratio_min: 0.30 # Reject if < 30% of wallets are unique
+  lp_lock_min_days: 30 # Reject if LP locked for < 30 days
+```
+
+---
+
+#### 13.4.2 Real Feature Signals — `config/feature.yaml` (Layer 2)
+
+Before Phase 9, five out of eight trading signals returned a hardcoded `0.5` ("neutral") instead
+of computing a real value from on-chain data. This meant the bot could not distinguish a token
+with explosive momentum from a dead token.
+
+Phase 9 wires up the following real signals:
+
+| Signal              | What it measures                                                     | Data source            |
+| ------------------- | -------------------------------------------------------------------- | ---------------------- |
+| `tx_velocity_score` | How many buy transactions happened in the last 30 seconds            | Recent Swap events     |
+| `wallet_entropy`    | How many _different_ wallets are buying (high = organic, low = wash) | Recent Swap senders    |
+| `token_age`         | How old the token is (sweet spot: 30 seconds to 5 minutes old)       | Pool creation block    |
+| `volume_momentum`   | Short-term vs long-term volume ratio (is volume accelerating?)       | Sync event ring buffer |
+| `price_momentum`    | Price change between recent Sync events                              | Sync event ring buffer |
+
+These are the signals the edge detection layer uses to decide _"is this token worth buying right now?"_
+
+**Key config options in `config/feature.yaml`:**
+
+```yaml
+feature:
+  feature_timeout_ms: 500 # If RPC call takes > 500ms, use cold-start default
+
+  tx_velocity:
+    window_sec: 30 # Count swaps in the last 30 seconds
+    swap_count_normalize_high: 50 # 50+ swaps/30s → score 1.0 (very hot)
+
+  token_age:
+    sweet_spot_min_sec: 30 # Token younger than 30s: score 0.2 (too new, risky)
+    sweet_spot_max_sec:
+      300 # Token 30s–5min old: score 1.0 (ideal window)
+      # Token older than 5min: score 0.6 (cooling down)
+```
+
+> **Beginner tip:** The `feature_timeout_ms` setting is important if your RPC is slow. If you see
+> many `cold_start_default` entries in the logs, increase this to `800` — but beware that slower
+> feature computation means slower trade decisions.
+
+---
+
+#### 13.4.3 Real Probability Scores — `config/probability.yaml` (Layer 4)
+
+Before Phase 9, the validation layer always used a fixed probability of `0.35` regardless of the
+token. This meant every trade was evaluated as if it had a 35% chance of success — completely
+ignoring the probability model that was being trained in the background.
+
+Phase 9 wires the probability model output into the validation gate. Now each token gets its own
+probability score based on historical patterns.
+
+**What happens when the model doesn't have enough data?** (e.g., a brand-new launch)
+
+The bot falls back to the `prior_probability` you configure:
+
+```yaml
+# config/probability.yaml
+probability:
+  use_model_output: true # Use model output when available
+  prior_probability: 0.35 # Conservative fallback for new tokens
+  min_model_confidence: 0.40 # If model confidence < 40%, use prior instead
+  prob_join_timeout_ms: 200 # Max 200ms to wait for model output before fallback
+
+  # Alert via Telegram if > 5% of recent trades used fallback in the last hour
+  fallback_alert_pct: 0.05
+  fallback_alert_window_sec: 3600
+```
+
+**What the fallback alert means:** If more than 5% of trades in the last hour used the fallback
+probability (meaning the model couldn't score them), you will receive a Telegram alert. This is
+your signal that the probability model is struggling — possibly due to a data gap or model drift.
+
+> **Beginner tip:** You do not need to change `prior_probability` immediately. If you find the
+> bot is too aggressive on new tokens, lower it to `0.25`. If it is too conservative, raise it
+> to `0.45`. Never set it above `0.5` — that would mean you expect to win more than you lose on
+> tokens with no data, which is optimistic at best.
+
+---
+
+#### 13.4.4 Dynamic Capital Sizing — `config/capital.yaml` (Layer 7)
+
+Before Phase 9, the bot always bet a fixed dollar amount (e.g., `$50`) on every trade regardless
+of how strong or weak the signal was. This is suboptimal — a very strong signal deserves more
+capital; a borderline signal deserves less.
+
+Phase 9 introduces **Kelly fraction sizing**: position size is proportional to your edge score,
+the model's probability estimate, and the confidence of the features.
+
+```
+size = base_size_usd × kelly_fraction × mode_multiplier × cohort_multiplier
+```
+
+**Key config in `config/capital.yaml`:**
+
+```yaml
+capital:
+  use_dynamic_sizing: true # Set to false to revert to fixed_entry_size_usd (emergency only)
+  base_size_usd: 50.0 # Starting point for sizing calculation
+  min_size_usd: 5.0 # Never allocate less than $5 (not worth gas)
+  max_size_usd: 500.0 # Never allocate more than $500 per trade
+
+  kelly:
+    cap: 0.25 # Use at most 25% Kelly fraction (full Kelly is too aggressive)
+
+  mode_multipliers:
+    STRICT: 0.5 # In STRICT mode, halve the position size
+    BALANCED: 1.0 # In BALANCED mode, normal sizing
+    EXPLORATION: 1.3 # In EXPLORATION mode, 30% larger (exploring new patterns)
+
+  failure_policy:
+    on_missing_probability: "reject" # "reject" or "fallback_prior"
+    fallback_prior_probability: 0.35 # Used only if on_missing_probability="fallback_prior"
+```
+
+**Understanding `on_missing_probability`:**
+
+| Setting            | What happens when probability model is unavailable                           |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `reject` (default) | Bot refuses to trade — safest choice                                         |
+| `fallback_prior`   | Bot trades using `fallback_prior_probability` — higher throughput, more risk |
+
+> **Beginner recommendation:** Keep `on_missing_probability: reject` for your first week. The bot
+> will trade less often, but every trade will have a real probability score backing it.
+
+> **Important:** If `fallback_prior_probability` is `0` or missing, the bot treats it as "unset"
+> and rejects trades even when `on_missing_probability: fallback_prior`. This is intentional —
+> a missing config value is never silently treated as a safe default.
+
+---
+
+#### 13.4.5 Real-Time Position Monitoring — `config/pipeline.yaml` (Layer 9)
+
+Before Phase 9, positions were monitored on a fixed 5-second timer. Phase 9 changes this to
+price-feed-driven monitoring: the position monitor polls whenever a new price event arrives from
+the on-chain price feed, not on a clock.
+
+This means:
+
+- **Faster exits**: If a token dumps 15% in 2 seconds, the stop-loss fires in < 1 second instead of up to 5 seconds
+- **No unnecessary polling**: Between price events, the monitor sleeps (saves CPU and RPC calls)
+
+The existing position parameters in `config/pipeline.yaml` still control exit behavior:
+
+```yaml
+position:
+  tp1_bps: 2000 # Take Profit 1: sell 50% when up 20%
+  tp2_bps: 5000 # Take Profit 2: sell rest when up 50%
+  sl_bps: 1500 # Stop Loss: sell all when down 15%
+  max_hold_seconds: 3600 # Emergency exit after 1 hour regardless of price
+```
+
+> **What changed for you:** Your stop-loss and take-profit now trigger faster. If you previously
+> set `sl_bps: 1500` and were seeing losses deeper than 15%, this improvement will help. If you
+> were not seeing that issue, no action is needed.
+
+---
+
+#### 13.4.6 Phase 9 Config Summary
+
+These are all the YAML files Phase 9 adds or changes. All defaults are safe to use without
+modification — they match what was previously hardcoded:
+
+| Config file                | Key sections                                      | What to tune                   |
+| -------------------------- | ------------------------------------------------- | ------------------------------ |
+| `config/data_quality.yaml` | `risk_weights`, `thresholds`, `detectors`         | Scam detection sensitivity     |
+| `config/feature.yaml`      | `tx_velocity`, `token_age`, `volume_momentum`     | Feature extraction timing      |
+| `config/probability.yaml`  | `prior_probability`, `fallback_alert_pct`         | Probability fallback behavior  |
+| `config/capital.yaml`      | `kelly.cap`, `mode_multipliers`, `failure_policy` | Position sizing aggressiveness |
+| `config/pipeline.yaml`     | `position.*` (unchanged format)                   | Exit parameters                |
+
+**Nothing is required before your first run.** Review these files after your first 50 live trades
+and tune based on what you observe in the Telegram alerts and database.
 
 ---
 
@@ -2362,7 +2662,7 @@ docker compose up --build -d  # recreates fresh database with migrations
 
 - [ ] No stuck open positions from test runs
 - [ ] Strategy version initialized in database
-- [ ] Migration count matches expected (`make migrate-up` output shows all 14 applied)
+- [ ] Migration count matches expected (`make migrate-up` output shows all 13 applied)
 
 #### 4.5 — Wallet Security
 
