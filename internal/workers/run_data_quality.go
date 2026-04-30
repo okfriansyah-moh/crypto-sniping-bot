@@ -27,7 +27,7 @@ func NewDataQualityWorker(adapter database.Adapter, cfg *config.Config, logger *
 	}
 	return &DataQualityWorker{
 		adapter: adapter,
-		mod:     data_quality.New(data_quality.DefaultConfig(cfg), logger),
+		mod:     data_quality.New(data_quality.DefaultConfig(cfg), logger).WithRuntimeConfig(&cfg.DataQualityRuntime),
 		logger:  logger,
 	}
 }

@@ -14,7 +14,8 @@ import (
 
 // Module is the edge validation engine.
 type Module struct {
-cfg *config.ValidationConfig
+cfg     *config.ValidationConfig
+probCfg *config.ProbabilityRuntimeConfig // Phase 9 (§ 9.3) — optional, may be nil.
 }
 
 // New returns a new validation Module.
@@ -32,6 +33,14 @@ TTLSeconds:       5,
 }
 }
 return &Module{cfg: cfg}
+}
+
+// WithProbabilityRuntime attaches the Phase 9 probability runtime config
+// (NaN/Inf guards, confidence gate, fallback semantics). Returns the
+// receiver to allow fluent wiring at construction sites.
+func (m *Module) WithProbabilityRuntime(p *config.ProbabilityRuntimeConfig) *Module {
+m.probCfg = p
+return m
 }
 
 // Process evaluates an EdgeDTO and emits ValidatedEdgeDTO.

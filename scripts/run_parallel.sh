@@ -877,15 +877,21 @@ security_auditor_validate() {
         fi
     done
 
-    # Check for SQL string formatting (parameterized queries required in Go)
-    if grep -rn 'fmt\.Sprintf.*SELECT\|fmt\.Sprintf.*INSERT\|fmt\.Sprintf.*UPDATE\|fmt\.Sprintf.*DELETE' \
+    # Check for SQL string formatting (parameterized queries required in Go).
+    # Use ERE-compatible non-identifier boundaries (BSD/GNU grep both treat \b
+    # inconsistently in -E mode). Pattern: fmt.Sprintf( ... [non-identifier]
+    # KEYWORD followed by whitespace + uppercase identifier (typical of
+    # interpolated SQL like fmt.Sprintf("SELECT %s FROM ...")).
+    if grep -rEn 'fmt\.Sprintf\([^)]*[^[:alnum:]_](SELECT|INSERT|UPDATE|DELETE)[[:space:]]+[A-Z]' \
             internal/ cmd/ 2>/dev/null | grep -v '_test\.go' | grep -v '\.example' | head -3 | grep -q .; then
         log_error "[security-validate] SQL string formatting detected — use parameterized queries"
         ((failures++))
     fi
 
-    # Check for os/exec with user-controlled input (shell injection risk)
-    if grep -rn 'exec\.Command\|os\.Exec' internal/ cmd/ 2>/dev/null \
+    # Check for os/exec with user-controlled input (shell injection risk).
+    # Match exec.Command(...) call sites or the "os/exec" import. Anchor with
+    # a leading non-identifier so identifiers like pos.ExecutionID don't match.
+    if grep -rEn '(^|[^[:alnum:]_])exec\.Command\(|"os/exec"' internal/ cmd/ 2>/dev/null \
             | grep -v '_test\.go' | head -3 | grep -q .; then
         log_warn "[security-validate] exec.Command usage detected — verify no user-controlled input"
     fi

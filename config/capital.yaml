@@ -60,3 +60,7 @@ capital:
     on_missing_probability: "reject" # reject | fallback_prior
     on_cohort_lookup_miss: "use_default" # use_default | reject
     on_mode_lookup_stale: "fallback_balanced" # fallback_balanced | reject
+    # Used only when on_missing_probability="fallback_prior". 0 means
+    # "unset" — engine rejects rather than picking a hardcoded value.
+    # Mirrors probability.prior_probability so both engines share intent.
+    fallback_prior_probability: 0.35

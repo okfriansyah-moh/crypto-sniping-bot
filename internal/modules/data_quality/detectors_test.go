@@ -4,11 +4,11 @@ import "testing"
 
 func TestDetectWashTrading(t *testing.T) {
 	cases := []struct {
-		name           string
-		volume         float64
-		holders        int32
-		ageSeconds     int32
-		want           bool
+		name       string
+		volume     float64
+		holders    int32
+		ageSeconds int32
+		want       bool
 	}{
 		{"high_per_holder_few_holders_new_pool", 200_000, 20, 600, true},
 		{"too_many_holders", 200_000, 100, 600, false},
@@ -55,11 +55,11 @@ func TestDetectTaxAnomaly(t *testing.T) {
 }
 
 func TestAggregateRiskScoreBounds(t *testing.T) {
-	score := AggregateRiskScore(4, 4, true, true, true, true, true)
+	score := AggregateRiskScore(4, 4, true, true, true, true, true, nil)
 	if score != 1 {
 		t.Fatalf("max risk should clamp to 1, got %v", score)
 	}
-	if AggregateRiskScore(0, 4, false, false, false, false, false) != 0 {
+	if AggregateRiskScore(0, 4, false, false, false, false, false, nil) != 0 {
 		t.Fatal("clean signals must score 0")
 	}
 }

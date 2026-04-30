@@ -25,22 +25,36 @@ type Config struct {
 }
 
 // DefaultConfig returns safe defaults that align with pipeline.yaml.
-// Phase 2: simple thresholds; Phase 3 adds adaptive tuning.
+// Phase 9 (§ 9.1): when a top-level Config is supplied, threshold values
+// are sourced from cfg.DataQualityRuntime.Thresholds (mirrors
+// config/data_quality.yaml). Module-side defaults remain only as fallback
+// for tests / partial configs.
 func DefaultConfig(cfg *config.Config) Config {
-	_ = cfg // reserved for YAML-driven overrides in Phase 3
-	return Config{
+	out := Config{
 		MaxBuyTaxBps:      1000, // 10%
 		MaxSellTaxBps:     1500, // 15%
 		MinLPHolderCount:  1,
 		MinReserveBaseWei: "1000000000000000", // 0.001 ETH in wei
 	}
+	if cfg == nil {
+		return out
+	}
+	t := cfg.DataQualityRuntime.Thresholds
+	if t.TaxBuyMaxBps > 0 {
+		out.MaxBuyTaxBps = t.TaxBuyMaxBps
+	}
+	if t.TaxSellMaxBps > 0 {
+		out.MaxSellTaxBps = t.TaxSellMaxBps
+	}
+	return out
 }
 
 // Module is the data quality engine.
 // It is a pure function: no state, no DB, no side effects on shared mutable state.
 type Module struct {
-	cfg    Config
-	logger *slog.Logger
+	cfg     Config
+	runtime *config.DataQualityRuntimeConfig // Phase 9 (§ 9.1) — optional runtime config.
+	logger  *slog.Logger
 }
 
 // New creates a new data quality Module.
@@ -51,24 +65,50 @@ func New(cfg Config, logger *slog.Logger) *Module {
 	return &Module{cfg: cfg, logger: logger}
 }
 
+// WithRuntimeConfig attaches Phase 9 detector toggles, weights, and
+// thresholds (mirrors config/data_quality.yaml). Returns the receiver for
+// fluent wiring.
+func (m *Module) WithRuntimeConfig(rt *config.DataQualityRuntimeConfig) *Module {
+	m.runtime = rt
+	return m
+}
+
 // Process evaluates a MarketDataDTO and returns a DataQualityDTO.
-// Phase 2: static heuristic checks — no RPC calls (deferred to Phase 3 with retry).
+// Phase 9 (§ 9.1) — invokes the detector helpers (DetectRugRisk,
+// DetectWashTrading, DetectTaxAnomaly) instead of leaving every flag at
+// false, and aggregates RiskScore via AggregateRiskScore.
+//
+// True RPC-backed honeypot simulation, LP-lock contract probes, and
+// Etherscan source-code lookup are deferred (they require new client
+// infrastructure). Until then the corresponding flags remain conservative
+// (false) and contribute zero weight, which is safer than fabricating
+// signals.
+//
 // Deterministic: same input → same output.
 func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contracts.DataQualityDTO, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	var rejectReasons []string
-	isHoneypot := false
+	isHoneypot := false // requires eth_call simulation (deferred)
 	isFakeLiquidity := false
 	isWashTrading := false
 	isRugRisk := false
 	isTaxAnomaly := false
-	buyTaxBps := int32(0)
-	sellTaxBps := int32(0)
-	lpLocked := false
-	lpHolderCount := int32(0)
-	contractVerified := false
-	riskScore := 0.0
+	buyTaxBps := int32(0)     // requires sim/Etherscan (deferred)
+	sellTaxBps := int32(0)    // requires sim/Etherscan (deferred)
+	lpLocked := false         // requires lock-contract probe (deferred)
+	lpHolderCount := int32(0) // requires holder enumeration (deferred)
+	contractVerified := false // requires Etherscan v2 (deferred)
+
+	// Resolve detector toggles from runtime config (default = enabled).
+	rugEnabled := true
+	washEnabled := true
+	taxEnabled := true
+	if m.runtime != nil {
+		rugEnabled = m.runtime.Detectors.RugAuthority
+		washEnabled = m.runtime.Detectors.WashTrading
+		taxEnabled = m.runtime.Detectors.TaxAnomaly
+	}
 
 	// Check 1: Missing reserve data → reject.
 	if in.ReserveBaseRaw == "" || in.ReserveBaseRaw == "0" {
@@ -93,13 +133,34 @@ func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contrac
 		rejectReasons = append(rejectReasons, "missing_token_address")
 	}
 
-	// Compute risk score as proportion of checks failed.
-	totalChecks := 4.0
-	failedChecks := float64(len(rejectReasons))
-	if isFakeLiquidity || isHoneypot {
-		failedChecks++ // weight harder rejections
+	// Phase 9 (§ 9.1) — invoke real detector helpers.
+	if rugEnabled {
+		isRugRisk = DetectRugRisk(lpLocked, in.ReserveBaseRaw, m.cfg.MinReserveBaseWei)
 	}
-	riskScore = clampFloat(failedChecks/totalChecks, 0.0, 1.0)
+	if taxEnabled {
+		isTaxAnomaly = DetectTaxAnomaly(buyTaxBps, sellTaxBps, m.cfg.MaxBuyTaxBps, m.cfg.MaxSellTaxBps)
+	}
+	if washEnabled {
+		// Phase 9.5 deferred: real wash-trading detection requires holder
+		// count and pool age, neither of which is present in MarketDataDTO
+		// today. Until that enrichment lands, leave isWashTrading=false
+		// rather than calling DetectWashTrading(0,0,0) which would always
+		// return false anyway and create the illusion of an active gate.
+		_ = isWashTrading
+	}
+
+	// Aggregate RiskScore via the shared helper (Phase 9 § 9.1).
+	// Pass per-detector weights from runtime config so YAML changes to
+	// `data_quality.risk_weights` actually take effect.
+	var weights *config.DataQualityRiskWeights
+	if m.runtime != nil {
+		weights = &m.runtime.RiskWeights
+	}
+	riskScore := AggregateRiskScore(
+		len(rejectReasons), 4,
+		isHoneypot, isFakeLiquidity, isWashTrading, isRugRisk, isTaxAnomaly,
+		weights,
+	)
 
 	// Sort reasons for determinism.
 	sort.Strings(rejectReasons)
