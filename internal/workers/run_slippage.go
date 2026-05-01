@@ -21,14 +21,16 @@ type SlippageWorker struct {
 	logger      *slog.Logger
 }
 
-// NewSlippageWorker constructs a SlippageWorker using the configured bucket grid.
+// NewSlippageWorker constructs a SlippageWorker using the configured CPMM
+// model. The model resolves α via the adapter (no-op default = 1.0 until
+// the realized-fill aggregator is wired).
 func NewSlippageWorker(adapter database.Adapter, cfg *config.Config, logger *slog.Logger) *SlippageWorker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &SlippageWorker{
 		adapter:     adapter,
-		model:       models.NewSlippageModel(slippageCfgFromConfig(cfg)),
+		model:       models.NewSlippageModelWithAlpha(slippageCfgFromConfig(cfg), adapter),
 		defaultSize: cfg.Capital.FixedEntrySizeUsd,
 		logger:      logger,
 	}
@@ -46,7 +48,7 @@ func (w *SlippageWorker) Process(ctx context.Context, evt *database.Event) (*dat
 		size = 50.0
 	}
 
-	slip, err := w.model.Estimate(ctx, feat, size)
+	slip, err := w.model.EstimateForMarket(ctx, feat, size, feat.Market)
 	if err != nil {
 		w.logger.Warn("slippage_worker_estimate_failed",
 			"event_id", evt.EventID, "error", err)
@@ -72,25 +74,27 @@ func (w *SlippageWorker) Process(ctx context.Context, evt *database.Event) (*dat
 }
 
 // slippageCfgFromConfig builds models.SlippageConfig from YAML config.
+// Empty / zero values fall back to the model's safe defaults
+// (see models.DefaultSlippageConfig).
 func slippageCfgFromConfig(cfg *config.Config) models.SlippageConfig {
 	defaults := models.DefaultSlippageConfig()
-	if cfg == nil || len(cfg.Models.Slippage.Buckets) == 0 {
+	if cfg == nil {
 		return defaults
 	}
 	src := cfg.Models.Slippage
 	out := models.SlippageConfig{
+		MaxSlippageBps: src.MaxSlippageBps,
+		VolatilityZ:    src.VolatilityZ,
+		TailBps:        src.TailBps,
+		MinReserveUsd:  src.MinReserveUsd,
+		DefaultAlpha:   src.DefaultAlpha,
+		MaxAlpha:       src.MaxAlpha,
+		ModelVersionID: src.ModelVersionID,
 		FallbackP50Bps: src.FallbackP50Bps,
 		FallbackP95Bps: src.FallbackP95Bps,
-		ModelVersionID: src.ModelVersionID,
 	}
 	if out.ModelVersionID == "" {
 		out.ModelVersionID = defaults.ModelVersionID
-	}
-	if out.FallbackP50Bps == 0 {
-		out.FallbackP50Bps = defaults.FallbackP50Bps
-	}
-	if out.FallbackP95Bps == 0 {
-		out.FallbackP95Bps = defaults.FallbackP95Bps
 	}
 	for _, b := range src.Buckets {
 		out.Buckets = append(out.Buckets, models.SlippageBucket{

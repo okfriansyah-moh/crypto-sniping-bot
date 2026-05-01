@@ -103,18 +103,18 @@ func (s *stubAdapter) InsertStateViolation(_ context.Context, lifecycleID, _, _,
 
 // Implement all remaining Adapter methods as stubs.
 func (s *stubAdapter) Initialize(_ context.Context, _ database.Config) error { return nil }
-func (s *stubAdapter) RunMigrations(_ context.Context) error                  { return nil }
-func (s *stubAdapter) Close(_ context.Context) error                          { return nil }
+func (s *stubAdapter) RunMigrations(_ context.Context) error                 { return nil }
+func (s *stubAdapter) Close(_ context.Context) error                         { return nil }
 func (s *stubAdapter) InsertEvent(_ context.Context, _ database.Event) error { return nil }
 func (s *stubAdapter) ClaimNextEvent(_ context.Context, _ string, _ []string) (*database.Event, error) {
 	return nil, nil
 }
-func (s *stubAdapter) MarkEventProcessed(_ context.Context, _ string) error   { return nil }
+func (s *stubAdapter) MarkEventProcessed(_ context.Context, _ string) error { return nil }
 func (s *stubAdapter) GetEventByID(_ context.Context, _ string) (*database.Event, error) {
 	return nil, nil
 }
-func (s *stubAdapter) MarkEventExpired(_ context.Context, _, _ string) error   { return nil }
-func (s *stubAdapter) ReleaseEventClaim(_ context.Context, _ string) error    { return nil }
+func (s *stubAdapter) MarkEventExpired(_ context.Context, _, _ string) error { return nil }
+func (s *stubAdapter) ReleaseEventClaim(_ context.Context, _ string) error   { return nil }
 func (s *stubAdapter) UpsertIngestionWatermark(_ context.Context, _ string, _ uint64) error {
 	return nil
 }
@@ -165,7 +165,7 @@ func (s *stubAdapter) InsertEvaluation(_ context.Context, _ contracts.Evaluation
 func (s *stubAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return nil
 }
-func (s *stubAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error) { return 0, nil }
+func (s *stubAdapter) AllocateNonce(_ context.Context, _, _ string) (uint64, error)  { return 0, nil }
 func (s *stubAdapter) ReconcileNonce(_ context.Context, _, _ string, _ uint64) error { return nil }
 func (s *stubAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionStateDTO, error) {
 	return nil, nil
@@ -201,6 +201,9 @@ func (s *stubAdapter) GetExposureSummary(_ context.Context) (*database.ExposureS
 }
 func (s *stubAdapter) GetEventsByTrace(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil
+}
+func (s *stubAdapter) GetLastEventTimestamp(_ context.Context, _ string) (time.Time, error) {
+	return time.Time{}, database.ErrNotFound
 }
 func (s *stubAdapter) GetEventsByCorrelation(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil

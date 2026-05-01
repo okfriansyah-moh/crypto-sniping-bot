@@ -49,4 +49,31 @@ type EdgeDTO struct {
 	DevBuyPctBps        int32  `json:"dev_buy_pct_bps,omitempty"`
 	CreatorRugCount     int32  `json:"creator_rug_count,omitempty"`
 	DevWalletAgeSeconds int64  `json:"dev_wallet_age_seconds,omitempty"`
+
+	// EdgeModelVersionID identifies the edge-discovery taxonomy / weight
+	// configuration that produced this DTO (additive, transport-only —
+	// not yet persisted to the `edges` table; downstream modules MAY use
+	// it for attribution and replay differencing). Populated from
+	// EdgeConfig.ModelVersion. Zero value means "unversioned legacy".
+	EdgeModelVersionID string `json:"edge_model_version_id,omitempty"`
+
+	// RejectReason carries a short token explaining why no edge fired.
+	// Empty for accepted edges; populated for EdgeType="NONE".
+	// Examples: "no_qualifying_edge", "creator_dev_buy_too_high".
+	RejectReason string `json:"reject_reason,omitempty"`
+}
+
+// Edge type taxonomy (per docs/architecture.md § 3.3 and the
+// edge-detection skill). Modules MUST NOT invent edges outside this set.
+const (
+	EdgeTypeNewLaunch = "NEW_LAUNCH_EDGE"
+	EdgeTypeMomentum  = "MOMENTUM_EDGE"
+	EdgeTypeNone      = "NONE"
+)
+
+// IsEdgeDetected reports whether the EdgeDTO represents an actionable
+// edge. It is the single canonical predicate used by downstream code
+// (workers, validation) — never compare EdgeType to "" directly.
+func (e EdgeDTO) IsEdgeDetected() bool {
+	return e.EdgeType != "" && e.EdgeType != EdgeTypeNone
 }

@@ -9,15 +9,52 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 )
 
+// Decision-reason fallback codes for stage_completed log records when the
+// upstream DTO did not enumerate a specific reason. These are stable
+// machine-parseable strings — never free-form prose — so downstream
+// log parsers and dashboards can group on them.
+const (
+	// reasonDataQualityRejectFallback is used when DataQualityDTO.Decision
+	// is REJECT but RejectReasons is empty (defensive — modules SHOULD
+	// always populate the slice).
+	reasonDataQualityRejectFallback = "data_quality_reject"
+
+	// reasonValidationRejectFallback is used when ValidatedEdgeDTO.Decision
+	// is not ACCEPT but RejectReason is empty.
+	reasonValidationRejectFallback = "validation_reject"
+)
+
+// dqRejectReason returns a stable, machine-parseable decision_reason for a
+// DataQualityDTO REJECT. Reject reason codes are joined with "," so a single
+// log field carries the full attribution without nesting.
+func dqRejectReason(dq contracts.DataQualityDTO) string {
+	if len(dq.RejectReasons) == 0 {
+		return reasonDataQualityRejectFallback
+	}
+	return strings.Join(dq.RejectReasons, ",")
+}
+
+// validationRejectReason returns a stable decision_reason for a non-ACCEPT
+// ValidatedEdgeDTO. Falls back to a constant when the module did not record
+// a structured reason.
+func validationRejectReason(reason string) string {
+	if reason == "" {
+		return reasonValidationRejectFallback
+	}
+	return reason
+}
+
 // urlKeyPathRe matches API keys embedded as a path segment after /v<N>/.
 // Covers Infura  wss://mainnet.infura.io/ws/v3/<KEY>
-//         Alchemy  https://eth-mainnet.g.alchemy.com/v2/<KEY>
+//
+//	Alchemy  https://eth-mainnet.g.alchemy.com/v2/<KEY>
 var urlKeyPathRe = regexp.MustCompile(`(?i)(/v\d+/)([a-zA-Z0-9_\-]{20,})`)
 
 // urlKeyQueryRe matches API keys embedded as query parameters.
@@ -34,7 +71,6 @@ func sanitizeURL(rawURL string) string {
 	s = urlKeyTrailingRe.ReplaceAllString(s, "${1}[REDACTED]${3}")
 	return s
 }
-
 
 // makeOutputEvent serialises dto into a downstream database.Event.
 // dtoEventID must already be computed by the module (content-addressable).
@@ -116,7 +152,6 @@ func doMandatoryTransition(
 		ActorWorker:       actor,
 	})
 }
-
 
 // Returns (nil, false) on error and logs a warning.
 func fetchLifecycle(

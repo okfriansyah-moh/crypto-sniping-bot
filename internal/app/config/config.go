@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ type Config struct {
 	Models       ModelsConfig           `yaml:"models"`
 	Learning     LearningConfig         `yaml:"learning"`
 	Risk         RiskConfig             `yaml:"risk"`
+	ModeAdaptive ModeAdaptiveConfig     `yaml:"mode_adaptive"`
 	Retention    RetentionConfig        `yaml:"retention"`
 	MEV          MEVConfig              `yaml:"mev"`
 	Budgets      BudgetsConfig          `yaml:"budgets"`
@@ -45,6 +47,14 @@ type Config struct {
 	DataQualityRuntime DataQualityRuntimeConfig `yaml:"data_quality"`
 	Feature            FeatureRuntimeConfig     `yaml:"feature"`
 	ProbabilityRuntime ProbabilityRuntimeConfig `yaml:"probability"`
+
+	// Residual-risk #3 closure: per-market slippage α aggregator.
+	ExecutionQuality ExecutionQualityConfig `yaml:"execution_quality"`
+
+	// Residual-risk #4 scaffolding: optional MarketDataDTO enrichment
+	// stage. Default-OFF — populated only when the operator deploys a
+	// simulation contract and flips probes.enabled.
+	Probes ProbesConfig `yaml:"probes"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -105,6 +115,58 @@ type EdgeConfig struct {
 	MaxDevBuyPctBps        int32 `yaml:"max_dev_buy_pct_bps"`
 	MaxCreatorRugCount     int32 `yaml:"max_creator_rug_count"`
 	MinDevWalletAgeSeconds int64 `yaml:"min_dev_wallet_age_seconds"`
+
+	// ── F-4 fix: edge taxonomy + adaptive momentum threshold ──────────
+	// (per docs/architecture.md § 3.3 and the edge-detection /
+	// momentum-detector / signal-normalizer skills).
+
+	// NewLaunchWindowSeconds: pool-age ceiling (seconds) for the
+	// NEW_LAUNCH_EDGE path. Tokens older than this fall through to the
+	// MOMENTUM_EDGE path. Per skill default: 300s (5 min).
+	NewLaunchWindowSeconds int64 `yaml:"new_launch_window_seconds"`
+
+	// MinContractSafety: NEW_LAUNCH_EDGE requires this floor on
+	// FeatureDTO.ContractSafety (defence-in-depth — DQ should already
+	// have rejected unsafe tokens). 0 disables the floor.
+	MinContractSafety float64 `yaml:"min_contract_safety"`
+
+	// NEW_LAUNCH_EDGE strength weights (sum should be 1.0). Defaults
+	// applied in code when zero.
+	NewLaunchWeightLiquidity float64 `yaml:"new_launch_weight_liquidity"`
+	NewLaunchWeightSafety    float64 `yaml:"new_launch_weight_safety"`
+	NewLaunchWeightHolders   float64 `yaml:"new_launch_weight_holders"`
+	NewLaunchWeightEntropy   float64 `yaml:"new_launch_weight_entropy"`
+
+	// MOMENTUM_EDGE strength weights (sum should be 1.0).
+	MomentumWeightPrice    float64 `yaml:"momentum_weight_price"`
+	MomentumWeightVolume   float64 `yaml:"momentum_weight_volume"`
+	MomentumWeightVelocity float64 `yaml:"momentum_weight_velocity"`
+
+	// MinPriceMomentum: cold-start fallback threshold and absolute floor
+	// for the adaptive PriceMomentum percentile (NEVER below this).
+	MinPriceMomentum float64 `yaml:"min_price_momentum"`
+	// MinVolumeMomentum: hard gate on VolumeMomentum for MOMENTUM_EDGE.
+	MinVolumeMomentum float64 `yaml:"min_volume_momentum"`
+	// MomentumQuantile: rolling-window quantile used to derive the
+	// adaptive PriceMomentum threshold once enough samples exist
+	// (default 0.7 per momentum-detector skill).
+	MomentumQuantile float64 `yaml:"momentum_quantile"`
+	// BaselineMinSamples: cold-start gate. Below this, adaptive threshold
+	// is bypassed in favour of MinPriceMomentum.
+	BaselineMinSamples int `yaml:"baseline_min_samples"`
+	// BaselineMaxLen: ring-buffer cap per (market, signal). Bounded
+	// memory — oldest values are evicted past this limit.
+	BaselineMaxLen int `yaml:"baseline_max_len"`
+
+	// Residual-risk #1 — debounced rolling-window baseline persistence.
+	// See FeatureRuntimeConfig for field semantics. Minimums enforced
+	// by validate_ranges: flush_interval_sec >= 5, flush_max_writes >= 1.
+	BaselineFlushIntervalSec int `yaml:"baseline_flush_interval_sec"`
+	BaselineFlushMaxWrites   int `yaml:"baseline_flush_max_writes"`
+
+	// ModelVersion: stamped onto every emitted EdgeDTO.EdgeModelVersionID
+	// for attribution and replay differencing.
+	ModelVersion string `yaml:"model_version"`
 }
 
 // ValidationConfig holds Phase 2 EV gate parameters (fixed priors).
@@ -133,6 +195,23 @@ type ValidationConfig struct {
 	// single-pass behaviour and is the only safe configuration today.
 	RequiredConsecutivePasses    int32 `yaml:"required_consecutive_passes"`
 	ConsecutivePassWindowSeconds int32 `yaml:"consecutive_pass_window_seconds"`
+
+	// Bus dependency-wait — bounded join window for the ValidationWorker.
+	// Validation triggers on edge_event but joins probability/slippage by
+	// trace_id from the DB-backed event-bus state. If those upstream
+	// producers haven't committed by JoinTimeoutMs, validation rejects
+	// with an explicit reason ("probability_unavailable") rather than
+	// silently substituting the prior into EV — that substitution
+	// produces deterministic mass-rejects at large negative bps and
+	// starves Layers 6–10 (see docs/architecture.md § 2 / § 3.5).
+	//
+	// JoinTimeoutMs        — hard cap on the bounded wait, ms.
+	// JoinPollIntervalMs   — DB poll cadence within the bounded wait, ms.
+	//
+	// JoinTimeoutMs <= 0 disables the wait (single-shot read; legacy
+	// behaviour for tests / replay). Production YAML must set both > 0.
+	JoinTimeoutMs      int `yaml:"join_timeout_ms"`
+	JoinPollIntervalMs int `yaml:"join_poll_interval_ms"`
 }
 
 // SelectionConfig holds Phase 2 selection parameters.
@@ -342,17 +421,27 @@ type ProbabilityCoefficients struct {
 	BrierCalibration    float64 `yaml:"brier_calibration"`
 }
 
-// SlippageModelConfig holds the slippage bucket grid + fallbacks.
+// SlippageModelConfig holds the slippage CPMM-model parameters. Bucket
+// fields are retained for backward-compatible YAML loading only — the
+// CPMM model (F-3 fix) does not consult them.
 type SlippageModelConfig struct {
 	Buckets        []SlippageBucketConfig `yaml:"buckets"`
 	FallbackP50Bps int32                  `yaml:"fallback_p50_bps"`
 	FallbackP95Bps int32                  `yaml:"fallback_p95_bps"`
 	ModelVersionID string                 `yaml:"model_version_id"`
 
-	// Phase 11 (Reference-Repo Improvements R2 — P/S/L MODELS) —
-	// congestion-aware multiplier. When enabled, the slippage model
-	// scales BaseP95 by 1 + clamp((latencyP95 - anchor) / anchor, 0,
-	// MaxMultiplier - 1). Disabled = always 1.0 (legacy).
+	// CPMM model parameters (F-3 fix).
+	MaxSlippageBps int32   `yaml:"max_slippage_bps"`
+	VolatilityZ    float64 `yaml:"volatility_z"`
+	TailBps        int32   `yaml:"tail_bps"`
+	MinReserveUsd  float64 `yaml:"min_reserve_usd"`
+	DefaultAlpha   float64 `yaml:"default_alpha"`
+	MaxAlpha       float64 `yaml:"max_alpha"`
+
+	// Phase 11 (Reference-Repo R2 — P/S/L MODELS) — congestion-aware
+	// multiplier. When enabled, the slippage model scales BaseP95 by 1 +
+	// clamp((latencyP95 - anchor) / anchor, 0, MaxMultiplier - 1).
+	// Disabled = always 1.0 (legacy).
 	Congestion SlippageCongestionConfig `yaml:"congestion"`
 }
 
@@ -406,6 +495,15 @@ type LearningConfig struct {
 	// RollbackCheckIntervalSeconds is how often the rollback watchdog runs (default: 300).
 	RollbackCheckIntervalSeconds int `yaml:"rollback_check_interval_seconds"`
 
+	// SybilSuspectMinWallets is the minimum UniqueWallets1m count above
+	// which a losing trade with a low wash score is flagged as a probable
+	// Sybil-cluster bypass (residual risk #5 / F-SEC-08). Default 50.
+	SybilSuspectMinWallets int `yaml:"sybil_suspect_min_wallets"`
+	// SybilSuspectMaxWashScore is the wash-score upper bound (exclusive)
+	// below which the Sybil flag fires — i.e. the wash detector said the
+	// token was clean. Range [0,1]. Default 0.30.
+	SybilSuspectMaxWashScore float64 `yaml:"sybil_suspect_max_wash_score"`
+
 	// Phase 11 (Reference-Repo Improvements R2 — LEARN) — creator
 	// blacklist plumbing. When Enabled, every confirmed rug observation
 	// for a creator increments creator_blacklist.rug_count; the Edge
@@ -434,6 +532,39 @@ type RiskConfig struct {
 	ResumeDrawdownPct float64 `yaml:"resume_drawdown_pct"`
 	// DegradedSizeMultiplier scales SizeUsd in DEGRADED mode (default: 0.5).
 	DegradedSizeMultiplier float64 `yaml:"degraded_size_multiplier"`
+}
+
+// ModeAdaptiveConfig governs the adaptive risk-appetite controller that
+// transitions the system between STRICT / BALANCED / EXPLORATION based on
+// starvation and rug/FP-rate signals (operational-modes skill). It is
+// orthogonal to the drawdown-driven safety mode controller in RiskConfig:
+// the adaptive controller skips entirely when the system is DEGRADED or
+// HALTED.
+type ModeAdaptiveConfig struct {
+	// Enabled gates the entire adaptive controller. When false, only the
+	// safety-mode (drawdown) controller and manual /mode commands change
+	// the mode.
+	Enabled bool `yaml:"enabled"`
+	// AdaptiveWindowSec is the look-back window over which rug/FP rates
+	// are computed. Default 1800s (30 min).
+	AdaptiveWindowSec int `yaml:"adaptive_window_sec"`
+	// StarvationTriggerSec triggers an auto-upgrade once the time since
+	// the last validated_edge_event exceeds this. Default 1800s.
+	StarvationTriggerSec int `yaml:"starvation_trigger_sec"`
+	// RugRateAutoDowngrade triggers a one-notch auto-downgrade when the
+	// observed rug rate exceeds this fraction. Range [0,1]. Default 0.15.
+	RugRateAutoDowngrade float64 `yaml:"rug_rate_auto_downgrade"`
+	// FPRateAutoDowngrade triggers a one-notch auto-downgrade when the
+	// observed false-positive rate exceeds this fraction. Range [0,1].
+	// Default 0.25.
+	FPRateAutoDowngrade float64 `yaml:"fp_rate_auto_downgrade"`
+	// TransitionWindowSec bounds adaptive transitions to at most one per
+	// window. Default 3600s (1 hour).
+	TransitionWindowSec int `yaml:"transition_window_sec"`
+	// DefaultStartupMode is the cold-start mode persisted on the first
+	// risk-controller tick when state.Mode is empty. One of
+	// {BALANCED, STRICT, EXPLORATION}. Default BALANCED.
+	DefaultStartupMode string `yaml:"default_startup_mode"`
 }
 
 // RetentionConfig holds Phase 6 data retention / archival parameters.
@@ -561,6 +692,10 @@ func Load(paths ...string) (*Config, error) {
 	applyEnvOverrides(cfg)
 
 	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	if err := cfg.validateRanges(slog.Default()); err != nil {
 		return nil, err
 	}
 

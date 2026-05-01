@@ -242,10 +242,16 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 	var logFilterSkip atomic.Int64
 	// rateLimitSkip counts notifications skipped during an active rate-limit backoff.
 	var rateLimitSkip atomic.Int64
-	// dtoNilSkip counts instructions that matched the program ID but produced
-	// a (nil, nil) DTO from the family-specific normalizer (i.e. matched the
-	// program but not the target instruction discriminator).
+	// dtoNilSkip counts instructions where the leading tag IS a recognized
+	// instruction (e.g. Raydium V4 Initialize2/SwapBaseIn/SwapBaseOut, or a
+	// Pump.fun Create) but the per-family normalizer still produced nil — i.e.
+	// a likely decoder bug or an account-layout mismatch worth investigating.
 	var dtoNilSkip atomic.Int64
+	// skippedUnknownInstruction counts instructions whose leading tag is NOT a
+	// recognized opcode for this family (e.g. Raydium V4 SetParams/Withdraw,
+	// Pump.fun non-Create). These are irrelevant by design — distinct from
+	// decoder bugs that mis-handle a recognized opcode.
+	var skippedUnknownInstruction atomic.Int64
 	// emittedFromLogs counts events produced by the Pump.fun log-decode path.
 	var emittedFromLogs atomic.Int64
 	// sampleSeq is incremented for every successfully-fetched notification
@@ -281,6 +287,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				"no_instr_match", noInstrMatch.Load(),
 				"normalize_skip", normalizeSkip.Load(),
 				"dto_nil_skip", dtoNilSkip.Load(),
+				"skipped_unknown_instruction", skippedUnknownInstruction.Load(),
 				"process_errors", processErrors.Load(),
 				"in_flight", len(sem),
 				"events_emitted", emitted.Load(),
@@ -325,7 +332,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 			go func(n LogsNotification, s int64) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if err := m.processNotification(ctx, n, prog, s, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip); err != nil {
+				if err := m.processNotification(ctx, n, prog, s, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip, &skippedUnknownInstruction); err != nil {
 					processErrors.Add(1)
 					m.logger.Warn("solana_ingestion_process_error",
 						"signature", n.Signature,
@@ -409,7 +416,7 @@ func (m *Module) processNotification(
 	notif LogsNotification,
 	prog config.SolanaProgramConfig,
 	seq int64,
-	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip *atomic.Int64,
+	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip, skippedUnknownInstruction *atomic.Int64,
 ) error {
 	// Circuit breaker: skip GetTransaction during an active rate-limit backoff.
 	if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
@@ -472,7 +479,16 @@ func (m *Module) processNotification(
 		case "pumpfun":
 			dto, normErr = NormalizePumpFunCreate(tx, instr, m.versionID)
 		case "raydium-v4":
-			dto, normErr = NormalizeRaydiumPoolInit(tx, instr, m.versionID)
+			res := NormalizeRaydiumV4Instruction(tx, instr, m.versionID)
+			if res.Kind == RaydiumV4KindUnknown {
+				// Tag is not Initialize2 / SwapBaseIn / SwapBaseOut. Irrelevant
+				// by design — NOT a decoder bug. Counted separately so the
+				// heartbeat distinguishes "we saw a SetParams" from "we failed
+				// to decode an Initialize2".
+				skippedUnknownInstruction.Add(1)
+				continue
+			}
+			dto, normErr = res.DTO, res.Err
 		default:
 			continue
 		}

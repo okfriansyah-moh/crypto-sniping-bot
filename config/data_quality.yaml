@@ -85,6 +85,29 @@ data_quality:
     # If ≥ this many detectors are Indeterminate, reject DQ entirely.
     max_indeterminate_count: 3
 
+  # ── Operational-mode decision profiles (Layer 1 fix) ──────────
+  # Threshold band applied to the aggregated RiskScore in [0,1] depending
+  # on the active operational mode reported by SystemState.Mode.
+  # Canonical values from `.github/skills/data-quality-engine/SKILL.md`.
+  # `unknown_factor` controls how a `dq_unknown_<detector>` flag
+  # (upstream input missing) degrades the risk score:
+  #   STRICT       → 0.5  (treat unknown as half-weight risk)
+  #   BALANCED     → 0.0  (neutral — wait for real data)
+  #   EXPLORATION  → 0.0  (ignore — accept incomplete telemetry)
+  mode_profiles:
+    strict:
+      reject_above: 0.30
+      risky_pass_above: 0.15
+      unknown_factor: 0.5
+    balanced:
+      reject_above: 0.50
+      risky_pass_above: 0.25
+      unknown_factor: 0.0
+    exploration:
+      reject_above: 0.65
+      risky_pass_above: 0.35
+      unknown_factor: 0.0
+
   # ── Etherscan / BscScan v2 API ────────────────────────────────
   contract_verified_api:
     eth_url: "https://api.etherscan.io/v2/api"

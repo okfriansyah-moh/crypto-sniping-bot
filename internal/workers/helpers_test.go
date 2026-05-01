@@ -121,8 +121,22 @@ func (s *stubAdapter) InsertLatencyProfile(_ context.Context, _ contracts.Latenc
 func (s *stubAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (s *stubAdapter) GetSlippageAlpha(_ context.Context, _ string) (float64, error) {
+	return 1.0, nil
+}
+func (s *stubAdapter) GetRealizedFillSamples(_ context.Context, _ int) (map[string][]database.FillSample, error) {
+	return nil, nil
+}
+func (s *stubAdapter) UpsertSlippageAlpha(_ context.Context, _ string, _, _, _ float64, _ int) error {
+	return nil
+}
 func (s *stubAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
 	return nil, database.ErrNotFound
+}
+func (s *stubAdapter) GetEstimatesByTrace(ctx context.Context, traceID string) (*contracts.ProbabilityEstimateDTO, *contracts.SlippageEstimateDTO, error) {
+	p, _ := s.GetProbabilityEstimateByTrace(ctx, traceID)
+	sl, _ := s.GetSlippageEstimateByTrace(ctx, traceID)
+	return p, sl, nil
 }
 func (s *stubAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
 	return nil, database.ErrNotFound
@@ -176,6 +190,9 @@ func (s *stubAdapter) GetEventsByTrace(_ context.Context, _ string) ([]database.
 }
 func (s *stubAdapter) GetEventsByCorrelation(_ context.Context, _ string) ([]database.Event, error) {
 	return s.correlationEvts, s.correlationErr
+}
+func (s *stubAdapter) GetLastEventTimestamp(_ context.Context, _ string) (time.Time, error) {
+	return time.Time{}, database.ErrNotFound
 }
 func (s *stubAdapter) GetFailureChain(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil
@@ -731,4 +748,13 @@ func (s *stubAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.
 }
 func (s *stubAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
+}
+func (s *stubAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
+	return 0, 0, nil
+}
+func (s *stubAdapter) SaveBaseline(_ context.Context, _, _, _ string, _ []float64) error {
+	return nil
+}
+func (s *stubAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[string][]float64, error) {
+	return map[string]map[string][]float64{}, nil
 }

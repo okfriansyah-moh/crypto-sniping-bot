@@ -55,4 +55,72 @@ type MarketDataDTO struct {
 	// pump.fun / bonk.fun curve markets; 0 (the default) means "not
 	// applicable". Used by Layer 1 to reject already-graduated curves.
 	BondingCurveProgressBps int32 `json:"bonding_curve_progress_bps,omitempty"`
+
+	// ─────────────────────────────────────────────────────────────────────
+	// Layer-1 Data Quality detector inputs (additive — Layer 1 fix).
+	//
+	// Each block carries a *Known flag because the zero value of bool/int/
+	// float is indistinguishable from "not measured". When *Known is false,
+	// the corresponding detector emits a `dq_unknown_<name>` flag and the
+	// active operational-mode profile decides how to degrade (STRICT counts
+	// it as risk; BALANCED/EXPLORATION ignore it).
+	//
+	// The data_quality module MUST NOT make RPC calls to populate these —
+	// they are filled by upstream workers (ingestion / probe workers) so
+	// the module remains a pure function. Until upstream populates them,
+	// detectors degrade per profile rather than silently passing.
+	// ─────────────────────────────────────────────────────────────────────
+
+	// Honeypot simulation result (callStatic buy → sell on the router).
+	HoneypotSimKnown bool `json:"honeypot_sim_known,omitempty"`
+	BuySimSuccess    bool `json:"buy_sim_success,omitempty"`
+	SellSimSuccess   bool `json:"sell_sim_success,omitempty"`
+
+	// Tax (basis points, 1bp = 0.01%). Includes detection of dynamic / per-
+	// address tax overrides and presence of a blacklist function.
+	TaxKnown                 bool  `json:"tax_known,omitempty"`
+	BuyTaxBps                int32 `json:"buy_tax_bps,omitempty"`
+	SellTaxBps               int32 `json:"sell_tax_bps,omitempty"`
+	InitialBuyTaxBps         int32 `json:"initial_buy_tax_bps,omitempty"`
+	InitialSellTaxBps        int32 `json:"initial_sell_tax_bps,omitempty"`
+	TaxIsDynamic             bool  `json:"tax_is_dynamic,omitempty"`
+	BlacklistFunctionPresent bool  `json:"blacklist_function_present,omitempty"`
+
+	// LP lock — boolean lock plus a [0,1] strength score (0 = unlocked,
+	// 1 = burned/permanent).
+	LpLockKnown    bool    `json:"lp_lock_known,omitempty"`
+	LpLocked       bool    `json:"lp_locked,omitempty"`
+	LpLockStrength float64 `json:"lp_lock_strength,omitempty"`
+	LpLockDays     int32   `json:"lp_lock_days,omitempty"`
+
+	// Owner-privilege selectors discovered on the contract (EVM) or
+	// authority state (Solana). Canonical entries: "mint", "pause",
+	// "blacklist", "set_max_tx", "upgrade", "set_tax".
+	OwnerPrivilegesKnown     bool     `json:"owner_privileges_known,omitempty"`
+	OwnerPrivileges          []string `json:"owner_privileges,omitempty"`
+	MintAuthorityRenounced   bool     `json:"mint_authority_renounced,omitempty"`
+	FreezeAuthorityRenounced bool     `json:"freeze_authority_renounced,omitempty"`
+	SolanaAuthoritiesKnown   bool     `json:"solana_authorities_known,omitempty"`
+	ContractVerified         bool     `json:"contract_verified,omitempty"`
+	ContractVerifiedKnown    bool     `json:"contract_verified_known,omitempty"`
+
+	// Holder distribution — fraction (0..1) of supply held by top 5 wallets.
+	HolderDistKnown bool    `json:"holder_dist_known,omitempty"`
+	Top5HolderPct   float64 `json:"top5_holder_pct,omitempty"`
+	HolderCount     int32   `json:"holder_count,omitempty"`
+
+	// Wash-trading window stats over the most recent N swaps.
+	WashStatsKnown  bool    `json:"wash_stats_known,omitempty"`
+	TxCount1m       int32   `json:"tx_count_1m,omitempty"`
+	UniqueWallets1m int32   `json:"unique_wallets_1m,omitempty"`
+	WalletEntropy   float64 `json:"wallet_entropy,omitempty"`
+	RepeatRatio1m   float64 `json:"repeat_ratio_1m,omitempty"`
+
+	// Liquidity quality — USD-denominated pool depth and LP-churn signal.
+	LpStatsKnown        bool    `json:"lp_stats_known,omitempty"`
+	LiquidityUsd        float64 `json:"liquidity_usd,omitempty"`
+	SingleLpProviderPct float64 `json:"single_lp_provider_pct,omitempty"`
+	LpChurnDetected     bool    `json:"lp_churn_detected,omitempty"`
+	LpChurnBlocks       int32   `json:"lp_churn_blocks,omitempty"`
+	PoolAgeSeconds      int32   `json:"pool_age_seconds,omitempty"`
 }

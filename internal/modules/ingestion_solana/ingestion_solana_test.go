@@ -39,11 +39,11 @@ func buildPumpFunCreateData(name, symbol, uri string) []byte {
 	return buf
 }
 
-// buildRaydiumPoolInitData builds a synthetic Raydium V4 Initialize2 payload.
+// buildRaydiumPoolInitData builds a synthetic Raydium V4 Initialize2 payload
+// in the on-chain wire format: 1-byte tag, then nonce u8, openTime u64 LE,
+// initPcAmount u64 LE, initCoinAmount u64 LE.
 func buildRaydiumPoolInitData(nonce uint8, openTime, initPc, initCoin uint64) []byte {
-	var buf []byte
-	disc := ingestion_solana.RaydiumPoolInitDiscriminator
-	buf = append(buf, disc[:]...)
+	buf := []byte{ingestion_solana.RaydiumV4OpInitialize2}
 	buf = append(buf, nonce)
 	buf = appendU64LE(buf, openTime)
 	buf = appendU64LE(buf, initPc)

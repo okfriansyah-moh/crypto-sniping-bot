@@ -210,6 +210,27 @@ func (d *DB) GetEventsByCorrelation(ctx context.Context, correlationID string) (
 	return d.queryEvents(ctx, q, correlationID)
 }
 
+// GetLastEventTimestamp returns the most recent created_at for the given event_type.
+// Used by the adaptive risk-appetite controller (operational-modes skill) for
+// starvation detection. Returns ErrNotFound when no event of that type exists.
+func (d *DB) GetLastEventTimestamp(ctx context.Context, eventType string) (time.Time, error) {
+	const q = `
+		SELECT created_at
+		FROM events
+		WHERE event_type = $1
+		ORDER BY created_at DESC
+		LIMIT 1`
+	var ts time.Time
+	err := d.pool.QueryRowContext(ctx, q, eventType).Scan(&ts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, database.ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get last event timestamp: %w", err)
+	}
+	return ts, nil
+}
+
 // GetFailureChain reconstructs the causal chain leading to a failed event.
 func (d *DB) GetFailureChain(ctx context.Context, failedEventID string) ([]database.Event, error) {
 	// Walk the causation chain backwards from the failed event.

@@ -40,6 +40,27 @@ edge:
   max_dev_buy_pct_bps: 0 # reject if dev buys > N bps of supply at launch (0=off)
   max_creator_rug_count: 0 # reject if creator wallet has ≥N prior rugs (0=off)
   min_dev_wallet_age_seconds: 0 # reject if creator wallet age < N seconds (0=off)
+  # ── F-4 fix: edge taxonomy + adaptive momentum threshold ────────────────────
+  new_launch_window_seconds: 300 # pool-age ceiling for NEW_LAUNCH_EDGE (5 min)
+  min_contract_safety: 0.0 # NEW_LAUNCH safety floor (defence-in-depth)
+  new_launch_weight_liquidity: 0.4
+  new_launch_weight_safety: 0.3
+  new_launch_weight_holders: 0.2
+  new_launch_weight_entropy: 0.1
+  momentum_weight_price: 0.4
+  momentum_weight_volume: 0.4
+  momentum_weight_velocity: 0.2
+  min_price_momentum: 0.4 # cold-start floor + absolute min for adaptive threshold
+  min_volume_momentum: 0.3 # hard gate on VolumeMomentum for MOMENTUM_EDGE
+  momentum_quantile: 0.7 # rolling-window quantile for adaptive threshold
+  baseline_min_samples: 30 # below this, use MinPriceMomentum (cold start)
+  baseline_max_len: 256 # per-signal ring-buffer cap
+  # Residual-risk #1 — debounced rolling-window baseline persistence.
+  # Hot path stays in-memory; the worker flushes dirty (market, signal)
+  # entries to the DB on this cadence (best-effort; failures logged).
+  baseline_flush_interval_sec: 30 # >= 5 (validator); 0 → default 30
+  baseline_flush_max_writes: 100 # >= 1 (validator); excess deferred to next cycle
+  model_version: edge-v1 # stamped onto EdgeDTO.EdgeModelVersionID
 
 validation:
   prior_probability: 0.35 # fixed prior P(success) — Phase 2 simplification
@@ -56,6 +77,15 @@ validation:
   # Set to 1 to disable (default behaviour).
   required_consecutive_passes: 1
   consecutive_pass_window_seconds: 60
+  # Bus dependency-wait. Validation triggers on edge_event but joins
+  # probability/slippage by trace_id from the DB-backed event-bus state.
+  # If those upstream events have not committed by join_timeout_ms,
+  # validation REJECTs with reject_reason=probability_unavailable rather
+  # than silently using the prior to compute EV (that path produced the
+  # mass -1900 bps reject regression — see docs/architecture.md § 3.5).
+  # join_poll_interval_ms is the DB poll cadence within the wait.
+  join_timeout_ms: 250
+  join_poll_interval_ms: 20
 
 selection:
   max_open_positions: 1 # Phase 2: one concurrent position only
@@ -99,7 +129,19 @@ models:
     brier_calibration: 0.18 # baseline calibration score (lower = better)
 
   slippage:
-    model_version_id: "buckets-v1"
+    # CPMM closed-form slippage model (F-3 fix). Replaces the legacy
+    # bucket lookup which emitted constant (p50,p95) per liquidity tier.
+    # Algorithm: see internal/modules/models/slippage.go.
+    model_version_id: "cpmm-alpha-v1"
+    max_slippage_bps: 5000 # hard upper bound (50%)
+    volatility_z: 1.65 # standard-normal 95th-percentile multiplier
+    tail_bps: 25 # fixed p95 premium so p95 > p50 even when σ≈0
+    min_reserve_usd: 1.0 # numerical floor for the CPMM denominator
+    default_alpha: 1.0 # used when GetSlippageAlpha errors / returns ≤0
+    max_alpha: 5.0 # hard cap on the per-market α coefficient
+
+    # Legacy bucket grid retained for YAML backward-compat only; the
+    # CPMM model does NOT consult these values.
     fallback_p50_bps: 100
     fallback_p95_bps: 250
     buckets:
@@ -178,6 +220,12 @@ learning:
   observation_window_seconds: 3600 # how long to track a rejected token's return
   fn_gain_threshold_pct: 0.10 # minimum return to classify rejected trade as FN
   rollback_check_interval_seconds: 300 # how often the rollback watchdog runs
+  # F-SEC-08 / residual risk #5 — Sybil-cluster bypass tracking. Flag a
+  # losing trade as a probable Sybil bypass when the wash detector said
+  # the token was clean (wash_score < max_wash_score) AND the wash-stats
+  # window saw more than min_wallets unique wallets.
+  sybil_suspect_min_wallets: 50
+  sybil_suspect_max_wash_score: 0.30
   # Phase 11 (Reference-Repo R2 — LEARN) — creator blacklist auto-build.
   # Confirmed-rug LearningRecords bump the creator's rug counter; once
   # the counter reaches min_rugs_for_blacklist, the edge gate
@@ -185,6 +233,20 @@ learning:
   creator_blacklist:
     enabled: false
     min_rugs_for_blacklist: 2
+
+# ── Adaptive Risk-Appetite Controller (operational-modes skill) ───────────────
+# Drives auto-transitions between STRICT / BALANCED / EXPLORATION based on
+# starvation and rug/FP-rate signals. Orthogonal to the drawdown safety
+# controller (config: risk.*) — the adaptive controller skips when the
+# system is DEGRADED or HALTED.
+mode_adaptive:
+  enabled: true
+  adaptive_window_sec: 1800 # 30-min look-back for rug/FP rates
+  starvation_trigger_sec: 1800 # auto-upgrade after 30 min with no edges
+  rug_rate_auto_downgrade: 0.15 # auto-downgrade when rug rate > 15%
+  fp_rate_auto_downgrade: 0.25 # auto-downgrade when FP rate > 25%
+  transition_window_sec: 3600 # at most one adaptive transition per hour
+  default_startup_mode: BALANCED # cold-start mode
 
 # ── Phase 8: Production Hardening Configuration ───────────────────────────────
 
@@ -200,3 +262,29 @@ hardening:
   evaluation_deadline_sec: 3600 # seconds after execution before eval overdue
   recovery_grace_sec: 300 # seconds before marking a tx as lost
   max_reorg_depth: 12 # EVM max safe reorg depth before halt
+
+# ── Residual Risk #3: Per-Market Slippage α Aggregator ────────────────────────
+# Drives Adapter.GetSlippageAlpha — the Layer 4 CPMM slippage model
+# previously returned a hardcoded α=1.0. The aggregator worker
+# (workers.RunAlphaAggregator) periodically samples realized vs predicted
+# slippage from execution_results × slippage_estimates × allocations and
+# upserts per-market α to slippage_alpha_calibrations.
+
+execution_quality:
+  alpha:
+    min_sample_count: 30 # require ≥30 fills before updating
+    alpha_min: 0.5 # clamp lower bound
+    alpha_max: 2.0 # clamp upper bound
+    ewma_halflife_sec: 3600 # 1h EWMA halflife (recent fills win)
+    update_interval_sec: 300 # 5min between aggregation cycles
+
+# ── Residual-risk #4: optional MarketDataDTO enrichment probes ──────────────
+# Default-OFF. Until simulation contracts are deployed, leave probes.enabled
+# false — DQ will continue to consume the raw market_data_event and degrade
+# via *Known flags per the active operational-mode profile.
+probes:
+  enabled: false
+  honeypot_sim:
+    enabled: false
+    simulation_contract: "" # EIP-55 address of deployed sim contract
+    timeout_ms: 2000 # bounded by validate_ranges to [100, 30000]

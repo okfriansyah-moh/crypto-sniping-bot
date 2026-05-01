@@ -16,6 +16,16 @@ type FeatureDTO struct {
 	TokenLifecycleID string `json:"token_lifecycle_id"`
 	TokenAddress     string `json:"token_address"`
 
+	// Market identifies the originating market (e.g. "eth-uniswap-v2").
+	// Threaded from the upstream MarketDataDTO.Market for downstream
+	// per-market α / latency / cohort lookups (Layer 4 slippage model in
+	// particular). Empty when upstream MarketDataDTO is unavailable —
+	// downstream models then fall back to cold-start defaults.
+	Market string `json:"market,omitempty"`
+	// Chain is the chain key (e.g. "eth", "bsc", "solana"). Threaded from
+	// the upstream MarketDataDTO.Chain for chain-aware fallback paths.
+	Chain string `json:"chain,omitempty"`
+
 	// Normalized [0.0, 1.0] features
 	LiquidityScore     float64 `json:"liquidity_score"`
 	TxVelocityScore    float64 `json:"tx_velocity_score"`

@@ -120,8 +120,20 @@ func (a *dispatcherStubAdapter) InsertLatencyProfile(_ context.Context, _ contra
 func (a *dispatcherStubAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (a *dispatcherStubAdapter) GetRealizedFillSamples(_ context.Context, _ int) (map[string][]database.FillSample, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) UpsertSlippageAlpha(_ context.Context, _ string, _, _, _ float64, _ int) error {
+	return nil
+}
+func (a *dispatcherStubAdapter) GetSlippageAlpha(_ context.Context, _ string) (float64, error) {
+	return 1.0, nil
+}
 func (a *dispatcherStubAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
 	return nil, database.ErrNotFound
+}
+func (a *dispatcherStubAdapter) GetEstimatesByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, *contracts.SlippageEstimateDTO, error) {
+	return nil, nil, database.ErrNotFound
 }
 func (a *dispatcherStubAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
 	return nil, database.ErrNotFound
@@ -176,6 +188,9 @@ func (a *dispatcherStubAdapter) GetExposureSummary(_ context.Context) (*database
 }
 func (a *dispatcherStubAdapter) GetEventsByTrace(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil
+}
+func (a *dispatcherStubAdapter) GetLastEventTimestamp(_ context.Context, _ string) (time.Time, error) {
+	return time.Time{}, database.ErrNotFound
 }
 func (a *dispatcherStubAdapter) GetEventsByCorrelation(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil
@@ -404,4 +419,13 @@ func (s *dispatcherStubAdapter) UpsertCreatorRugObservation(_ context.Context, _
 }
 func (s *dispatcherStubAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
+}
+func (s *dispatcherStubAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
+	return 0, 0, nil
+}
+func (s *dispatcherStubAdapter) SaveBaseline(_ context.Context, _, _, _ string, _ []float64) error {
+	return nil
+}
+func (s *dispatcherStubAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[string][]float64, error) {
+	return map[string]map[string][]float64{}, nil
 }

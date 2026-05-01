@@ -149,6 +149,36 @@ type Adapter interface {
 	// for the given trace ID, or nil if not present.
 	GetSlippageEstimateByTrace(ctx context.Context, traceID string) (*contracts.SlippageEstimateDTO, error)
 
+	// GetEstimatesByTrace returns the most recent probability and slippage
+	// estimates for the given trace ID in a single round-trip. Either or
+	// both may be nil if the corresponding row has not yet been committed.
+	// F-SEC-05: halves DB round-trips on the validation hot path.
+	GetEstimatesByTrace(ctx context.Context, traceID string) (
+		*contracts.ProbabilityEstimateDTO, *contracts.SlippageEstimateDTO, error)
+
+	// GetSlippageAlpha returns the per-market α calibration coefficient
+	// for the Layer 4 slippage model. α is the multiplier applied to the
+	// CPMM closed-form base impact and absorbs realized fee/tax/MEV drift.
+	//
+	// market is a stable per-market key (e.g. "eth-uniswap-v2"); empty
+	// string requests the global default.
+	//
+	// Cold-start behavior: when no row exists for the requested market,
+	// implementations MUST return (1.0, nil). The execution_quality.AlphaAggregator
+	// worker populates rows from realized fills (residual risk #3 closure).
+	GetSlippageAlpha(ctx context.Context, market string) (float64, error)
+
+	// GetRealizedFillSamples returns realized-vs-predicted slippage samples
+	// keyed by market, captured within the last sinceSeconds. Joins
+	// execution_results × slippage_estimates × allocations to produce one
+	// FillSample per successful execution with a non-zero predicted &
+	// realized slippage. Used by the AlphaAggregator worker.
+	GetRealizedFillSamples(ctx context.Context, sinceSeconds int) (map[string][]FillSample, error)
+
+	// UpsertSlippageAlpha persists the computed α calibration for a market.
+	// Idempotent: ON CONFLICT (market) DO UPDATE.
+	UpsertSlippageAlpha(ctx context.Context, market string, alpha, ewmaPred, ewmaReal float64, sampleCount int) error
+
 	// GetLatestLatencyProfile returns the most recent latency profile for the
 	// given chain, or nil if no profile has been recorded.
 	GetLatestLatencyProfile(ctx context.Context, chain string) (*contracts.LatencyProfileDTO, error)
@@ -270,6 +300,12 @@ type Adapter interface {
 
 	// GetEventsByCorrelation returns all events sharing a correlation ID.
 	GetEventsByCorrelation(ctx context.Context, correlationID string) ([]Event, error)
+
+	// GetLastEventTimestamp returns the created_at timestamp of the most recent
+	// event of the given event_type. Used by the adaptive risk-appetite
+	// controller (operational-modes skill) to compute starvation duration.
+	// Returns ErrNotFound when no event of that type exists.
+	GetLastEventTimestamp(ctx context.Context, eventType string) (time.Time, error)
 
 	// GetFailureChain reconstructs the causal chain leading to a failed event.
 	GetFailureChain(ctx context.Context, failedEventID string) ([]Event, error)
@@ -477,6 +513,28 @@ type Adapter interface {
 	// windowHours and the most recent tokens that passed DQ validation.
 	// Used by the /pipeline Telegram command.
 	GetPipelineStats(ctx context.Context, windowHours int) (*PipelineStats, error)
+
+	// GetAdaptiveDQStats returns the data-quality decision counters for the
+	// past sinceSeconds: total decisions and rug/honeypot rejects. Used by
+	// the adaptive risk-appetite controller (operational-modes skill) to
+	// compute a real rug_rate, replacing the prior hardcoded 0.0 path.
+	// Returns (0, 0, nil) when no decisions exist within the window.
+	GetAdaptiveDQStats(ctx context.Context, sinceSeconds int) (totalDecisions int, rugRejects int, err error)
+
+	// ── Baseline Persistence (residual risk #1) ──────────────────────────────
+
+	// SaveBaseline writes/upserts the rolling-window ring buffer for a single
+	// (module, market, signal) tuple. `values` is stored oldest-first.
+	// Idempotent: ON CONFLICT (module, market, signal) DO UPDATE SET values, updated_at.
+	// Best-effort from the caller's perspective — workers MUST log + continue
+	// on error rather than abort processing.
+	SaveBaseline(ctx context.Context, module, market, signal string, values []float64) error
+
+	// LoadBaselines returns every persisted (market, signal) → values entry
+	// for `module`. Used by the features and edge workers at startup to
+	// rehydrate their in-memory ring buffers.
+	// Returns an empty (non-nil) outer map when no rows exist.
+	LoadBaselines(ctx context.Context, module string) (map[string]map[string][]float64, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────
@@ -624,6 +682,15 @@ type ExposureSummary struct {
 	PerToken      map[string]float64 // tokenAddress → usd
 	PerCohort     map[string]float64 // cohortID     → usd
 	OpenPositions int32
+}
+
+// FillSample is one realized-vs-predicted slippage observation captured
+// from execution_results × slippage_estimates × allocations. Consumed by
+// the AlphaAggregator worker (residual risk #3 closure).
+type FillSample struct {
+	PredictedBps float64
+	RealizedBps  float64
+	At           time.Time
 }
 
 // ShadowTrade is an observation row tracking the price trajectory of a rejected

@@ -55,8 +55,10 @@ func DefaultLogisticConfig() LogisticConfig {
 		WPriceMomentum:      0.6,
 		ModelVersionID:      "logreg-phase4-v1",
 		BrierCalibration:    0.22,
-		MinProbability:      1e-6,
-		MaxProbability:      1.0 - 1e-6,
+		// Per probability-modeling skill: clip to [0.05, 0.95] — never 0 or 1.
+		// Tight extremes destabilize the EV gate and inflate Kelly sizing.
+		MinProbability: 0.05,
+		MaxProbability: 0.95,
 	}
 }
 
@@ -113,8 +115,64 @@ func (m *ProbabilityModel) Predict(_ context.Context, in contracts.FeatureDTO) (
 		Probability:      p,
 		Calibration:      c.BrierCalibration,
 		ModelVersionID:   c.ModelVersionID,
+		Confidence:       minFeatureConfidence(in.Confidence),
+		CalibrationBin:   probabilityDecile(p),
 		EstimatedAt:      now,
 	}, nil
+}
+
+// minFeatureConfidence returns the minimum confidence over the eight features
+// that feed the logistic model. Per probability-modeling skill: "low FeatureConfidence
+// in → low ProbabilityEstimate confidence out". Skips zero-valued slots so an
+// optional/absent feature does not collapse the score (a confidence of exactly 0
+// signals "not provided", not "fully uncertain"). If no slot is positive, returns 0.
+func minFeatureConfidence(fc contracts.FeatureConfidence) float64 {
+	candidates := [...]float64{
+		fc.LiquidityScore,
+		fc.TxVelocityScore,
+		fc.HolderDistribution,
+		fc.WalletEntropy,
+		fc.ContractSafety,
+		fc.TokenAge,
+		fc.VolumeMomentum,
+		fc.PriceMomentum,
+	}
+	min := -1.0
+	for _, v := range candidates {
+		// F-SEC-02: skip NaN/±Inf in addition to non-positive — same
+		// "treat as missing" rule. Without this guard a single NaN slot
+		// poisoned the returned Confidence and propagated into
+		// ProbabilityEstimateDTO.Confidence.
+		if v <= 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		if min < 0 || v < min {
+			min = v
+		}
+	}
+	if min < 0 {
+		return 0
+	}
+	if min > 1.0 {
+		min = 1.0
+	}
+	return min
+}
+
+// probabilityDecile maps p ∈ [0,1] → bin in [0..9]. p=1.0 maps to 9.
+// Used by the learning engine to bucket predictions for calibration/Brier tracking.
+func probabilityDecile(p float64) int32 {
+	if p <= 0 {
+		return 0
+	}
+	bin := int32(math.Floor(p * 10))
+	if bin > 9 {
+		bin = 9
+	}
+	if bin < 0 {
+		bin = 0
+	}
+	return bin
 }
 
 // ModelVersionID returns the configured probability model version.

@@ -227,7 +227,8 @@ SELECT event_id, trace_id, correlation_id, COALESCE(causation_id,''), version_id
        shadow, outcome, classification, pnl_usd, pnl_pct, prediction_error, cohort,
        features_snapshot, edge_snapshot, validated_snapshot,
        simulated, expired_source, strategy_status,
-       COALESCE(expires_at,''), priority, recorded_at
+       COALESCE(expires_at,''), priority, recorded_at,
+       sybil_indicators
 FROM learning_records
 WHERE version_id = $1
   AND recorded_at >= $2
@@ -293,6 +294,7 @@ ORDER BY evaluated_at DESC`
 func scanLearningRecord(rows *sql.Rows) (contracts.LearningRecordDTO, error) {
 	var dto contracts.LearningRecordDTO
 	var featuresJSON, edgeJSON, validatedJSON []byte
+	var sybilJSON []byte
 	err := rows.Scan(
 		&dto.EventID, &dto.TraceID, &dto.CorrelationID, &dto.CausationID, &dto.VersionID,
 		&dto.RecordID, &dto.TokenLifecycleID,
@@ -301,6 +303,7 @@ func scanLearningRecord(rows *sql.Rows) (contracts.LearningRecordDTO, error) {
 		&featuresJSON, &edgeJSON, &validatedJSON,
 		&dto.Simulated, &dto.ExpiredSource, &dto.StrategyStatus,
 		&dto.ExpiresAt, &dto.Priority, &dto.RecordedAt,
+		&sybilJSON,
 	)
 	if err != nil {
 		return contracts.LearningRecordDTO{}, err
@@ -313,6 +316,12 @@ func scanLearningRecord(rows *sql.Rows) (contracts.LearningRecordDTO, error) {
 	}
 	if len(validatedJSON) > 0 {
 		_ = json.Unmarshal(validatedJSON, &dto.ValidatedSnapshot)
+	}
+	if len(sybilJSON) > 0 {
+		var s contracts.SybilIndicators
+		if err := json.Unmarshal(sybilJSON, &s); err == nil {
+			dto.SybilClusterIndicators = &s
+		}
 	}
 	return dto, nil
 }
