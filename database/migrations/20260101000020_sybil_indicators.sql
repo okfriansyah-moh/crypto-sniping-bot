@@ -7,5 +7,9 @@
 -- every existing row and every record that does not trip the Sybil
 -- heuristic (wins, true-rugs the wash layer caught, etc.).
 
+BEGIN;
+
 ALTER TABLE learning_records
     ADD COLUMN IF NOT EXISTS sybil_indicators JSONB DEFAULT NULL;
+
+COMMIT;

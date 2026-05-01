@@ -1,4 +1,3 @@
-package execution_quality
 // Package execution_quality computes post-trade execution quality metrics.
 // AlphaAggregator derives the per-market slippage α calibration coefficient
 // from realized fills, closing residual risk #3 (the GetSlippageAlpha stub).

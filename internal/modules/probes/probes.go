@@ -1,4 +1,3 @@
-package probes
 // Package probes defines the on-chain enrichment interface for upstream
 // MarketDataDTO records. A probe takes an in-memory MarketDataDTO and
 // returns an enriched copy with one or more *Known flag pairs flipped to

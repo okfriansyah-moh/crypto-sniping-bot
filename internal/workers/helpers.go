@@ -1,9 +1,6 @@
 // Package workers contains stage handler implementations for the pipeline event bus.
 // Workers are the ONLY components that call adapter methods.
 // Modules are pure functions; workers pass them data, persist results, and route events.
-// Package workers contains stage handler implementations for the pipeline event bus.
-// Workers are the ONLY components that call adapter methods.
-// Modules are pure functions; workers pass them data, persist results, and route events.
 package workers
 
 import (

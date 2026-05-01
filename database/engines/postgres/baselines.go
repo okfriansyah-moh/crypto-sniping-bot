@@ -2,9 +2,7 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 )
 
@@ -54,9 +52,6 @@ func (d *DB) LoadBaselines(ctx context.Context, module string) (map[string]map[s
 	const q = `SELECT market, signal, values FROM baselines WHERE module = $1`
 	rows, err := d.pool.QueryContext(ctx, q, module)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return out, nil
-		}
 		return nil, fmt.Errorf("load baselines: %w", err)
 	}
 	defer rows.Close()

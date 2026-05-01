@@ -84,7 +84,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	}
 
 	enriched := md
-	results := make([]probes.ProbeResult, 0, len(w.probes))
+	var results []probes.ProbeResult
 	for _, p := range w.probes {
 		start := time.Now()
 		out, err := p.Probe(ctx, enriched)
@@ -108,12 +108,21 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		results = append(results, res)
 	}
 
-	w.logger.Info("market_probes_completed",
+	// Log aggregate probe results so timing data is observable.
+	probeAttrs := make([]any, 0, 2+len(results)*2)
+	probeAttrs = append(probeAttrs,
 		"event_id", evt.EventID,
 		"trace_id", evt.TraceID,
 		"probe_count", len(w.probes),
 		"honeypot_sim_known", enriched.HoneypotSimKnown,
 	)
+	for _, r := range results {
+		probeAttrs = append(probeAttrs,
+			"probe."+r.ProbeName+".ok", r.Success,
+			"probe."+r.ProbeName+".ms", r.DurationMs,
+		)
+	}
+	w.logger.Info("market_probes_completed", probeAttrs...)
 
 	// Re-derive the EventID for the enriched DTO so it is distinct from
 	// the upstream raw event (idempotency / event-log clarity). Use a

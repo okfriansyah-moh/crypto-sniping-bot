@@ -1,5 +1,4 @@
 package probes
-package probes
 
 import (
 	"context"
