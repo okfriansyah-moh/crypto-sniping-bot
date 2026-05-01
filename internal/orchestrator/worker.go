@@ -21,9 +21,51 @@ const defaultMaxRetries = 5
 // The orchestrator calls handlers; handlers never call each other.
 type StageHandler interface {
 	// Process handles an incoming event and returns the output event.
-	// Return nil output to not emit any downstream event.
+	// Return nil output to not emit any downstream event. When returning nil,
+	// handlers SHOULD call RecordDecision(ctx, status, reason) so the
+	// stage_completed log line carries an explicit discriminator and remains
+	// correlatable to the input event_id (see traceability skill).
 	// Return an error to abort processing — the event remains unprocessed for retry.
 	Process(ctx context.Context, evt *database.Event) (*database.Event, error)
+}
+
+// stageDecisionKey is the context key for the per-Process decision recorder.
+// It is unexported and addressed by type identity so no external package can
+// collide with or overwrite the recorder out-of-band.
+type stageDecisionKey struct{}
+
+// stageDecision is the per-Process record of the handler's no-output
+// discriminator. RunWorker allocates a fresh value for every claimed event,
+// so there is no shared state across goroutines or events. Idempotency: the
+// same input drives the same handler code path which records the same
+// (status, reason), so retries log identical stage_completed records.
+type stageDecision struct {
+	status string
+	reason string
+}
+
+// RecordDecision attaches an explicit output_status and decision_reason to
+// the upcoming stage_completed log line for the current Process call.
+// Handlers that intentionally return (nil, nil) — for REJECT, FILTER,
+// TERMINAL, or SKIP paths — MUST call this so observability traces remain
+// correlatable. status MUST be one of the StageStatus* constants.
+//
+// Calling this when the handler also returns a non-nil output event is a
+// no-op for the status field: the orchestrator overrides status to
+// StageStatusEmitted because the canonical correlation is via output_event_id.
+//
+// Outside of a worker-driven context (e.g. unit tests calling Process
+// directly without RunWorker) this function is a no-op.
+func RecordDecision(ctx context.Context, status, reason string) {
+	if ctx == nil {
+		return
+	}
+	d, ok := ctx.Value(stageDecisionKey{}).(*stageDecision)
+	if !ok || d == nil {
+		return
+	}
+	d.status = status
+	d.reason = reason
 }
 
 // RunWorker runs the generic event worker loop for a stage handler.
@@ -94,7 +136,13 @@ func RunWorker(
 			"version_id", evt.VersionID,
 		)
 
-		output, stageErr := safeProcess(ctx, handler, evt, evtLog)
+		// Allocate a fresh decision recorder per event and inject via context.
+		// Handlers signal no-output discriminators (rejected/filtered/...)
+		// through RecordDecision — see traceability skill (F-8 fix).
+		decision := &stageDecision{}
+		procCtx := context.WithValue(ctx, stageDecisionKey{}, decision)
+
+		output, stageErr := safeProcess(procCtx, handler, evt, evtLog)
 		if stageErr != nil {
 			handleStageFailure(ctx, adapter, group, retryCap, evt, stageErr, evtLog)
 			continue
@@ -112,7 +160,12 @@ func RunWorker(
 			continue
 		}
 
-		evtLog.Info("stage_completed", "output_event_id", outputEventID(output))
+		status, reason := resolveStageOutcome(output, decision)
+		evtLog.Info("stage_completed",
+			LogFieldOutputEventID, outputEventID(output),
+			LogFieldOutputStatus, status,
+			LogFieldDecisionReason, reason,
+		)
 	}
 }
 
@@ -228,4 +281,24 @@ func outputEventID(evt *database.Event) string {
 		return ""
 	}
 	return evt.EventID
+}
+
+// resolveStageOutcome derives the (output_status, decision_reason) tuple
+// logged on stage_completed. Resolution rules:
+//
+//  1. Output emitted          → StageStatusEmitted, reason="" (correlation
+//     is via output_event_id; reason is reserved for non-emit cases).
+//  2. No output, recorded     → use the handler-recorded status and reason.
+//  3. No output, not recorded → StageStatusFiltered, reason="" — the legacy
+//     default for handlers that have not yet adopted RecordDecision.
+//
+// Deterministic and side-effect-free; safe for tests to call directly.
+func resolveStageOutcome(output *database.Event, d *stageDecision) (status, reason string) {
+	if output != nil {
+		return StageStatusEmitted, ""
+	}
+	if d != nil && d.status != "" {
+		return d.status, d.reason
+	}
+	return StageStatusFiltered, ""
 }

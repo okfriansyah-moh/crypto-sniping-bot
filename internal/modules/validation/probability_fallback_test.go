@@ -74,20 +74,30 @@ func TestProcessWithEstimates_LowConfidence_FallsBack(t *testing.T) {
 	}
 }
 
-func TestProcessWithEstimates_NilProb_TimeoutTag(t *testing.T) {
+func TestProcessWithEstimates_NilProb_RejectsProbabilityUnavailable(t *testing.T) {
+	// Production mode (UseModelOutput=true): a missing probability estimate
+	// MUST surface as an explicit REJECT with reject_reason="probability_unavailable".
+	// The historical "silently substitute PriorProbability and tag prob_join_timeout"
+	// path produced deterministic mass-rejects at large negative ev_bps and
+	// starved Layers 6–10 — see docs/architecture.md § 3.5.
 	mod := New(validationCfg()).WithProbabilityRuntime(phase9ProbCfg())
 	got, _ := mod.ProcessWithEstimates(context.Background(), goodEdge(), nil, nil, nil)
-	// prob_join_timeout is a fallback signal — same contract rule applies.
-	if got.Decision == "ACCEPT" && got.RejectReason != "" {
-		t.Fatalf("RejectReason must be empty on ACCEPT; got %q", got.RejectReason)
+
+	if got.Decision != "REJECT" {
+		t.Fatalf("missing prob in production mode must REJECT; got %s", got.Decision)
 	}
-	// On REJECT the fallback tag must be present for traceability.
-	if got.Decision == "REJECT" && !strings.Contains(got.RejectReason, "prob_join_timeout") {
-		t.Fatalf("REJECT must carry prob_join_timeout tag; got %q", got.RejectReason)
+	if !strings.Contains(got.RejectReason, "probability_unavailable") {
+		t.Fatalf("expected probability_unavailable; got %q", got.RejectReason)
 	}
-	// Either way, the prior must have been used.
-	if math.Abs(got.ProbabilityUsed-0.55) > 1e-9 {
-		t.Errorf("expected prior 0.55 to be used on missing prob; got %v", got.ProbabilityUsed)
+	// The legacy fallback tag must NOT appear — operators distinguish a
+	// real join failure from a low-confidence prior fallback by reason.
+	if strings.Contains(got.RejectReason, "prob_join_timeout") {
+		t.Fatalf("legacy prob_join_timeout tag must not be emitted; got %q", got.RejectReason)
+	}
+	// ProbabilityUsed must NOT carry the prior — that would imply the prior
+	// fed EV and is exactly the silent-substitution we are rejecting.
+	if got.ProbabilityUsed != 0 {
+		t.Fatalf("ProbabilityUsed must be 0 (no model input); got %v", got.ProbabilityUsed)
 	}
 }
 

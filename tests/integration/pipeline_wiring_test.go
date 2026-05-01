@@ -102,6 +102,9 @@ func (m *memAdapter) GetEventByID(_ context.Context, id string) (*database.Event
 func (m *memAdapter) GetEventsByTrace(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil
 }
+func (m *memAdapter) GetLastEventTimestamp(_ context.Context, _ string) (time.Time, error) {
+	return time.Time{}, database.ErrNotFound
+}
 func (m *memAdapter) GetEventsByCorrelation(_ context.Context, _ string) ([]database.Event, error) {
 	return nil, nil
 }
@@ -259,8 +262,22 @@ func (m *memAdapter) InsertLatencyProfile(_ context.Context, _ contracts.Latency
 func (m *memAdapter) GetProbabilityEstimateByTrace(_ context.Context, _ string) (*contracts.ProbabilityEstimateDTO, error) {
 	return nil, nil
 }
+func (m *memAdapter) GetRealizedFillSamples(_ context.Context, _ int) (map[string][]database.FillSample, error) {
+	return nil, nil
+}
+func (m *memAdapter) UpsertSlippageAlpha(_ context.Context, _ string, _, _, _ float64, _ int) error {
+	return nil
+}
+func (m *memAdapter) GetSlippageAlpha(_ context.Context, _ string) (float64, error) {
+	return 1.0, nil
+}
 func (m *memAdapter) GetSlippageEstimateByTrace(_ context.Context, _ string) (*contracts.SlippageEstimateDTO, error) {
 	return nil, nil
+}
+func (m *memAdapter) GetEstimatesByTrace(ctx context.Context, traceID string) (*contracts.ProbabilityEstimateDTO, *contracts.SlippageEstimateDTO, error) {
+	p, _ := m.GetProbabilityEstimateByTrace(ctx, traceID)
+	s, _ := m.GetSlippageEstimateByTrace(ctx, traceID)
+	return p, s, nil
 }
 func (m *memAdapter) GetLatestLatencyProfile(_ context.Context, _ string) (*contracts.LatencyProfileDTO, error) {
 	return nil, nil
@@ -820,4 +837,13 @@ func (m *memAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.C
 }
 func (m *memAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
+}
+func (m *memAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
+	return 0, 0, nil
+}
+func (m *memAdapter) SaveBaseline(_ context.Context, _, _, _ string, _ []float64) error {
+	return nil
+}
+func (m *memAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[string][]float64, error) {
+	return map[string]map[string][]float64{}, nil
 }

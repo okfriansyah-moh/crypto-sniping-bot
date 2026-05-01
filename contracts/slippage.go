@@ -27,4 +27,11 @@ type SlippageEstimateDTO struct {
 	// Adapted from mux's congestion-aware slippage. Bounded by the
 	// SlippageConfig.MaxCongestionMultiplier YAML value.
 	CongestionMultiplier float64 `json:"congestion_multiplier,omitempty"`
+
+	// F-3 fix (CPMM slippage model) — [0,1] confidence derived from input
+	// depth (liquidity raw + per-feature confidence). Producers populate
+	// it; consumers MAY use it to bias the EV gate. Optional / additive:
+	// existing rows persisted before this field was introduced will load
+	// as 0.0 which downstream consumers treat as "unknown".
+	Confidence float64 `json:"confidence,omitempty"`
 }

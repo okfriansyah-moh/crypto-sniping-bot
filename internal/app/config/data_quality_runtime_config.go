@@ -17,6 +17,26 @@ type DataQualityRuntimeConfig struct {
 	Cache             DataQualityCacheConfig         `yaml:"cache"`
 	RiskWeights       DataQualityRiskWeights         `yaml:"risk_weights"`
 	FailurePolicy     DataQualityFailurePolicyConfig `yaml:"failure_policy"`
+
+	// ModeProfiles maps the active operational mode (STRICT / BALANCED /
+	// EXPLORATION) onto the threshold band that turns RiskScore into a
+	// Decision. Keys MUST be lower-case ("strict", "balanced",
+	// "exploration"); the module up-cases the runtime mode before lookup.
+	ModeProfiles map[string]DataQualityModeProfile `yaml:"mode_profiles"`
+}
+
+// DataQualityModeProfile is the per-mode decision band (Layer 1 fix).
+// Applied to the aggregated RiskScore by the Data Quality Engine.
+type DataQualityModeProfile struct {
+	// RejectAbove: RiskScore ≥ this → Decision = REJECT.
+	RejectAbove float64 `yaml:"reject_above"`
+	// RiskyPassAbove: RiskScore ≥ this (but below RejectAbove) → Decision = RISKY_PASS.
+	RiskyPassAbove float64 `yaml:"risky_pass_above"`
+	// UnknownFactor: how a `dq_unknown_<detector>` flag contributes when its
+	// upstream input is missing. Multiplied by the detector weight.
+	// Canonical: STRICT=0.5 (treat unknown as half-risk), BALANCED=0
+	// (neutral), EXPLORATION=0 (ignore).
+	UnknownFactor float64 `yaml:"unknown_factor"`
 }
 
 // DataQualityDetectorFlags toggles individual detectors at runtime.
@@ -73,6 +93,9 @@ type DataQualityRiskWeights struct {
 	LpLockMissing      float64 `yaml:"lp_lock_missing"`
 	WashTrading        float64 `yaml:"wash_trading"`
 	ContractUnverified float64 `yaml:"contract_unverified"`
+	// FakeLiquidity weight (Layer 1 fix). Optional in YAML; when 0 the
+	// default 0.20 contribution from defaultRiskWeights is used.
+	FakeLiquidity float64 `yaml:"fake_liquidity"`
 }
 
 // DataQualityFailurePolicyConfig governs RPC-failure handling.

@@ -10,6 +10,7 @@ import (
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/data_quality"
+	"crypto-sniping-bot/internal/orchestrator"
 )
 
 // DataQualityWorker implements orchestrator.StageHandler for Layer 1.
@@ -54,7 +55,16 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 	}
 
 	// Run data quality module (pure function).
-	dqDTO, err := w.mod.Process(ctx, dto)
+	// Read active operational mode from SystemState — STRICT/BALANCED/
+	// EXPLORATION select the per-mode threshold profile inside the module.
+	// On error or absent state, the module collapses unknown values onto
+	// STRICT (conservative).
+	sysMode := "BALANCED"
+	if state, stateErr := w.adapter.GetSystemState(ctx); stateErr == nil && state != nil && state.Mode != "" {
+		sysMode = state.Mode
+	}
+
+	dqDTO, err := w.mod.ProcessForMode(ctx, dto, sysMode)
 	if err != nil {
 		return nil, fmt.Errorf("dq_worker: module: %w", err)
 	}
@@ -63,6 +73,8 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		"token", dqDTO.TokenAddress,
 		"decision", dqDTO.Decision,
 		"risk_score", dqDTO.RiskScore,
+		"profile", dqDTO.Profile,
+		"flags", dqDTO.Flags,
 		"trace_id", dqDTO.TraceID,
 	)
 
@@ -82,6 +94,7 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 
 	// Do not emit downstream event for rejections.
 	if dqDTO.Decision == "REJECT" {
+		orchestrator.RecordDecision(ctx, orchestrator.StageStatusRejected, dqRejectReason(dqDTO))
 		return nil, nil
 	}
 

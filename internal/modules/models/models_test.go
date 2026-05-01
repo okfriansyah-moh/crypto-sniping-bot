@@ -79,11 +79,11 @@ func TestProbabilityClampsExtremes(t *testing.T) {
 	m := NewProbabilityModel(cfg)
 	in := sampleFeature()
 	out, _ := m.Predict(context.Background(), in)
-	if out.Probability >= 1.0 {
-		t.Fatalf("probability not clamped below 1: %v", out.Probability)
+	if out.Probability > cfg.MaxProbability {
+		t.Fatalf("probability not clamped to MaxProbability: %v > %v", out.Probability, cfg.MaxProbability)
 	}
-	if out.Probability < 0.99 {
-		t.Fatalf("probability should be near 1 for large positive z, got %v", out.Probability)
+	if out.Probability != cfg.MaxProbability {
+		t.Fatalf("expected probability == MaxProbability for large positive z, got %v", out.Probability)
 	}
 }
 

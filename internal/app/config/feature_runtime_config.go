@@ -17,6 +17,7 @@ type FeatureRuntimeConfig struct {
 	EthGetLogs          FeatureEthGetLogsConfig          `yaml:"eth_getlogs"`
 	Normalization       FeatureNormalizationConfig       `yaml:"normalization"`
 	ConfidenceAggregate FeatureConfidenceAggregateConfig `yaml:"confidence_aggregate"`
+	Stability           FeatureStabilityConfig           `yaml:"stability"`
 
 	// Phase 11 (Reference-Repo Improvements R2 — FEATURES) — additive
 	// holder-concentration and social-presence extractors. Both
@@ -24,6 +25,15 @@ type FeatureRuntimeConfig struct {
 	// preserved.
 	HolderConcentration FeatureHolderConcentrationConfig `yaml:"holder_concentration"`
 	SocialLinks         FeatureSocialLinksConfig         `yaml:"social_links"`
+
+	// Residual-risk #1 — debounced rolling-window baseline persistence.
+	// BaselineFlushIntervalSec: ticker cadence for the worker's flush
+	//   goroutine (default 30s when 0; minimum enforced by validator: 5s).
+	// BaselineFlushMaxWrites: per-cycle SaveBaseline cap. Excess dirty
+	//   keys are deferred to the next cycle and a warn is logged
+	//   (default 100; minimum 1).
+	BaselineFlushIntervalSec int `yaml:"baseline_flush_interval_sec"`
+	BaselineFlushMaxWrites   int `yaml:"baseline_flush_max_writes"`
 }
 
 // FeatureHolderConcentrationConfig drives the top-N holder pct extractor.
@@ -108,4 +118,14 @@ type FeatureNormalizationConfig struct {
 type FeatureConfidenceAggregateConfig struct {
 	Method              string `yaml:"method"`
 	MinFeaturesRequired int    `yaml:"min_features_required"`
+}
+
+// FeatureStabilityConfig drives the directional-consistency stability gate
+// (per .github/skills/feature-stability-checker/SKILL.md). Unstable
+// features get weight=0; freed mass is redistributed proportionally across
+// stable features.
+type FeatureStabilityConfig struct {
+	MinConsistency float64 `yaml:"min_consistency"`
+	MinBars        int     `yaml:"min_bars"`
+	LookbackBars   int     `yaml:"lookback_bars"`
 }

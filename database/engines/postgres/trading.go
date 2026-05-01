@@ -22,6 +22,14 @@ func (d *DB) InsertDataQuality(ctx context.Context, dto contracts.DataQualityDTO
 	if err != nil {
 		return fmt.Errorf("insert data quality: marshal reject reasons: %w", err)
 	}
+	flags := dto.Flags
+	if flags == nil {
+		flags = []string{}
+	}
+	flagsJSON, err := json.Marshal(flags)
+	if err != nil {
+		return fmt.Errorf("insert data quality: marshal flags: %w", err)
+	}
 
 	const q = `
 INSERT INTO data_quality (
@@ -30,14 +38,18 @@ INSERT INTO data_quality (
     decision, risk_score,
     is_honeypot, is_fake_liquidity, is_wash_trading, is_rug_risk, is_tax_anomaly,
     buy_tax_bps, sell_tax_bps, lp_locked, lp_holder_count, contract_verified,
-    reject_reasons, expires_at, priority, evaluated_at
+    reject_reasons, expires_at, priority, evaluated_at,
+    honeypot_score, rug_score, wash_score, fake_liq_score, tax_score,
+    profile, flags
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10,
     $11, $12, $13, $14, $15,
     $16, $17, $18, $19, $20,
-    $21, $22, $23, $24
+    $21, $22, $23, $24,
+    $25, $26, $27, $28, $29,
+    $30, $31
 )
 ON CONFLICT (event_id) DO NOTHING`
 
@@ -48,6 +60,8 @@ ON CONFLICT (event_id) DO NOTHING`
 		dto.IsHoneypot, dto.IsFakeLiquidity, dto.IsWashTrading, dto.IsRugRisk, dto.IsTaxAnomaly,
 		dto.BuyTaxBps, dto.SellTaxBps, dto.LpLocked, dto.LpHolderCount, dto.ContractVerified,
 		reasonsJSON, nullableString(dto.ExpiresAt), dto.Priority, dto.EvaluatedAt,
+		dto.HoneypotScore, dto.RugScore, dto.WashScore, dto.FakeLiqScore, dto.TaxScore,
+		dto.Profile, flagsJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert data quality: %w", err)
@@ -96,12 +110,14 @@ INSERT INTO edges (
     event_id, trace_id, correlation_id, causation_id, version_id,
     token_lifecycle_id, token_address,
     edge_type, edge_strength, edge_confidence, momentum_score, threshold_applied,
-    opportunity_window_ms, expires_at, priority, detected_at
+    opportunity_window_ms, expires_at, priority, detected_at,
+    model_version_id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7,
     $8, $9, $10, $11, $12,
-    $13, $14, $15, $16
+    $13, $14, $15, $16,
+    $17
 )
 ON CONFLICT (event_id) DO NOTHING`
 
@@ -110,6 +126,7 @@ ON CONFLICT (event_id) DO NOTHING`
 		dto.TokenLifecycleID, dto.TokenAddress,
 		dto.EdgeType, dto.EdgeStrength, dto.EdgeConfidence, dto.MomentumScore, dto.ThresholdApplied,
 		dto.OpportunityWindowMs, nullableString(dto.ExpiresAt), dto.Priority, dto.DetectedAt,
+		dto.EdgeModelVersionID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert edge: %w", err)
@@ -119,28 +136,40 @@ ON CONFLICT (event_id) DO NOTHING`
 
 // InsertValidatedEdge persists a ValidatedEdgeDTO.
 func (d *DB) InsertValidatedEdge(ctx context.Context, dto contracts.ValidatedEdgeDTO) error {
+	fallback := dto.FallbackReasons
+	if fallback == nil {
+		fallback = []string{}
+	}
+	fallbackJSON, err := json.Marshal(fallback)
+	if err != nil {
+		return fmt.Errorf("insert validated edge: marshal fallback reasons: %w", err)
+	}
+
 	const q = `
 INSERT INTO validated_edges (
     event_id, trace_id, correlation_id, causation_id, version_id,
     token_lifecycle_id, token_address,
     decision, expected_value_bps, expected_gain_bps, expected_loss_bps, fixed_costs_bps,
     probability_used, slippage_p95_bps_used, ev_threshold_applied, reject_reason,
-    expected_latency_ms, latency_gate_passed, expires_at, priority, validated_at
+    expected_latency_ms, latency_gate_passed, expires_at, priority, validated_at,
+    fallback_reasons
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7,
     $8, $9, $10, $11, $12,
     $13, $14, $15, $16,
-    $17, $18, $19, $20, $21
+    $17, $18, $19, $20, $21,
+    $22
 )
 ON CONFLICT (event_id) DO NOTHING`
 
-	_, err := d.pool.ExecContext(ctx, q,
+	_, err = d.pool.ExecContext(ctx, q,
 		dto.EventID, dto.TraceID, dto.CorrelationID, nullableString(dto.CausationID), dto.VersionID,
 		dto.TokenLifecycleID, dto.TokenAddress,
 		dto.Decision, dto.ExpectedValueBps, dto.ExpectedGainBps, dto.ExpectedLossBps, dto.FixedCostsBps,
 		dto.ProbabilityUsed, dto.SlippageP95BpsUsed, dto.EvThresholdApplied, dto.RejectReason,
 		dto.ExpectedLatencyMs, dto.LatencyGatePassed, nullableString(dto.ExpiresAt), dto.Priority, dto.ValidatedAt,
+		fallbackJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert validated edge: %w", err)
@@ -361,6 +390,17 @@ func (d *DB) InsertLearningRecord(ctx context.Context, dto contracts.LearningRec
 		return fmt.Errorf("insert learning record: marshal validated: %w", err)
 	}
 
+	// Sybil indicators are sparse — emit SQL NULL when the heuristic did
+	// not fire so JSONB queries can filter on `sybil_indicators IS NOT NULL`.
+	var sybilJSON interface{}
+	if dto.SybilClusterIndicators != nil {
+		b, err := json.Marshal(dto.SybilClusterIndicators)
+		if err != nil {
+			return fmt.Errorf("insert learning record: marshal sybil indicators: %w", err)
+		}
+		sybilJSON = b
+	}
+
 	const q = `
 INSERT INTO learning_records (
     event_id, trace_id, correlation_id, causation_id, version_id,
@@ -368,14 +408,16 @@ INSERT INTO learning_records (
     shadow, outcome, classification, pnl_usd, pnl_pct, prediction_error, cohort,
     features_snapshot, edge_snapshot, validated_snapshot,
     simulated, expired_source, strategy_status,
-    expires_at, priority, recorded_at
+    expires_at, priority, recorded_at,
+    sybil_indicators
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7,
     $8, $9, $10, $11, $12, $13, $14,
     $15, $16, $17,
     $18, $19, $20,
-    $21, $22, $23
+    $21, $22, $23,
+    $24
 )
 ON CONFLICT (event_id) DO NOTHING`
 
@@ -386,6 +428,7 @@ ON CONFLICT (event_id) DO NOTHING`
 		featuresJSON, edgeJSON, validatedJSON,
 		dto.Simulated, dto.ExpiredSource, dto.StrategyStatus,
 		nullableString(dto.ExpiresAt), dto.Priority, dto.RecordedAt,
+		sybilJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert learning record: %w", err)
@@ -430,4 +473,35 @@ LIMIT 1`
 		return nil, fmt.Errorf("get execution by lifecycle: %w", err)
 	}
 	return dto, nil
+}
+
+// GetAdaptiveDQStats returns counters for the adaptive risk-appetite controller:
+// total data_quality decisions in the past sinceSeconds and the subset that
+// rejected with a rug or honeypot reason. Rows missing created_at (pre-migration)
+// fail the >= comparison and are excluded — matching their "ancient" semantics.
+func (d *DB) GetAdaptiveDQStats(ctx context.Context, sinceSeconds int) (int, int, error) {
+	if sinceSeconds <= 0 {
+		return 0, 0, nil
+	}
+	const q = `
+SELECT
+  COUNT(*) AS total,
+  COUNT(*) FILTER (
+    WHERE decision = 'REJECT'
+      AND (
+        reject_reasons::text ILIKE '%rug%'
+        OR reject_reasons::text ILIKE '%honeypot%'
+      )
+  ) AS rug_rejects
+FROM data_quality
+WHERE created_at >= NOW() - ($1 || ' seconds')::interval`
+
+	var total, rugRejects int
+	if err := d.pool.QueryRowContext(ctx, q, sinceSeconds).Scan(&total, &rugRejects); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("get adaptive dq stats: %w", err)
+	}
+	return total, rugRejects, nil
 }

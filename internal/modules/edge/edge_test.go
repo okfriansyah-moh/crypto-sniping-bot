@@ -157,25 +157,38 @@ func TestProcess_LowScores_NoEdge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.EdgeType != "" {
-		t.Errorf("expected empty EdgeType for low scores, got %q", out.EdgeType)
+	if out.EdgeType != contracts.EdgeTypeNone {
+		t.Errorf("expected EdgeType=NONE for low scores, got %q", out.EdgeType)
+	}
+	if out.IsEdgeDetected() {
+		t.Errorf("NONE must report IsEdgeDetected()=false")
 	}
 	if out.EdgeStrength != 0 {
 		t.Errorf("expected EdgeStrength=0, got %f", out.EdgeStrength)
 	}
+	if out.RejectReason == "" {
+		t.Error("NONE must populate RejectReason")
+	}
 }
 
-func TestProcess_LowScores_BaseWindowOnlyUsed(t *testing.T) {
-	// With no edge (momentum=0), window = BaseWindowMs * 1.0.
-	m := New(defaultEdgeCfg())
-	in := lowScoreFeature()
+func TestProcess_LowScores_WindowReflectsMomentumScore(t *testing.T) {
+	// Per F-4 fix: MomentumScore is always derivable from
+	// PriceMomentum/VolumeMomentum and the opportunity window scales
+	// with it even when no edge fires — downstream observers see
+	// continuous signal evolution.
+	cfg := defaultEdgeCfg()
+	m := New(cfg)
+	in := lowScoreFeature() // VolumeMomentum=0.7, PriceMomentum=0
 
 	out, err := m.Process(context.Background(), in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.OpportunityWindowMs != int32(defaultEdgeCfg().BaseWindowMs) {
-		t.Errorf("expected base window %d, got %d", defaultEdgeCfg().BaseWindowMs, out.OpportunityWindowMs)
+	// MomentumScore = 0.6*0.7 + 0.4*0 = 0.42
+	// window = 5000 * (1 + 0.2 * 0.42) = 5420
+	expected := int32(5420)
+	if out.OpportunityWindowMs != expected {
+		t.Errorf("expected %d, got %d", expected, out.OpportunityWindowMs)
 	}
 }
 

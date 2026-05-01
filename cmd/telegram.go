@@ -241,7 +241,7 @@ func buildModeFn(db database.Adapter, logger *slog.Logger) func(ctx context.Cont
 			expectedVersion = current.StateVersion
 		}
 		newState.Mode = mode
-		newState.LastTransitionReason = "/mode command (telegram_operator)"
+		newState.LastTransitionReason = "manual_telegram"
 
 		if _, err := db.UpsertSystemState(ctx, newState, expectedVersion); err != nil {
 			return "", fmt.Errorf("update system mode: %w", err)

@@ -74,18 +74,37 @@ func TestProcessWithEstimates_RejectsOutOfRangeProbability(t *testing.T) {
 	cfg := validationCfgFixture()
 	mod := validation.New(cfg)
 
-	// Probability ≤ 0 must fall back to prior, not be used directly.
+	// F-SEC-01: 0.0 and 1.0 are boundary-inclusive — used exactly, no
+	// silent prior substitution. (The legacy `> 0 && < 1` check that
+	// produced fallback was the security finding.)
 	probZero := &contracts.ProbabilityEstimateDTO{Probability: 0}
 	out, _ := mod.ProcessWithEstimates(context.Background(), edgeDTOFixture(), probZero, nil, nil)
-	if out.ProbabilityUsed != cfg.PriorProbability {
-		t.Errorf("p=0 should fall back to prior, got %v", out.ProbabilityUsed)
+	if out.ProbabilityUsed != 0.0 {
+		t.Errorf("p=0 must be honoured exactly, got %v", out.ProbabilityUsed)
 	}
 
-	// Probability ≥ 1 must also fall back.
 	probOne := &contracts.ProbabilityEstimateDTO{Probability: 1.0}
 	out2, _ := mod.ProcessWithEstimates(context.Background(), edgeDTOFixture(), probOne, nil, nil)
-	if out2.ProbabilityUsed != cfg.PriorProbability {
-		t.Errorf("p=1 should fall back to prior, got %v", out2.ProbabilityUsed)
+	if out2.ProbabilityUsed != 1.0 {
+		t.Errorf("p=1 must be honoured exactly, got %v", out2.ProbabilityUsed)
+	}
+
+	// Out-of-range values (here −0.5) MUST fall back to prior AND emit the
+	// `prob_boundary_value` diagnostic in FallbackReasons.
+	probOOB := &contracts.ProbabilityEstimateDTO{Probability: -0.5}
+	out3, _ := mod.ProcessWithEstimates(context.Background(), edgeDTOFixture(), probOOB, nil, nil)
+	if out3.ProbabilityUsed != cfg.PriorProbability {
+		t.Errorf("OOB probability should fall back to prior, got %v", out3.ProbabilityUsed)
+	}
+	found := false
+	for _, r := range out3.FallbackReasons {
+		if r == "prob_boundary_value" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected prob_boundary_value tag; got %v", out3.FallbackReasons)
 	}
 }
 

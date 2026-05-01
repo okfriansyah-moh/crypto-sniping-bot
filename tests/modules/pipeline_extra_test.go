@@ -5,6 +5,7 @@ package modules_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"crypto-sniping-bot/contracts"
@@ -86,8 +87,8 @@ func TestDataQuality_RejectsSetsRejectReasonsInSortedOrder(t *testing.T) {
 		EventID:        "evt-multi",
 		TraceID:        "trace-multi",
 		CorrelationID:  "corr-multi",
-		TokenAddress:   "",   // triggers missing_token_address
-		ReserveBaseRaw: "0",  // triggers missing_reserves
+		TokenAddress:   "",  // triggers missing_token_address
+		ReserveBaseRaw: "0", // triggers missing_reserves
 		Chain:          "eth",
 		VersionID:      "v1",
 		Reorged:        true, // triggers reorged_event
@@ -332,26 +333,32 @@ func TestEdge_OpportunityWindowScalesWithMomentum(t *testing.T) {
 }
 
 func TestEdge_EdgeStrengthComponents(t *testing.T) {
-	// Arrange: known inputs for verifiable edge strength
-	// EdgeStrength = liquidity*0.5 + contractSafety*0.3 + volumeMomentum*0.2
+	// Arrange: known inputs for verifiable NEW_LAUNCH_EDGE strength
+	// (per F-4 fix). Weights: liquidity 0.4, safety 0.3, holders 0.2,
+	// entropy 0.1.
 	cfg := &config.EdgeConfig{
-		MinLiquidityScore:    0.0,
-		MinVelocityScore:     0.0,
-		BaseWindowMs:         5000,
-		WindowMomentumFactor: 0.0,
-		TTLSeconds:           8,
+		MinLiquidityScore:        0.0,
+		MinVelocityScore:         0.0,
+		BaseWindowMs:             5000,
+		WindowMomentumFactor:     0.0,
+		TTLSeconds:               8,
+		NewLaunchWeightLiquidity: 0.4,
+		NewLaunchWeightSafety:    0.3,
+		NewLaunchWeightHolders:   0.2,
+		NewLaunchWeightEntropy:   0.1,
 	}
 	in := contracts.FeatureDTO{
-		EventID:          "feat-strength",
-		TraceID:          "trace-strength",
-		CorrelationID:    "corr-strength",
-		TokenLifecycleID: "lc-strength",
-		TokenAddress:     "0xstrength",
-		VersionID:        "v1",
-		LiquidityScore:   1.0,
-		TxVelocityScore:  1.0,
-		ContractSafety:   1.0,
-		VolumeMomentum:   1.0,
+		EventID:            "feat-strength",
+		TraceID:            "trace-strength",
+		CorrelationID:      "corr-strength",
+		TokenLifecycleID:   "lc-strength",
+		TokenAddress:       "0xstrength",
+		VersionID:          "v1",
+		LiquidityScore:     1.0,
+		TxVelocityScore:    1.0,
+		ContractSafety:     1.0,
+		HolderDistribution: 1.0,
+		WalletEntropy:      1.0,
 		Confidence: contracts.FeatureConfidence{
 			LiquidityScore: 0.8,
 			ContractSafety: 0.9,
@@ -362,12 +369,13 @@ func TestEdge_EdgeStrengthComponents(t *testing.T) {
 	// Act
 	dto, err := mod.Process(context.Background(), in)
 
-	// Assert: EdgeStrength = 1.0*0.5 + 1.0*0.3 + 1.0*0.2 = 1.0
+	// Assert: EdgeStrength = 1.0*0.4 + 1.0*0.3 + 1.0*0.2 + 1.0*0.1 = 1.0
+	// (allow IEEE-754 epsilon)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	const expected = 1.0
-	if dto.EdgeStrength != expected {
+	if math.Abs(dto.EdgeStrength-expected) > 1e-9 {
 		t.Errorf("expected EdgeStrength=%v, got %v", expected, dto.EdgeStrength)
 	}
 }
@@ -518,8 +526,8 @@ func TestValidation_EVThresholdApplied_MatchesConfig(t *testing.T) {
 func TestCapital_CapsAtMaxSizeUsd(t *testing.T) {
 	// Arrange: fixed entry > max → should be capped at max
 	cfg := &config.CapitalConfig{
-		FixedEntrySizeUsd: 999.0,   // exceeds max
-		MaxSizeUsd:        50.0,    // hard cap
+		FixedEntrySizeUsd: 999.0, // exceeds max
+		MaxSizeUsd:        50.0,  // hard cap
 		TTLSeconds:        3,
 		WalletAddress:     "0xwallet",
 	}

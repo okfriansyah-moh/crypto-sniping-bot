@@ -43,4 +43,12 @@ type ValidatedEdgeDTO struct {
 	ExpiresAt   string `json:"expires_at"`   // ISO 8601 UTC; "" = no expiry
 	Priority    int32  `json:"priority"`     // higher = processed first; default 0
 	ValidatedAt string `json:"validated_at"` // ISO 8601
+
+	// F-SEC-01 (additive) — diagnostic tags appended whenever the EV gate
+	// substituted a prior or otherwise altered its inputs without rejecting.
+	// Examples: "prob_boundary_value" (probability outside [0,1] → prior),
+	// "low_model_confidence" (model confidence below MinModelConfidence →
+	// prior). Empty on the happy path. Never affects Decision; never
+	// embedded into RejectReason on ACCEPT (per RejectReason contract).
+	FallbackReasons []string `json:"fallback_reasons,omitempty"`
 }

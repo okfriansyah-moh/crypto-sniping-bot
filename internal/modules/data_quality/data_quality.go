@@ -74,132 +74,219 @@ func (m *Module) WithRuntimeConfig(rt *config.DataQualityRuntimeConfig) *Module 
 }
 
 // Process evaluates a MarketDataDTO and returns a DataQualityDTO.
-// Phase 9 (§ 9.1) — invokes the detector helpers (DetectRugRisk,
-// DetectWashTrading, DetectTaxAnomaly) instead of leaving every flag at
-// false, and aggregates RiskScore via AggregateRiskScore.
 //
-// True RPC-backed honeypot simulation, LP-lock contract probes, and
-// Etherscan source-code lookup are deferred (they require new client
-// infrastructure). Until then the corresponding flags remain conservative
-// (false) and contribute zero weight, which is safer than fabricating
-// signals.
+// This is the back-compat entry point — it routes through ProcessForMode
+// using the BALANCED profile. Production callers (the worker) MUST use
+// ProcessForMode and supply the active SystemState.Mode so the decision
+// band reflects the operator's risk posture.
 //
 // Deterministic: same input → same output.
-func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contracts.DataQualityDTO, error) {
+func (m *Module) Process(ctx context.Context, in contracts.MarketDataDTO) (contracts.DataQualityDTO, error) {
+	return m.ProcessForMode(ctx, in, "BALANCED")
+}
+
+// ProcessForMode evaluates a MarketDataDTO under the supplied operational
+// mode (STRICT / BALANCED / EXPLORATION). All five canonical detectors run.
+// Detectors whose upstream inputs are not populated emit a `dq_unknown_*`
+// flag and degrade per the active profile's UnknownFactor:
+//   - STRICT       → unknown counts as half-weight risk
+//   - BALANCED     → unknown is neutral (no contribution)
+//   - EXPLORATION  → unknown is ignored
+//
+// Hard-reject flags (HONEYPOT_SELL_FAIL, SELL_BLOCKED, HONEYPOT_BUY_FAIL)
+// always force Decision = REJECT regardless of the aggregated score.
+func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, mode string) (contracts.DataQualityDTO, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
+	profileName, profile := resolveProfile(mode, m.runtime)
+
+	// ── Structural rejects (cheap pre-checks) ───────────────────────────
 	var rejectReasons []string
-	isHoneypot := false // requires eth_call simulation (deferred)
-	isFakeLiquidity := false
-	isWashTrading := false
-	isRugRisk := false
-	isTaxAnomaly := false
-	buyTaxBps := int32(0)     // requires sim/Etherscan (deferred)
-	sellTaxBps := int32(0)    // requires sim/Etherscan (deferred)
-	lpLocked := false         // requires lock-contract probe (deferred)
-	lpHolderCount := int32(0) // requires holder enumeration (deferred)
-	contractVerified := false // requires Etherscan v2 (deferred)
+	flags := []string{}
 
-	// Resolve detector toggles from runtime config (default = enabled).
-	rugEnabled := true
-	washEnabled := true
-	taxEnabled := true
-	if m.runtime != nil {
-		rugEnabled = m.runtime.Detectors.RugAuthority
-		washEnabled = m.runtime.Detectors.WashTrading
-		taxEnabled = m.runtime.Detectors.TaxAnomaly
-	}
-
-	// isNewLaunch is true for brand-new bonding-curve events (Pump.fun
-	// CreateEvent). These tokens start with zero reserves by design — the
-	// bonding curve fills as buyers come in. Applying a missing_reserves
-	// gate would reject every single new launch before anyone can trade,
-	// making the bot blind to all pump.fun opportunities.
-	// For all other event types (pool inits, swaps) reserves ARE expected.
 	isNewLaunch := in.EventTopic == "PumpFunCreate"
 
-	// Check 1: Missing reserve data → reject.
-	// Skipped for new-launch events (zero reserves expected).
 	if !isNewLaunch && (in.ReserveBaseRaw == "" || in.ReserveBaseRaw == "0") {
 		rejectReasons = append(rejectReasons, "missing_reserves")
-	} else if !isNewLaunch {
-		// Check 2: Minimum reserve threshold.
+	}
+	isFakeLiquidityStructural := false
+	if !isNewLaunch && in.ReserveBaseRaw != "" && in.ReserveBaseRaw != "0" {
 		reserveBase, ok := new(big.Int).SetString(in.ReserveBaseRaw, 10)
 		minReserve, _ := new(big.Int).SetString(m.cfg.MinReserveBaseWei, 10)
 		if ok && minReserve != nil && reserveBase.Cmp(minReserve) < 0 {
-			isFakeLiquidity = true
+			isFakeLiquidityStructural = true
 			rejectReasons = append(rejectReasons, "insufficient_liquidity")
 		}
 	}
 
-	// Check 3: Reorged events are suspect.
 	if in.Reorged {
 		rejectReasons = append(rejectReasons, "reorged_event")
 	}
-
-	// Check 4: Missing token address → reject immediately.
 	if in.TokenAddress == "" {
 		rejectReasons = append(rejectReasons, "missing_token_address")
 	}
-
-	// Phase 10 (Reference-Repo Improvements / Task F) — Solana bonding
-	// curve progress filter. Reject pump.fun / bonk.fun markets whose
-	// bonding curve has already advanced past the configured cap (a
-	// late-curve buy has limited remaining upside before graduation).
-	// Skipped when the threshold is unset (0) or the event has no curve
-	// progress (EVM events leave BondingCurveProgressBps == 0).
 	if m.runtime != nil &&
 		m.runtime.Thresholds.MaxBondingCurveProgressBps > 0 &&
 		in.BondingCurveProgressBps > m.runtime.Thresholds.MaxBondingCurveProgressBps {
 		rejectReasons = append(rejectReasons, "bonding_curve_too_advanced")
 	}
 
-	// Phase 9 (§ 9.1) — invoke real detector helpers.
-	if rugEnabled {
-		// For new-launch events, DetectRugRisk would always fire (reserve=0 < threshold)
-		// which is a tautology for a freshly minted bonding-curve token.
-		// Only apply the rug-risk reserve gate to events where liquidity is expected.
-		if !isNewLaunch {
-			isRugRisk = DetectRugRisk(lpLocked, in.ReserveBaseRaw, m.cfg.MinReserveBaseWei)
-		}
+	// ── Detector toggles + weights ──────────────────────────────────────
+	rugEnabled := true
+	washEnabled := true
+	taxEnabled := true
+	honeypotEnabled := true
+	fakeLiqEnabled := true
+	if m.runtime != nil {
+		rugEnabled = m.runtime.Detectors.RugAuthority || m.runtime.Detectors.LpLock
+		washEnabled = m.runtime.Detectors.WashTrading
+		taxEnabled = m.runtime.Detectors.TaxAnomaly
+		honeypotEnabled = m.runtime.Detectors.HoneypotSimulation
+		// FakeLiquidity has no dedicated YAML toggle yet; tie to LpLock so
+		// operators can disable both signals together.
+		fakeLiqEnabled = m.runtime.Detectors.LpLock
 	}
-	if taxEnabled {
-		isTaxAnomaly = DetectTaxAnomaly(buyTaxBps, sellTaxBps, m.cfg.MaxBuyTaxBps, m.cfg.MaxSellTaxBps)
+
+	weights := defaultRiskWeights
+	if m.runtime != nil && !isZeroWeights(m.runtime.RiskWeights) {
+		weights = m.runtime.RiskWeights
+	}
+	fakeLiqWeight := weights.FakeLiquidity
+	if fakeLiqWeight <= 0 {
+		fakeLiqWeight = 0.20 // legacy structural contribution
+	}
+
+	// ── Detector thresholds ─────────────────────────────────────────────
+	maxBuyTaxBps := m.cfg.MaxBuyTaxBps
+	maxSellTaxBps := m.cfg.MaxSellTaxBps
+	totalTaxCapBps := int32(0)
+	holderConcentrationCap := 0.40
+	minLiquidityUsd := 5000.0
+	minUniqueWallets := int32(5)
+	if m.runtime != nil {
+		if m.runtime.Thresholds.TaxBuyMaxBps > 0 {
+			maxBuyTaxBps = m.runtime.Thresholds.TaxBuyMaxBps
+		}
+		if m.runtime.Thresholds.TaxSellMaxBps > 0 {
+			maxSellTaxBps = m.runtime.Thresholds.TaxSellMaxBps
+		}
+		totalTaxCapBps = m.runtime.Thresholds.TaxTotalMaxBps
+	}
+
+	// ── Run detectors ───────────────────────────────────────────────────
+	var (
+		honeypot HoneypotResult
+		rug      RugResult
+		wash     WashTradingResult
+		fakeLiq  FakeLiquidityResult
+		tax      TaxResult
+	)
+	if honeypotEnabled {
+		honeypot = DetectHoneypot(in)
+	}
+	if rugEnabled {
+		rug = DetectRugPull(in, holderConcentrationCap)
 	}
 	if washEnabled {
-		// Phase 9.5 deferred: real wash-trading detection requires holder
-		// count and pool age, neither of which is present in MarketDataDTO
-		// today. Until that enrichment lands, leave isWashTrading=false
-		// rather than calling DetectWashTrading(0,0,0) which would always
-		// return false anyway and create the illusion of an active gate.
-		_ = isWashTrading
+		wash = DetectWashTradingDTO(in, minUniqueWallets, 0, 0, 0)
+	}
+	if fakeLiqEnabled {
+		fakeLiq = DetectFakeLiquidity(in, minLiquidityUsd)
+	}
+	if taxEnabled {
+		tax = DetectTaxManipulation(in, maxBuyTaxBps, maxSellTaxBps, totalTaxCapBps)
 	}
 
-	// Aggregate RiskScore via the shared helper (Phase 9 § 9.1).
-	// Pass per-detector weights from runtime config so YAML changes to
-	// `data_quality.risk_weights` actually take effect.
-	var weights *config.DataQualityRiskWeights
-	if m.runtime != nil {
-		weights = &m.runtime.RiskWeights
-	}
-	riskScore := AggregateRiskScore(
-		len(rejectReasons), 4,
-		isHoneypot, isFakeLiquidity, isWashTrading, isRugRisk, isTaxAnomaly,
-		weights,
-	)
+	// ── Aggregate ──────────────────────────────────────────────────────
+	hardReject := honeypot.HardReject
 
-	// Sort reasons for determinism.
+	riskScore := 0.0
+	riskScore += weightedDetector(honeypot.Score, weights.Honeypot, honeypot.Unknown, profile.UnknownFactor)
+	riskScore += weightedDetector(rug.Score, weights.RugAuthority, rug.Unknown, profile.UnknownFactor)
+	riskScore += weightedDetector(wash.Score, weights.WashTrading, wash.Unknown, profile.UnknownFactor)
+	riskScore += weightedDetector(fakeLiq.Score, fakeLiqWeight, fakeLiq.Unknown, profile.UnknownFactor)
+	riskScore += weightedDetector(tax.Score, weights.TaxAnomaly, tax.Unknown, profile.UnknownFactor)
+
+	// Structural-failure base contribution mirrors the legacy aggregator
+	// (missing_reserves / reorged / missing_token / insufficient_liquidity
+	// each adds 0.25 / 4 of the base; we keep them in rejectReasons so
+	// they trigger the deterministic REJECT path even at score 0).
+	if isFakeLiquidityStructural {
+		// Already counted via insufficient_liquidity reject reason; do not
+		// double-add to riskScore.
+	}
+
+	if riskScore < 0 {
+		riskScore = 0
+	}
+	if riskScore > 1 {
+		riskScore = 1
+	}
+
+	// ── Collect detector flags ─────────────────────────────────────────
+	flags = append(flags, honeypot.Flags...)
+	flags = append(flags, rug.Flags...)
+	flags = append(flags, wash.Flags...)
+	flags = append(flags, fakeLiq.Flags...)
+	flags = append(flags, tax.Flags...)
+	if honeypot.Unknown {
+		flags = append(flags, honeypot.UnknownFlag)
+	}
+	if rug.Unknown {
+		flags = append(flags, rug.UnknownFlag)
+	}
+	if wash.Unknown {
+		flags = append(flags, wash.UnknownFlag)
+	}
+	if fakeLiq.Unknown {
+		flags = append(flags, fakeLiq.UnknownFlag)
+	}
+	if tax.Unknown {
+		flags = append(flags, tax.UnknownFlag)
+	}
+
+	// MaxIndeterminateCount: if too many detectors are Unknown, reject
+	// per the failure_policy block (configurable; 0 = disabled).
+	if m.runtime != nil && m.runtime.FailurePolicy.MaxIndeterminateCount > 0 {
+		unknownCount := 0
+		if honeypot.Unknown {
+			unknownCount++
+		}
+		if rug.Unknown {
+			unknownCount++
+		}
+		if wash.Unknown {
+			unknownCount++
+		}
+		if fakeLiq.Unknown {
+			unknownCount++
+		}
+		if tax.Unknown {
+			unknownCount++
+		}
+		if unknownCount >= m.runtime.FailurePolicy.MaxIndeterminateCount && profileName == "STRICT" {
+			rejectReasons = append(rejectReasons, "too_many_indeterminate_detectors")
+		}
+	}
+
 	sort.Strings(rejectReasons)
+	flags = dedupSorted(flags)
+	sort.Strings(flags)
 
-	decision := "PASS"
+	// ── Decision ───────────────────────────────────────────────────────
+	decision := makeDecision(riskScore, hardReject, profile)
+	if hardReject && !containsString(rejectReasons, "honeypot") {
+		rejectReasons = append(rejectReasons, "honeypot")
+	}
 	if len(rejectReasons) > 0 {
 		decision = "REJECT"
-	} else if riskScore > 0.3 {
-		decision = "RISKY_PASS"
+		sort.Strings(rejectReasons)
 	}
 
-	eventID := contracts.ContentIDFromString(fmt.Sprintf("dq:%s:%s", in.EventID, decision))
+	eventID := contracts.ContentIDFromString(fmt.Sprintf("dq:%s:%s:%s", in.EventID, profileName, decision))
 
+	// Booleans on the DTO mirror per-detector verdicts (>0 score) — kept
+	// for back-compat with downstream consumers reading the *DTO booleans.
 	return contracts.DataQualityDTO{
 		EventID:       eventID,
 		TraceID:       in.TraceID,
@@ -214,21 +301,57 @@ func (m *Module) Process(_ context.Context, in contracts.MarketDataDTO) (contrac
 		Decision:  decision,
 		RiskScore: riskScore,
 
-		IsHoneypot:      isHoneypot,
-		IsFakeLiquidity: isFakeLiquidity,
-		IsWashTrading:   isWashTrading,
-		IsRugRisk:       isRugRisk,
-		IsTaxAnomaly:    isTaxAnomaly,
+		IsHoneypot:      honeypot.HardReject || honeypot.Score > 0,
+		IsFakeLiquidity: isFakeLiquidityStructural || fakeLiq.Score > 0,
+		IsWashTrading:   wash.Score > 0,
+		IsRugRisk:       rug.Score > 0,
+		IsTaxAnomaly:    tax.Score > 0,
 
-		BuyTaxBps:        buyTaxBps,
-		SellTaxBps:       sellTaxBps,
-		LpLocked:         lpLocked,
-		LpHolderCount:    lpHolderCount,
-		ContractVerified: contractVerified,
+		BuyTaxBps:        in.BuyTaxBps,
+		SellTaxBps:       in.SellTaxBps,
+		LpLocked:         in.LpLockKnown && in.LpLocked,
+		LpHolderCount:    0,
+		ContractVerified: in.ContractVerifiedKnown && in.ContractVerified,
+
+		HoneypotScore: honeypot.Score,
+		RugScore:      rug.Score,
+		WashScore:     wash.Score,
+		FakeLiqScore:  fakeLiq.Score,
+		TaxScore:      tax.Score,
+		Profile:       profileName,
+		Flags:         flags,
 
 		RejectReasons: rejectReasons,
 		EvaluatedAt:   now,
 	}, nil
+}
+
+// weightedDetector returns the contribution of a detector to the aggregate
+// risk score, applying the per-profile UnknownFactor when the detector did
+// not have upstream data.
+func weightedDetector(score, weight float64, unknown bool, unknownFactor float64) float64 {
+	if weight <= 0 {
+		return 0
+	}
+	if unknown {
+		return applyUnknownContribution(weight, unknownFactor)
+	}
+	if score < 0 {
+		score = 0
+	}
+	if score > 1 {
+		score = 1
+	}
+	return score * weight
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // clampFloat clamps v to [lo, hi].

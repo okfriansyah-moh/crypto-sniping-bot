@@ -9,6 +9,13 @@ feature:
   # ── Per-feature compute timeout ───────────────────────────────
   feature_timeout_ms: 500
 
+  # ── Baseline persistence (residual-risk #1) ───────────────────
+  # Debounced flush of in-memory rolling-window baselines to DB so
+  # restart preserves history. Hot path stays in-memory; flush is
+  # async + best-effort.
+  baseline_flush_interval_sec: 30 # >= 5 (validator); 0 → default 30
+  baseline_flush_max_writes: 100 # >= 1; excess deferred to next cycle
+
   # ── Sync-event ring buffer (per pool) ─────────────────────────
   # Prevents repeated eth_getLogs calls for momentum/velocity computation.
   sync_cache:
@@ -82,6 +89,16 @@ feature:
   confidence_aggregate:
     method: "mean"
     min_features_required: 4 # < this → Aggregate = 0.3 (cold start)
+
+  # ── Stability gate (per feature-stability-checker skill) ──────
+  # Features whose directional consistency over the rolling window falls
+  # below `min_consistency` are zero-weighted with the freed mass
+  # redistributed proportionally across the stable features. Cold-start
+  # (n < min_bars) is treated as stable so early trades aren't blocked.
+  stability:
+    min_consistency: 0.60
+    min_bars: 30
+    lookback_bars: 50
 
   # ── Phase 11 (Reference-Repo R2 — FEATURES) ───────────────────
   # Holder concentration: top-N holder share as a risk signal.

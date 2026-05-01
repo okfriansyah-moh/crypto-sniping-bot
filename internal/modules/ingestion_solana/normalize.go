@@ -104,12 +104,19 @@ func NormalizePumpFunCreate(tx *TransactionResult, instr InstructionData, versio
 	return dto, nil
 }
 
-// NormalizeRaydiumPoolInit normalizes a Raydium V4 pool initialization instruction.
-// Returns nil if the instruction is not a pool init event.
+// NormalizeRaydiumPoolInit normalizes a Raydium V4 Initialize2 instruction.
+// Returns (nil, nil) when the leading tag is NOT Initialize2 (silent skip,
+// dispatcher routes elsewhere). Returns (nil, err) when the tag IS Initialize2
+// but the body is truncated/malformed — the worker counts this under
+// process_errors so the heartbeat surfaces decoder bugs instead of swallowing
+// them.
 func NormalizeRaydiumPoolInit(tx *TransactionResult, instr InstructionData, versionID string) (*contracts.MarketDataDTO, error) {
+	if len(instr.Data) < 1 || instr.Data[0] != RaydiumV4OpInitialize2 {
+		return nil, nil // wrong tag — not an Initialize2 instruction
+	}
 	event, err := DecodeRaydiumPoolInit(instr.Data)
 	if err != nil {
-		return nil, nil // skip: not a pool init instruction
+		return nil, fmt.Errorf("raydium_pool_init_decode: %w", err)
 	}
 
 	// Raydium V4 Initialize2 account layout (0-based):
@@ -230,12 +237,56 @@ func NormalizePumpFunCreateFromLogs(
 	}
 }
 
+// NormalizeRaydiumV4Result is the tri-state outcome of normalizing a single
+// Raydium V4 instruction. Exactly one of:
+//
+//	DTO != nil                                  → emit
+//	DTO == nil && Kind == RaydiumV4KindUnknown  → skipped_unknown_instruction
+//	DTO == nil && Kind != RaydiumV4KindUnknown  → dto_nil_skip (decoder bug or
+//	                                              recognized opcode missing
+//	                                              required accounts)
+//	Err != nil                                  → process error (truncated data,
+//	                                              malformed body, etc.)
+type NormalizeRaydiumV4Result struct {
+	DTO  *contracts.MarketDataDTO
+	Kind RaydiumV4InstructionKind
+	Err  error
+}
+
+// NormalizeRaydiumV4Instruction is the single dispatch entry for all Raydium V4
+// instructions ingested by Layer 0. Classifies the leading tag, then routes to
+// the per-instruction normalizer. Deterministic.
+func NormalizeRaydiumV4Instruction(tx *TransactionResult, instr InstructionData, versionID string) NormalizeRaydiumV4Result {
+	kind := ClassifyRaydiumV4Instruction(instr.Data)
+	switch kind {
+	case RaydiumV4KindInitialize2:
+		dto, err := NormalizeRaydiumPoolInit(tx, instr, versionID)
+		return NormalizeRaydiumV4Result{DTO: dto, Kind: kind, Err: err}
+	case RaydiumV4KindSwapBaseIn, RaydiumV4KindSwapBaseOut:
+		dto, err := NormalizeRaydiumSwap(tx, instr, versionID)
+		return NormalizeRaydiumV4Result{DTO: dto, Kind: kind, Err: err}
+	default:
+		// Unrecognized opcode (SetParams, Withdraw, AdminCancelOrders, etc.).
+		// Reported as skipped_unknown_instruction by the worker — NOT a decoder
+		// bug. No DTO produced.
+		return NormalizeRaydiumV4Result{DTO: nil, Kind: RaydiumV4KindUnknown, Err: nil}
+	}
+}
+
 // NormalizeRaydiumSwap normalizes a Raydium V4 swap instruction.
-// Returns nil if not a swap instruction.
+// Returns (nil, nil) when the data is not a swap instruction or the account
+// layout cannot be resolved. Returns (nil, err) only on malformed body bytes
+// for a swap-tagged instruction.
 func NormalizeRaydiumSwap(tx *TransactionResult, instr InstructionData, versionID string) (*contracts.MarketDataDTO, error) {
+	// Distinguish "wrong tag" (skip silently) from "tagged as swap but body is
+	// truncated/malformed" (surface as error so the worker can log/count it).
+	if len(instr.Data) < 1 ||
+		(instr.Data[0] != RaydiumV4OpSwapBaseIn && instr.Data[0] != RaydiumV4OpSwapBaseOut) {
+		return nil, nil
+	}
 	event, err := DecodeRaydiumSwap(instr.Data)
 	if err != nil {
-		return nil, nil // not a swap instruction
+		return nil, fmt.Errorf("raydium_swap_decode: %w", err)
 	}
 
 	// Raydium swap account layout simplified:

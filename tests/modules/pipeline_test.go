@@ -5,13 +5,13 @@ import (
 	"testing"
 
 	"crypto-sniping-bot/contracts"
+	"crypto-sniping-bot/internal/app/config"
+	"crypto-sniping-bot/internal/modules/capital"
 	"crypto-sniping-bot/internal/modules/data_quality"
 	"crypto-sniping-bot/internal/modules/edge"
 	"crypto-sniping-bot/internal/modules/features"
-	"crypto-sniping-bot/internal/modules/capital"
 	"crypto-sniping-bot/internal/modules/selection"
 	"crypto-sniping-bot/internal/modules/validation"
-	"crypto-sniping-bot/internal/app/config"
 )
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -189,8 +189,11 @@ func TestEdge_NoEdgeWhenBelowThreshold(t *testing.T) {
 	}
 	mod := edge.New(cfg)
 	dto, _ := mod.Process(context.Background(), featureDTOFixture())
-	if dto.EdgeType != "" {
-		t.Errorf("expected no edge, got %q", dto.EdgeType)
+	if dto.EdgeType != contracts.EdgeTypeNone {
+		t.Errorf("expected NONE, got %q", dto.EdgeType)
+	}
+	if dto.IsEdgeDetected() {
+		t.Error("NONE must report IsEdgeDetected()=false")
 	}
 }
 

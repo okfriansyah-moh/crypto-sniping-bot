@@ -75,34 +75,40 @@ func TestProcess_PassedDQ_TraceFieldsPropagated(t *testing.T) {
 	}
 }
 
-func TestProcess_LowRiskScore_HighLiquidityScore(t *testing.T) {
+func TestProcess_HigherLiquidityUsd_HigherLiquidityScore(t *testing.T) {
 	m := New(nil)
 	in := passedDQ()
-	in.RiskScore = 0.1
 
-	out, err := m.Process(context.Background(), in)
+	low := MarketSnapshot{Market: "eth-uniswap-v2", LpStatsKnown: true, LiquidityUsd: 1_000}
+	high := MarketSnapshot{Market: "eth-uniswap-v2", LpStatsKnown: true, LiquidityUsd: 1_000_000}
+
+	outLow, err := m.ProcessWithContext(context.Background(), in, low, BaselineSnapshot{}, "2026-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// LiquidityScore = clamp(1 - 0.1, 0, 1) = 0.9
-	if out.LiquidityScore != 0.9 {
-		t.Errorf("expected LiquidityScore=0.9, got %f", out.LiquidityScore)
+	outHigh, err := m.ProcessWithContext(context.Background(), in, high, BaselineSnapshot{}, "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outHigh.LiquidityScore <= outLow.LiquidityScore {
+		t.Errorf("expected LiquidityScore to grow with LiquidityUsd: low=%f high=%f",
+			outLow.LiquidityScore, outHigh.LiquidityScore)
+	}
+	if outLow.LiquidityUsdRaw != 1_000 || outHigh.LiquidityUsdRaw != 1_000_000 {
+		t.Errorf("raw liquidity not propagated: low=%f high=%f", outLow.LiquidityUsdRaw, outHigh.LiquidityUsdRaw)
 	}
 }
 
-func TestProcess_HighRiskScore_LowLiquidityScore(t *testing.T) {
+func TestProcess_NoMarketSnapshot_LiquidityConfidenceLow(t *testing.T) {
 	m := New(nil)
 	in := passedDQ()
-	in.RiskScore = 0.8
 
 	out, err := m.Process(context.Background(), in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// LiquidityScore = clamp(1 - 0.8, 0, 1) ≈ 0.2 (floating-point epsilon)
-	const eps = 1e-9
-	if out.LiquidityScore < 0.2-eps || out.LiquidityScore > 0.2+eps {
-		t.Errorf("expected LiquidityScore≈0.2, got %f", out.LiquidityScore)
+	if out.Confidence.LiquidityScore >= 0.4 {
+		t.Errorf("expected low liquidity confidence with no market snapshot, got %f", out.Confidence.LiquidityScore)
 	}
 }
 

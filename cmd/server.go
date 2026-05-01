@@ -18,6 +18,7 @@ import (
 	"crypto-sniping-bot/internal/modules/execution"
 	"crypto-sniping-bot/internal/modules/execution_solana"
 	"crypto-sniping-bot/internal/modules/ingestion_solana"
+	"crypto-sniping-bot/internal/modules/probes"
 	"crypto-sniping-bot/internal/orchestrator"
 	"crypto-sniping-bot/internal/rpc"
 	"crypto-sniping-bot/internal/workers"
@@ -89,9 +90,32 @@ func runServer() {
 	}
 
 	// Register pipeline stage workers (Phase 2 baseline + Phase 3 evaluation gate).
-	orch.RegisterStage("dq_worker", workers.NewDataQualityWorker(db, cfg, logger), "market_data_event")
-	orch.RegisterStage("features_worker", workers.NewFeaturesWorker(db, cfg, logger), "data_quality_event")
-	orch.RegisterStage("edge_worker", workers.NewEdgeWorker(db, cfg, logger), "feature_event")
+	// Residual-risk #4: when probes.enabled, insert the optional probes
+	// stage between market_data and data_quality. The probes worker
+	// emits "market_data_enriched" events; DQ subscribes to that type
+	// instead of the raw "market_data_event". When disabled, neither
+	// the probes worker nor the routing change is applied — the
+	// pipeline is identical to its pre-probes wiring.
+	dqInputType := "market_data_event"
+	if cfg.Probes.Enabled {
+		probeList := buildMarketProbes(cfg, logger)
+		orch.RegisterStage(
+			"market_probes_worker",
+			workers.NewMarketProbesWorker(db, probeList, logger),
+			"market_data_event",
+		)
+		dqInputType = workers.MarketDataEnrichedEventType
+		logger.Info("market_probes_enabled", "probe_count", len(probeList), "dq_input", dqInputType)
+	}
+	orch.RegisterStage("dq_worker", workers.NewDataQualityWorker(db, cfg, logger), dqInputType)
+	featuresWorker := workers.NewFeaturesWorker(db, cfg, logger)
+	featuresWorker.HydrateBaselines(ctx) // residual-risk #1: load persisted ring buffers
+	go featuresWorker.RunBaselinePersistence(ctx)
+	orch.RegisterStage("features_worker", featuresWorker, "data_quality_event")
+	edgeWorker := workers.NewEdgeWorker(db, cfg, logger)
+	edgeWorker.HydrateBaselines(ctx)
+	go edgeWorker.RunBaselinePersistence(ctx)
+	orch.RegisterStage("edge_worker", edgeWorker, "feature_event")
 	orch.RegisterStage("probability_worker", workers.NewProbabilityWorker(db, cfg, logger), "feature_event")
 	orch.RegisterStage("slippage_worker", workers.NewSlippageWorker(db, cfg, logger), "feature_event")
 	orch.RegisterStage("validation_worker", workers.NewValidationWorker(db, cfg, logger), "edge_event")
@@ -201,6 +225,14 @@ func runServer() {
 	go func() {
 		if err := workers.RunArchive(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
 			logger.Error("archive_worker_failed", "error", err)
+		}
+	}()
+
+	// Alpha aggregator — derives per-market slippage α from realized fills
+	// (residual risk #3 closure). Periodic; populates slippage_alpha_calibrations.
+	go func() {
+		if err := workers.RunAlphaAggregator(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+			logger.Error("alpha_aggregator_failed", "error", err)
 		}
 	}()
 
@@ -337,4 +369,30 @@ func buildWalletShards(cfg *config.Config) []execution.WalletConfig {
 	}
 
 	return shards
+}
+
+// buildMarketProbes constructs the probe slice for the optional market
+// probes worker. Only probes whose per-probe `enabled` flag is true are
+// instantiated. Returns an empty slice when no probes are configured —
+// the worker then operates as pass-through.
+//
+// TODO: add tax_probe, lp_lock_probe, owner_privileges_probe,
+// holder_dist_probe, wash_stats_probe registrations here once each
+// implementation lands. The slice ordering defines probe execution
+// order; later probes see the enrichment from earlier probes.
+func buildMarketProbes(cfg *config.Config, logger *slog.Logger) []probes.MarketProbe {
+	var out []probes.MarketProbe
+	if cfg.Probes.HoneypotSim.Enabled {
+		// rpc client is not yet wired here — production deployments
+		// must inject a real eth_call client. Until then the probe
+		// either short-circuits (empty SimulationContract) or returns
+		// an error from a nil-rpc check.
+		hpCfg := probes.HoneypotSimConfig{
+			Enabled:            cfg.Probes.HoneypotSim.Enabled,
+			SimulationContract: cfg.Probes.HoneypotSim.SimulationContract,
+			TimeoutMs:          cfg.Probes.HoneypotSim.TimeoutMs,
+		}
+		out = append(out, probes.NewHoneypotSimProbe(nil, hpCfg, logger))
+	}
+	return out
 }

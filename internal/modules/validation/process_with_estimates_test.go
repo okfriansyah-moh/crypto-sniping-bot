@@ -2,7 +2,9 @@ package validation
 
 import (
 	"context"
+	"math"
 	"testing"
+	"time"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/internal/app/config"
@@ -165,7 +167,7 @@ func TestProcessWithEstimates_HighSlippage_Rejects(t *testing.T) {
 func TestProcessWithEstimates_LatencyExceedsWindow_Rejects(t *testing.T) {
 	m := New(acceptEstimateCfg())
 	in := edgeForEstimates()
-	in.OpportunityWindowMs = 100 // tiny window
+	in.OpportunityWindowMs = 100                             // tiny window
 	lat := &contracts.LatencyProfileDTO{ExpectedP95Ms: 5000} // latency >> window
 
 	out, err := m.ProcessWithEstimates(context.Background(), in, nil, nil, lat)
@@ -216,18 +218,124 @@ func TestProcessWithEstimates_EventIDDeterministic(t *testing.T) {
 	}
 }
 
-// TestProcessWithEstimates_InvalidProbability_UsesPrior verifies OOB probability values are ignored.
-func TestProcessWithEstimates_InvalidProbability_UsesPrior(t *testing.T) {
-	// Arrange — probability = 0 should be ignored (uses prior)
+// TestProcessWithEstimates_BoundaryZero_UsesZero verifies F-SEC-01: with no
+// strict-reject runtime config attached, Probability=0.0 is honoured exactly
+// (boundary-inclusive). The previous `> 0 && < 1` check silently substituted
+// the prior — that boundary-value silent prior was the security finding.
+func TestProcessWithEstimates_BoundaryZero_UsesZero(t *testing.T) {
 	m := New(acceptEstimateCfg())
 	in := edgeForEstimates()
-	prob := &contracts.ProbabilityEstimateDTO{Probability: 0}
+	prob := &contracts.ProbabilityEstimateDTO{Probability: 0.0}
+
+	out, err := m.ProcessWithEstimates(context.Background(), in, prob, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ProbabilityUsed != 0.0 {
+		t.Errorf("Probability=0.0 must be used exactly; got %v", out.ProbabilityUsed)
+	}
+	for _, r := range out.FallbackReasons {
+		if r == "prob_boundary_value" {
+			t.Errorf("0.0 is in [0,1]; must NOT emit prob_boundary_value; got %v", out.FallbackReasons)
+		}
+	}
+}
+
+// TestProcessWithEstimates_BoundaryOne_UsesOne verifies Probability=1.0 is
+// honoured exactly (F-SEC-01 boundary-inclusive).
+func TestProcessWithEstimates_BoundaryOne_UsesOne(t *testing.T) {
+	m := New(acceptEstimateCfg())
+	in := edgeForEstimates()
+	prob := &contracts.ProbabilityEstimateDTO{Probability: 1.0}
+
+	out, err := m.ProcessWithEstimates(context.Background(), in, prob, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ProbabilityUsed != 1.0 {
+		t.Errorf("Probability=1.0 must be used exactly; got %v", out.ProbabilityUsed)
+	}
+}
+
+// TestProcessWithEstimates_NegativeBoundary_FallbackTagged verifies F-SEC-01:
+// when RejectOutOfRange is not configured, an out-of-range Probability falls
+// back to the prior AND emits prob_boundary_value in FallbackReasons. No
+// silent substitution path remains.
+func TestProcessWithEstimates_NegativeBoundary_FallbackTagged(t *testing.T) {
+	m := New(acceptEstimateCfg()) // no probCfg attached; RejectOutOfRange is implicitly false
+	in := edgeForEstimates()
+	prob := &contracts.ProbabilityEstimateDTO{Probability: -0.1}
 
 	out, err := m.ProcessWithEstimates(context.Background(), in, prob, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if out.ProbabilityUsed != acceptEstimateCfg().PriorProbability {
-		t.Errorf("expected prior probability when provided is 0, got %f", out.ProbabilityUsed)
+		t.Errorf("OOB probability must fall back to prior; got %v", out.ProbabilityUsed)
+	}
+	found := false
+	for _, r := range out.FallbackReasons {
+		if r == "prob_boundary_value" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected prob_boundary_value in FallbackReasons; got %v", out.FallbackReasons)
+	}
+}
+
+// TestProcessWithEstimates_NaNBoundary_FallbackTagged verifies F-SEC-01:
+// NaN Probability with RejectOutOfRange=false falls back + emits the tag.
+func TestProcessWithEstimates_NaNBoundary_FallbackTagged(t *testing.T) {
+	m := New(acceptEstimateCfg())
+	in := edgeForEstimates()
+	prob := &contracts.ProbabilityEstimateDTO{Probability: math.NaN()}
+
+	out, err := m.ProcessWithEstimates(context.Background(), in, prob, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ProbabilityUsed != acceptEstimateCfg().PriorProbability {
+		t.Errorf("NaN probability must fall back to prior; got %v", out.ProbabilityUsed)
+	}
+	found := false
+	for _, r := range out.FallbackReasons {
+		if r == "prob_boundary_value" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected prob_boundary_value in FallbackReasons; got %v", out.FallbackReasons)
+	}
+}
+
+// TestProcessWithEstimatesAt_DeterministicTimestamps verifies F-SEC-04: two
+// calls with the same inputs and the same `now` produce identical
+// ExpiresAt and ValidatedAt. This is the replay-bit-for-bit guarantee.
+func TestProcessWithEstimatesAt_DeterministicTimestamps(t *testing.T) {
+	m := New(acceptEstimateCfg())
+	in := edgeForEstimates()
+	now := time.Date(2026, 1, 2, 3, 4, 5, 600_000_000, time.UTC)
+
+	out1, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out2, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out1.ValidatedAt != out2.ValidatedAt {
+		t.Errorf("ValidatedAt non-deterministic under fixed `now`: %q vs %q", out1.ValidatedAt, out2.ValidatedAt)
+	}
+	if out1.ExpiresAt != out2.ExpiresAt {
+		t.Errorf("ExpiresAt non-deterministic under fixed `now`: %q vs %q", out1.ExpiresAt, out2.ExpiresAt)
+	}
+	// Sanity: ValidatedAt should reflect the injected `now` exactly.
+	wantValidatedAt := now.Format(time.RFC3339Nano)
+	if out1.ValidatedAt != wantValidatedAt {
+		t.Errorf("ValidatedAt did not honour injected now: want %q got %q", wantValidatedAt, out1.ValidatedAt)
 	}
 }
