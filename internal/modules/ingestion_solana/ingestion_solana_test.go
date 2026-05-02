@@ -442,3 +442,110 @@ func TestIsRateLimitError(t *testing.T) {
 		})
 	}
 }
+
+// ── NormalizePumpFunCreateFromLogs ────────────────────────────────────────────
+
+func TestNormalizePumpFunCreateFromLogs_VirtualReserve(t *testing.T) {
+	event := &ingestion_solana.PumpFunLogCreateEvent{
+		Mint:         fixtureMint,
+		BondingCurve: fixtureBonding,
+		Symbol:       "TKN",
+		Name:         "TestToken",
+	}
+	const (
+		testSig            = "LogSig111111111111111111111111111111111111"
+		testSlot    uint64 = 99000
+		testLamport uint64 = 30_000_000_000
+		testSolUSD         = 150.0
+	)
+	dto := ingestion_solana.NormalizePumpFunCreateFromLogs(
+		testSig, testSlot, event, "v1", "2026-05-01T00:00:00Z",
+		testLamport, testSolUSD,
+	)
+	if dto == nil {
+		t.Fatal("expected non-nil DTO")
+	}
+
+	// Virtual reserve fields must be populated.
+	expectedReserve := strconv.FormatUint(testLamport, 10)
+	if dto.ReserveBaseRaw != expectedReserve {
+		t.Errorf("ReserveBaseRaw: got %q, want %q", dto.ReserveBaseRaw, expectedReserve)
+	}
+	expectedLiqUsd := float64(testLamport) / 1e9 * testSolUSD
+	if dto.LiquidityUsd != expectedLiqUsd {
+		t.Errorf("LiquidityUsd: got %f, want %f", dto.LiquidityUsd, expectedLiqUsd)
+	}
+	if !dto.LpStatsKnown {
+		t.Error("LpStatsKnown should be true when virtual reserve is injected")
+	}
+
+	// WashStats must be marked known with zero counts (brand-new token).
+	if !dto.WashStatsKnown {
+		t.Error("WashStatsKnown should be true (0 txns at launch is factually correct)")
+	}
+	if dto.TxCount1m != 0 {
+		t.Errorf("TxCount1m: got %d, want 0", dto.TxCount1m)
+	}
+	if dto.UniqueWallets1m != 0 {
+		t.Errorf("UniqueWallets1m: got %d, want 0", dto.UniqueWallets1m)
+	}
+
+	// Standard fields.
+	if dto.TokenAddress != fixtureMint {
+		t.Errorf("TokenAddress: got %s, want %s", dto.TokenAddress, fixtureMint)
+	}
+	if dto.Market != "solana-pumpfun" {
+		t.Errorf("Market: got %s, want solana-pumpfun", dto.Market)
+	}
+	if dto.BlockNumber != testSlot {
+		t.Errorf("BlockNumber: got %d, want %d", dto.BlockNumber, testSlot)
+	}
+}
+
+func TestNormalizePumpFunCreateFromLogs_ZeroLamports_NoInjection(t *testing.T) {
+	event := &ingestion_solana.PumpFunLogCreateEvent{
+		Mint:         fixtureMint,
+		BondingCurve: fixtureBonding,
+		Symbol:       "TKN",
+		Name:         "TestToken",
+	}
+	dto := ingestion_solana.NormalizePumpFunCreateFromLogs(
+		fixtureSig, 1, event, "v1", "2026-05-01T00:00:00Z",
+		0,   // disabled
+		0.0, // disabled
+	)
+	if dto.ReserveBaseRaw != "0" {
+		t.Errorf("expected ReserveBaseRaw='0' when lamports=0, got %q", dto.ReserveBaseRaw)
+	}
+	if dto.LiquidityUsd != 0 {
+		t.Errorf("expected LiquidityUsd=0 when lamports=0, got %f", dto.LiquidityUsd)
+	}
+	if dto.LpStatsKnown {
+		t.Error("LpStatsKnown should be false when lamports=0")
+	}
+	// WashStats still marked known even without virtual reserve.
+	if !dto.WashStatsKnown {
+		t.Error("WashStatsKnown should be true regardless of virtual reserve")
+	}
+}
+
+func TestNormalizePumpFunCreateFromLogs_Deterministic(t *testing.T) {
+	event := &ingestion_solana.PumpFunLogCreateEvent{
+		Mint:         fixtureMint,
+		BondingCurve: fixtureBonding,
+		Symbol:       "DET",
+		Name:         "Deterministic",
+	}
+	dto1 := ingestion_solana.NormalizePumpFunCreateFromLogs(
+		fixtureSig, 42, event, "v1", "2026-05-01T00:00:00Z", 30_000_000_000, 150.0,
+	)
+	dto2 := ingestion_solana.NormalizePumpFunCreateFromLogs(
+		fixtureSig, 42, event, "v1", "2026-05-01T00:00:00Z", 30_000_000_000, 150.0,
+	)
+	if dto1.EventID != dto2.EventID {
+		t.Errorf("non-deterministic EventID: %s != %s", dto1.EventID, dto2.EventID)
+	}
+	if dto1.LiquidityUsd != dto2.LiquidityUsd {
+		t.Errorf("non-deterministic LiquidityUsd: %f != %f", dto1.LiquidityUsd, dto2.LiquidityUsd)
+	}
+}

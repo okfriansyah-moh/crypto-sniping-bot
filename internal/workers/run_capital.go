@@ -88,6 +88,7 @@ func (w *CapitalWorker) Process(ctx context.Context, evt *database.Event) (*data
 		"cohort_id", allocDTO.CohortID,
 		"rejected", allocDTO.Rejected,
 		"trace_id", allocDTO.TraceID,
+		"version_id", allocDTO.VersionID,
 	)
 
 	if err := w.adapter.InsertAllocation(ctx, allocDTO); err != nil {

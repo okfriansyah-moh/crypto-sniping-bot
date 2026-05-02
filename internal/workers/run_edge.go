@@ -106,6 +106,7 @@ func (w *EdgeWorker) Process(ctx context.Context, evt *database.Event) (*databas
 		"edge_model_version", edgeDTO.EdgeModelVersionID,
 		"reject_reason", edgeDTO.RejectReason,
 		"trace_id", edgeDTO.TraceID,
+		"version_id", edgeDTO.VersionID,
 	)
 
 	if err := w.adapter.InsertEdge(ctx, edgeDTO); err != nil {

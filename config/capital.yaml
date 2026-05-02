@@ -11,10 +11,10 @@ capital:
   use_dynamic_sizing: true
 
   # ── Base sizing parameters ────────────────────────────────────
-  base_size_usd: 50.0
+  base_size_usd: 5.0 # starting base — scale up only after confirmed P&L
   min_size_usd: 5.0
   max_size_usd: 500.0
-  fixed_entry_size_usd: 50.0 # documented fallback only
+  fixed_entry_size_usd: 5.0 # documented fallback only
 
   # ── Kelly fraction ────────────────────────────────────────────
   # f_kelly = (P × R − (1−P)) / R   where R = PriorGainBps / PriorLossBps

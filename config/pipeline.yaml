@@ -97,18 +97,18 @@ selection:
 capital:
   wallet_address: "" # EIP-55 wallet address (set via env or config)
   wallet_private_key: "" # hex private key — override with env SNIPER_WALLET_KEY
-  fixed_entry_size_usd: 50.0 # fixed trade size in USD (Phase 2 simplification)
+  fixed_entry_size_usd: 5.0 # override by config/capital.yaml — keep in sync
   max_total_exposure_usd: 500.0 # hard cap on total open exposure
   max_concurrent_positions: 1 # Phase 2: max 1 position at once
   max_size_usd: 100.0 # single position USD ceiling
   ttl_seconds: 3 # AllocationDTO TTL before expiry
 
 position:
-  tp1_bps: 2000 # take-profit 1 threshold (20%)
-  tp2_bps: 5000 # take-profit 2 threshold (50%)
-  sl_bps: 1500 # stop-loss threshold (15%)
-  max_hold_seconds: 3600 # maximum hold time (1 hour)
-  poll_interval_seconds: 15 # how often to poll open position prices
+  tp1_bps: 1500 # take partial at +15%
+  tp2_bps: 4000 # full exit at +40%
+  sl_bps: 500 # stop-loss at -5% (was 15% — tighter for micro-cap memes)
+  max_hold_seconds: 300 # 5 min max hold — meme tokens pump or dump fast
+  poll_interval_seconds: 5 # poll every 5s (was 15s — tighter for fast-moving tokens)
 
 # Phase 4 — Probability / Slippage / Latency models
 models:

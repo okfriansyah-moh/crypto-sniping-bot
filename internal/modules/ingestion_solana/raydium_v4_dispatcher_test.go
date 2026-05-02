@@ -189,7 +189,12 @@ func TestNormalizeRaydiumV4Instruction_Initialize2_Emits(t *testing.T) {
 	}
 }
 
-func TestNormalizeRaydiumV4Instruction_SwapBaseIn_Emits(t *testing.T) {
+// TestNormalizeRaydiumV4Instruction_SwapBaseIn_NoDTO guards F-1 fix:
+// swap instructions must NOT produce a DTO (they would carry an empty
+// TokenAddress and flood the DQ worker with empty-token DLQ rejections).
+// The Kind is still classified correctly so the caller's heartbeat counter
+// can distinguish "we saw a swap" from "unrecognized opcode".
+func TestNormalizeRaydiumV4Instruction_SwapBaseIn_NoDTO(t *testing.T) {
 	t.Parallel()
 	data := []byte{ingestion_solana.RaydiumV4OpSwapBaseIn}
 	data = appendLEU64(data, 1_000_000)
@@ -210,15 +215,16 @@ func TestNormalizeRaydiumV4Instruction_SwapBaseIn_Emits(t *testing.T) {
 	if res.Kind != ingestion_solana.RaydiumV4KindSwapBaseIn {
 		t.Errorf("Kind = %d, want SwapBaseIn", res.Kind)
 	}
-	if res.DTO == nil {
-		t.Fatal("expected non-nil DTO for SwapBaseIn")
-	}
-	if res.DTO.EventTopic != "Swap" {
-		t.Errorf("EventTopic = %q, want Swap", res.DTO.EventTopic)
+	// F-1 fix: swaps must NOT emit a DTO — they carry empty TokenAddress
+	// and would pollute the DQ worker with DLQ rejections.
+	if res.DTO != nil {
+		t.Fatalf("expected nil DTO for SwapBaseIn (F-1), got EventTopic=%q", res.DTO.EventTopic)
 	}
 }
 
-func TestNormalizeRaydiumV4Instruction_SwapBaseOut_Emits(t *testing.T) {
+// TestNormalizeRaydiumV4Instruction_SwapBaseOut_NoDTO guards F-1 fix:
+// swap instructions must NOT produce a DTO (same rationale as SwapBaseIn).
+func TestNormalizeRaydiumV4Instruction_SwapBaseOut_NoDTO(t *testing.T) {
 	t.Parallel()
 	data := []byte{ingestion_solana.RaydiumV4OpSwapBaseOut}
 	data = appendLEU64(data, 2_000_000)
@@ -239,8 +245,9 @@ func TestNormalizeRaydiumV4Instruction_SwapBaseOut_Emits(t *testing.T) {
 	if res.Kind != ingestion_solana.RaydiumV4KindSwapBaseOut {
 		t.Errorf("Kind = %d, want SwapBaseOut", res.Kind)
 	}
-	if res.DTO == nil {
-		t.Fatal("expected non-nil DTO for SwapBaseOut")
+	// F-1 fix: swaps must NOT emit a DTO.
+	if res.DTO != nil {
+		t.Fatalf("expected nil DTO for SwapBaseOut (F-1), got EventTopic=%q", res.DTO.EventTopic)
 	}
 }
 

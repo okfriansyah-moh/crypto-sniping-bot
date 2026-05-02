@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"crypto-sniping-bot/database"
@@ -95,6 +96,20 @@ func pollOnce(
 			continue
 		}
 
+		// Lazy entry-price initialization: simulated (and some early real)
+		// execution paths produce positions with EntryPrice="" because
+		// RealizedEntryPrice is not yet decoded from on-chain logs.  On the
+		// first successful price poll we anchor EntryPrice to the observed
+		// market price so TP/SL/TIME checks can proceed correctly.
+		if pos.EntryPrice == "" {
+			posLog.Info("position_entry_price_initialized",
+				"position_id", pos.PositionID,
+				"entry_price", currentPrice,
+			)
+			pos.EntryPrice = currentPrice
+			pos.CurrentPrice = currentPrice
+		}
+
 		updated, exitErr := mod.PollExit(ctx, pos, currentPrice, evaluatedAt)
 		if exitErr != nil {
 			posLog.Warn("position_poll_exit_eval_failed", "error", exitErr)
@@ -104,6 +119,27 @@ func pollOnce(
 		if err := adapter.InsertPositionState(ctx, updated); err != nil {
 			posLog.Warn("position_poll_persist_failed", "error", err)
 			continue
+		}
+
+		if updated.Status != "exited" {
+			// Emit a live snapshot so the operator can see position state every poll cycle.
+			var pnlPct float64
+			if entry, err := strconv.ParseFloat(pos.EntryPrice, 64); err == nil && entry > 0 {
+				if cur, err := strconv.ParseFloat(currentPrice, 64); err == nil {
+					pnlPct = (cur - entry) / entry * 100
+				}
+			}
+			posLog.Info("position_poll_snapshot",
+				"status", updated.Status,
+				"entry_price", pos.EntryPrice,
+				"current_price", currentPrice,
+				"peak_price", updated.PeakPrice,
+				"pnl_pct", pnlPct,
+				"sl_bps", pos.SlBps,
+				"tp1_bps", pos.Tp1Bps,
+				"tp2_bps", pos.Tp2Bps,
+				"trace_id", pos.TraceID,
+			)
 		}
 
 		if updated.Status == "exited" {

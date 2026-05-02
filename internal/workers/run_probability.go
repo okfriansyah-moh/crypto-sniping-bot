@@ -51,6 +51,7 @@ func (w *ProbabilityWorker) Process(ctx context.Context, evt *database.Event) (*
 		"event_id", prob.EventID,
 		"probability", prob.Probability,
 		"trace_id", prob.TraceID,
+		"version_id", prob.VersionID,
 	)
 
 	if err := w.adapter.InsertProbabilityEstimate(ctx, prob); err != nil {

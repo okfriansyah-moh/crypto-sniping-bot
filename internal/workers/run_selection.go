@@ -83,6 +83,7 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		"combined_score", selDTO.CombinedScore,
 		"reject_reason", selDTO.RejectReason,
 		"trace_id", selDTO.TraceID,
+		"version_id", selDTO.VersionID,
 	)
 
 	if err := w.adapter.InsertSelection(ctx, selDTO); err != nil {

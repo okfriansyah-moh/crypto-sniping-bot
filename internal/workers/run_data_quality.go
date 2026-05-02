@@ -76,6 +76,7 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		"profile", dqDTO.Profile,
 		"flags", dqDTO.Flags,
 		"trace_id", dqDTO.TraceID,
+		"version_id", dqDTO.VersionID,
 	)
 
 	// Persist the result regardless of decision.

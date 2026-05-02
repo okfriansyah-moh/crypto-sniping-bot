@@ -106,10 +106,34 @@ func (w *FeaturesWorker) Process(ctx context.Context, evt *database.Event) (*dat
 		"safety_conf", featDTO.Confidence.ContractSafety,
 		"market_snap_known", snapKnown,
 		"trace_id", featDTO.TraceID,
+		"version_id", featDTO.VersionID,
 	)
 
 	if err := w.adapter.InsertFeature(ctx, featDTO); err != nil {
 		w.logger.Warn("features_worker_persist_failed", "event_id", featDTO.EventID, "error", err)
+	}
+
+	// Emit fan-out routing events for Layer 4 parallel consumers BEFORE the
+	// lifecycle transition so that a retry (on transient InsertEvent failure)
+	// finds both the transition and routing-event steps in a clean state.
+	// InsertEvent is idempotent (ON CONFLICT DO NOTHING) so re-emission is safe.
+	// probability_worker and slippage_worker each subscribe to their own
+	// dedicated event type so the event-bus processed=TRUE single-consumer
+	// mutex does not block them when edge_worker claims the primary feature_event.
+	// Event IDs are derived content-addressably (SHA256(type+baseID)[:8]).
+	for _, routeType := range []string{"probability_feature_event", "slippage_feature_event"} {
+		routeEvt, routeErr := makeOutputEvent(
+			deriveEventID(featDTO.EventID, routeType), featDTO, routeType,
+			evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+		)
+		if routeErr != nil {
+			w.logger.Warn("features_worker_route_make_failed",
+				"event_type", routeType, "error", routeErr)
+			continue
+		}
+		if insertErr := w.adapter.InsertEvent(ctx, *routeEvt); insertErr != nil {
+			return nil, fmt.Errorf("features_worker: insert route event %s: %w", routeType, insertErr)
+		}
 	}
 
 	if err := doMandatoryTransition(ctx, w.adapter, dq.TokenLifecycleID, "DQ_PASSED", "FEATURE_READY", "", "features_worker"); err != nil {

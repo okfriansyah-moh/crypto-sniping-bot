@@ -123,4 +123,12 @@ type MarketDataDTO struct {
 	LpChurnDetected     bool    `json:"lp_churn_detected,omitempty"`
 	LpChurnBlocks       int32   `json:"lp_churn_blocks,omitempty"`
 	PoolAgeSeconds      int32   `json:"pool_age_seconds,omitempty"`
+
+	// Token supply — total/maximum token supply at creation.
+	// Populated by ingestion for Pump.fun tokens (from create instruction)
+	// and EVM tokens (from totalSupply() view call).
+	// TotalSupplyKnown=false means the value was not available at ingest time;
+	// the DQ check is skipped rather than incorrectly rejecting.
+	TotalSupplyKnown bool    `json:"total_supply_known,omitempty"`
+	TotalSupply      float64 `json:"total_supply,omitempty"`
 }

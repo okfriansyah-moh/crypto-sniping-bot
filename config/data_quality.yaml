@@ -45,6 +45,20 @@ data_quality:
     # Set to 0 to disable (default — EVM events always carry 0).
     max_bonding_curve_progress_bps: 0
 
+    # Minimum liquidity (USD) to consider a token not thin/fake.
+    # EVM default: 5000. For PumpFun Solana markets the 30 SOL protocol
+    # virtual reserve at creation is ~$3000-6000 depending on SOL price;
+    # setting this below that floor avoids a false LOW_LIQUIDITY flag on
+    # every new PumpFun launch. 0 disables the check entirely.
+    min_liquidity_usd: 3000.0
+
+    # Maximum total token supply. Tokens with supply > this value are
+    # immediately rejected — excessive supply destroys scarcity and is
+    # a strong indicator of low-value/rug meme tokens (e.g. Q10D: 2B supply).
+    # Only applied when MarketDataDTO.TotalSupplyKnown=true.
+    # 0 disables the check entirely.
+    max_total_supply: 1000000000 # 1 billion
+
     # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
     rug_dangerous_selectors:
       - "mint"
