@@ -136,6 +136,17 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 		in.TotalSupply > m.runtime.Thresholds.MaxTotalSupply {
 		rejectReasons = append(rejectReasons, "high_total_supply")
 	}
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxTotalSupply > 0 &&
+		!in.TotalSupplyKnown {
+		// Threshold is configured but ingestion did not populate TotalSupply.
+		// The check is intentionally skipped to avoid false rejections, but log
+		// so operators can detect missing upstream supply data.
+		m.logger.Debug("dq_total_supply_unknown",
+			"token_address", in.TokenAddress,
+			"max_total_supply_threshold", m.runtime.Thresholds.MaxTotalSupply,
+		)
+	}
 
 	// ── Detector toggles + weights ──────────────────────────────────────
 	rugEnabled := true

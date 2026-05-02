@@ -134,7 +134,7 @@ func pollOnce(
 				"entry_price", pos.EntryPrice,
 				"current_price", currentPrice,
 				"peak_price", updated.PeakPrice,
-				"pnl_pct", fmt.Sprintf("%.2f", pnlPct),
+				"pnl_pct", pnlPct,
 				"sl_bps", pos.SlBps,
 				"tp1_bps", pos.Tp1Bps,
 				"tp2_bps", pos.Tp2Bps,
