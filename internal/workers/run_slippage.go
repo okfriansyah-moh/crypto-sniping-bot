@@ -60,6 +60,7 @@ func (w *SlippageWorker) Process(ctx context.Context, evt *database.Event) (*dat
 		"p50_bps", slip.ExpectedP50Bps,
 		"p95_bps", slip.ExpectedP95Bps,
 		"trace_id", slip.TraceID,
+		"version_id", slip.VersionID,
 	)
 
 	if err := w.adapter.InsertSlippageEstimate(ctx, slip); err != nil {

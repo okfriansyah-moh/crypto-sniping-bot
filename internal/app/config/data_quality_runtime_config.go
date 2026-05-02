@@ -72,6 +72,18 @@ type DataQualityDetectorThresholds struct {
 	// curve progress filter. Reject MarketDataDTO when
 	// BondingCurveProgressBps > MaxBondingCurveProgressBps. 0 disables.
 	MaxBondingCurveProgressBps int32 `yaml:"max_bonding_curve_progress_bps"`
+
+	// MinLiquidityUsd overrides the default thin-liquidity floor used by
+	// DetectFakeLiquidity. 0 → module uses built-in default (5000 USD).
+	// Set below the market's protocol-defined minimum reserve to avoid
+	// false LOW_LIQUIDITY flags (e.g. 3000 for PumpFun 30 SOL virtual reserve).
+	MinLiquidityUsd float64 `yaml:"min_liquidity_usd"`
+
+	// MaxTotalSupply rejects tokens whose total supply exceeds this threshold.
+	// High supply destroys scarcity — tokens with 1B+ supply are disproportionately
+	// likely to be micro-cap rugs with no real value. 0 disables the check.
+	// Recommended: 1_000_000_000 (1B).
+	MaxTotalSupply float64 `yaml:"max_total_supply"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.

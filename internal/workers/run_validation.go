@@ -66,6 +66,7 @@ func (w *ValidationWorker) Process(ctx context.Context, evt *database.Event) (*d
 		"probability_used", vedge.ProbabilityUsed,
 		"reject_reason", vedge.RejectReason,
 		"trace_id", vedge.TraceID,
+		"version_id", vedge.VersionID,
 	)
 
 	if err := w.adapter.InsertValidatedEdge(ctx, vedge); err != nil {

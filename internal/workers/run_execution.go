@@ -279,6 +279,7 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		"mev_protected", result.MEVProtected,
 		"simulated", result.Simulated,
 		"trace_id", result.TraceID,
+		"version_id", result.VersionID,
 	)
 
 	nextState := "EXECUTED"

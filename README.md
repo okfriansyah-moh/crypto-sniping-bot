@@ -30,6 +30,62 @@ go run ./cmd migrate up
 
 ---
 
+## Makefile Targets
+
+All common operations are wrapped in `make` targets. Run `make <target>`.
+
+### Build & Quality
+
+| Target              | Description                                        |
+| ------------------- | -------------------------------------------------- |
+| `make build`        | Compile to `bin/crypto-sniping-bot`                |
+| `make run`          | `go run ./cmd serve`                               |
+| `make test`         | Run all tests with race detector                   |
+| `make test-cover`   | Tests + HTML coverage report                       |
+| `make vet`          | `go vet ./...`                                     |
+| `make lint`         | `golangci-lint run ./...` (requires golangci-lint) |
+| `make tidy`         | `go mod tidy`                                      |
+| `make migrate-up`   | Apply all pending migrations                       |
+| `make migrate-down` | Roll back last migration                           |
+| `make clean`        | Remove `bin/`, `coverage.out`, `coverage.html`     |
+| `make quality`      | Runs `vet` + `lint` + `test` (full gate)           |
+
+### Docker
+
+| Target              | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `make docker-build` | Build Docker image without starting services         |
+| `make docker-up`    | Build image + start all services in detached mode    |
+| `make docker-down`  | Stop all services (data volume preserved)            |
+| `make docker-clean` | Stop all services **and delete the database volume** |
+| `make docker-logs`  | Tail live bot logs (`docker compose logs -f bot`)    |
+
+### Log Collection & Pre-Analysis
+
+Collect live bot logs unattended, pre-analyse them against all 10 PRS dimensions, and write a structured summary ready to paste into a Copilot log-reviewer session.
+
+```bash
+make log-collect              # collect for 60 min (default), then write summary
+make log-collect MINS=5       # quick smoke test — 5 min window
+make log-collect MINS=10 SVC=bot
+make log-latest               # print the most recent summary to stdout
+make log-list                 # list all collected session summaries
+```
+
+**Workflow:**
+
+1. Run `make log-collect` in any terminal — it runs completely unattended.
+2. After the window elapses (or you press Ctrl-C), it writes two files to `output/logs/`:
+   - `summary_<TIMESTAMP>.txt` — human-readable findings (PRS score, stage counts, stub detection, invariant checks)
+   - `prs_<TIMESTAMP>.json` — machine-readable PRS breakdown
+3. Open a new Copilot chat and paste:
+   > _"Review this using the log-reviewer skill:"_ followed by the summary content.
+4. Copilot runs a full log-reviewer analysis (Verdict + Findings + Plan + Confirmation Gate).
+
+The script detects: pipeline stage completeness (L0–L10), stubbed numeric fields, R4 invariants (join_timeout, duplicate event IDs, missing trace_id), PANIC/FATAL lines, and reject-rate spikes. `output/logs/` is gitignored.
+
+---
+
 ## Pipeline
 
 The system runs a 11-layer sequential pipeline per market instance (e.g. `eth-uniswap-v2`):

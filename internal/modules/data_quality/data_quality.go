@@ -130,6 +130,12 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 		in.BondingCurveProgressBps > m.runtime.Thresholds.MaxBondingCurveProgressBps {
 		rejectReasons = append(rejectReasons, "bonding_curve_too_advanced")
 	}
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxTotalSupply > 0 &&
+		in.TotalSupplyKnown &&
+		in.TotalSupply > m.runtime.Thresholds.MaxTotalSupply {
+		rejectReasons = append(rejectReasons, "high_total_supply")
+	}
 
 	// ── Detector toggles + weights ──────────────────────────────────────
 	rugEnabled := true
@@ -164,6 +170,9 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	minLiquidityUsd := 5000.0
 	minUniqueWallets := int32(5)
 	if m.runtime != nil {
+		if m.runtime.Thresholds.MinLiquidityUsd > 0 {
+			minLiquidityUsd = m.runtime.Thresholds.MinLiquidityUsd
+		}
 		if m.runtime.Thresholds.TaxBuyMaxBps > 0 {
 			maxBuyTaxBps = m.runtime.Thresholds.TaxBuyMaxBps
 		}

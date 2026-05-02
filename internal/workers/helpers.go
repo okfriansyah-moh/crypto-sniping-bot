@@ -5,6 +5,8 @@ package workers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -70,6 +72,15 @@ func sanitizeURL(rawURL string) string {
 	s = urlKeyQueryRe.ReplaceAllString(s, "${1}[REDACTED]")
 	s = urlKeyTrailingRe.ReplaceAllString(s, "${1}[REDACTED]${3}")
 	return s
+}
+
+// deriveEventID computes a deterministic, content-addressable event ID for fan-out
+// routing events that share the same FeatureDTO payload but need unique event_ids
+// so the event bus ON CONFLICT DO NOTHING semantics remain correct.
+// Format: SHA256(eventType + ":" + baseEventID)[:8] → 16 lowercase hex chars.
+func deriveEventID(baseEventID, eventType string) string {
+	h := sha256.Sum256([]byte(eventType + ":" + baseEventID))
+	return hex.EncodeToString(h[:8])
 }
 
 // makeOutputEvent serialises dto into a downstream database.Event.

@@ -106,6 +106,7 @@ func (w *FeaturesWorker) Process(ctx context.Context, evt *database.Event) (*dat
 		"safety_conf", featDTO.Confidence.ContractSafety,
 		"market_snap_known", snapKnown,
 		"trace_id", featDTO.TraceID,
+		"version_id", featDTO.VersionID,
 	)
 
 	if err := w.adapter.InsertFeature(ctx, featDTO); err != nil {
@@ -114,6 +115,27 @@ func (w *FeaturesWorker) Process(ctx context.Context, evt *database.Event) (*dat
 
 	if err := doMandatoryTransition(ctx, w.adapter, dq.TokenLifecycleID, "DQ_PASSED", "FEATURE_READY", "", "features_worker"); err != nil {
 		return nil, fmt.Errorf("features_worker: transition: %w", err)
+	}
+
+	// Emit fan-out routing events for Layer 4 parallel consumers.
+	// probability_worker and slippage_worker each subscribe to their own
+	// dedicated event type so the event-bus processed=TRUE single-consumer
+	// mutex does not block them when edge_worker claims the primary feature_event.
+	// Event IDs are derived content-addressably (SHA256(type+baseID)[:8]).
+	for _, routeType := range []string{"probability_feature_event", "slippage_feature_event"} {
+		routeEvt, routeErr := makeOutputEvent(
+			deriveEventID(featDTO.EventID, routeType), featDTO, routeType,
+			evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+		)
+		if routeErr != nil {
+			w.logger.Warn("features_worker_route_make_failed",
+				"event_type", routeType, "error", routeErr)
+			continue
+		}
+		if insertErr := w.adapter.InsertEvent(ctx, *routeEvt); insertErr != nil {
+			w.logger.Warn("features_worker_route_insert_failed",
+				"event_type", routeType, "error", insertErr)
+		}
 	}
 
 	return makeOutputEvent(

@@ -38,8 +38,19 @@ func (d *DB) Initialize(ctx context.Context, cfg database.Config) error {
 		sslMode = "disable"
 	}
 	if sslMode == "disable" {
-		d.logger.Warn("postgres_tls_disabled",
-			"note", "set ssl_mode to 'require' or 'verify-full' in production")
+		// Log at INFO for known local-dev hosts (localhost / docker-compose
+		// service name); WARN everywhere else to remind operators that TLS
+		// is off in a potentially remote environment.
+		localHosts := map[string]bool{"localhost": true, "127.0.0.1": true, "postgres": true, "db": true}
+		if localHosts[cfg.Host] {
+			d.logger.Info("postgres_tls_disabled",
+				"host", cfg.Host,
+				"note", "TLS disabled — local dev environment")
+		} else {
+			d.logger.Warn("postgres_tls_disabled",
+				"host", cfg.Host,
+				"note", "set ssl_mode to 'require' or 'verify-full' in production")
+		}
 	}
 	dsn := fmt.Sprintf(
 		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",

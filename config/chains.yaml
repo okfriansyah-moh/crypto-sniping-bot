@@ -118,6 +118,17 @@ solana:
   # produced events_emitted=0 in heartbeats. Set false to fall back to the
   # tx-fetch path.
   pumpfun_decode_from_logs: true
+  # Pump.fun bonding curve virtual reserve at launch (protocol constant).
+  # At BondingCurveProgress=0 the curve holds exactly 30 SOL of virtual liquidity
+  # (30_000_000_000 lamports). Injected as ReserveBaseRaw + LiquidityUsd so that
+  # Layer-2 feature extraction and the CPMM slippage model receive a non-zero
+  # reserve instead of the default "0" from the log-only ingest path. Setting
+  # this to 0 disables the virtual-reserve injection.
+  pumpfun_virtual_sol_lamports: 30000000000
+  # Conservative SOL price estimate (USD) used ONLY when the live price feed is
+  # unavailable. Injected into LiquidityUsd = lamports / 1e9 × sol_estimated_price_usd.
+  # Update this when the long-run SOL price range shifts significantly.
+  sol_estimated_price_usd: 150.0
   ingestion_backoff:
     initial_ms: 200
     max_ms: 30000

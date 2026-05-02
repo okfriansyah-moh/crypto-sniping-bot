@@ -58,7 +58,10 @@ INSERT INTO market_data (
     amount0_raw, amount1_raw, reserve_base_raw, reserve_token_raw,
     block_timestamp, ingested_at, rpc_endpoint, transport,
     confirmation_depth, reorged, expires_at, priority,
-    symbol, name
+    symbol, name,
+    liquidity_usd, lp_stats_known, wash_stats_known,
+    tx_count_1m, unique_wallets_1m, wallet_entropy, repeat_ratio_1m,
+    holder_dist_known, holder_count, top5_holder_pct, pool_age_seconds
 ) VALUES (
     $1,  $2,  $3,  $4,  $5,
     $6,  $7,  $8,  $9,  $10, $11,
@@ -67,7 +70,10 @@ INSERT INTO market_data (
     $18, $19, $20, $21,
     $22, $23, $24, $25,
     $26, $27, $28, $29,
-    $30, $31
+    $30, $31,
+    $32, $33, $34,
+    $35, $36, $37, $38,
+    $39, $40, $41, $42
 )
 ON CONFLICT (event_id) DO NOTHING
 `
@@ -83,6 +89,9 @@ ON CONFLICT (event_id) DO NOTHING
 		dto.BlockTimestamp, dto.IngestedAt, dto.RpcEndpoint, dto.Transport,
 		dto.ConfirmationDepth, dto.Reorged, expiresAt, dto.Priority,
 		dto.Symbol, dto.Name,
+		dto.LiquidityUsd, dto.LpStatsKnown, dto.WashStatsKnown,
+		dto.TxCount1m, dto.UniqueWallets1m, dto.WalletEntropy, dto.RepeatRatio1m,
+		dto.HolderDistKnown, dto.HolderCount, dto.Top5HolderPct, dto.PoolAgeSeconds,
 	)
 	if err != nil {
 		return fmt.Errorf("insert market data: %w", err)
@@ -101,7 +110,18 @@ SELECT
     token0_address, token1_address,
     amount0_raw, amount1_raw, reserve_base_raw, reserve_token_raw,
     block_timestamp, ingested_at, rpc_endpoint, transport,
-    confirmation_depth, reorged, COALESCE(expires_at, ''), priority
+    confirmation_depth, reorged, COALESCE(expires_at, ''), priority,
+    COALESCE(liquidity_usd, 0.0),
+    COALESCE(lp_stats_known, FALSE),
+    COALESCE(wash_stats_known, FALSE),
+    COALESCE(tx_count_1m, 0),
+    COALESCE(unique_wallets_1m, 0),
+    COALESCE(wallet_entropy, 0.0),
+    COALESCE(repeat_ratio_1m, 0.0),
+    COALESCE(holder_dist_known, FALSE),
+    COALESCE(holder_count, 0),
+    COALESCE(top5_holder_pct, 0.0),
+    COALESCE(pool_age_seconds, 0)
 FROM market_data
 WHERE event_id = $1
 `
@@ -114,6 +134,9 @@ WHERE event_id = $1
 		&dto.Amount0Raw, &dto.Amount1Raw, &dto.ReserveBaseRaw, &dto.ReserveTokenRaw,
 		&dto.BlockTimestamp, &dto.IngestedAt, &dto.RpcEndpoint, &dto.Transport,
 		&dto.ConfirmationDepth, &dto.Reorged, &dto.ExpiresAt, &dto.Priority,
+		&dto.LiquidityUsd, &dto.LpStatsKnown, &dto.WashStatsKnown,
+		&dto.TxCount1m, &dto.UniqueWallets1m, &dto.WalletEntropy, &dto.RepeatRatio1m,
+		&dto.HolderDistKnown, &dto.HolderCount, &dto.Top5HolderPct, &dto.PoolAgeSeconds,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

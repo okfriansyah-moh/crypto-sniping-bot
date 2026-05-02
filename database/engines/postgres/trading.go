@@ -494,7 +494,7 @@ SELECT
       )
   ) AS rug_rejects
 FROM data_quality
-WHERE created_at >= NOW() - ($1 || ' seconds')::interval`
+WHERE created_at >= NOW() - ($1 * interval '1 second')`
 
 	var total, rugRejects int
 	if err := d.pool.QueryRowContext(ctx, q, sinceSeconds).Scan(&total, &rugRejects); err != nil {

@@ -378,7 +378,8 @@ func (m *Module) handlePumpfunFromLogs(
 		logFilterSkip.Add(1)
 		return
 	}
-	dto := NormalizePumpFunCreateFromLogs(notif.Signature, notif.Slot, event, m.versionID, nowUTC())
+	dto := NormalizePumpFunCreateFromLogs(notif.Signature, notif.Slot, event, m.versionID, nowUTC(),
+		m.cfg.PumpfunVirtualSolLamports, m.cfg.SolEstimatedPriceUsd)
 	if dto == nil {
 		return
 	}
@@ -480,11 +481,18 @@ func (m *Module) processNotification(
 			dto, normErr = NormalizePumpFunCreate(tx, instr, m.versionID)
 		case "raydium-v4":
 			res := NormalizeRaydiumV4Instruction(tx, instr, m.versionID)
-			if res.Kind == RaydiumV4KindUnknown {
+			switch res.Kind {
+			case RaydiumV4KindUnknown:
 				// Tag is not Initialize2 / SwapBaseIn / SwapBaseOut. Irrelevant
 				// by design — NOT a decoder bug. Counted separately so the
 				// heartbeat distinguishes "we saw a SetParams" from "we failed
 				// to decode an Initialize2".
+				skippedUnknownInstruction.Add(1)
+				continue
+			case RaydiumV4KindSwapBaseIn, RaydiumV4KindSwapBaseOut:
+				// Swap instructions are recognized but not pipeline-relevant
+				// (F-1 fix: swaps produce no DTO to avoid empty-token DLQ spam).
+				// Count as skipped_unknown_instruction so heartbeat math matches.
 				skippedUnknownInstruction.Add(1)
 				continue
 			}

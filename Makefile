@@ -59,6 +59,44 @@ migrate-down:
 clean:
 	rm -rf bin/ coverage.out coverage.html
 
+# ── Log collection + pre-analysis ────────────────────────────────────────────
+# Collect live bot logs for DURATION minutes, pre-analyse them, and write
+# a structured summary to output/logs/ ready for the log-reviewer Copilot session.
+#
+# Usage:
+#   make log-collect            # collect for 60 min (default)
+#   make log-collect MINS=10    # collect for 10 min (quick test)
+#   make log-collect MINS=5 SVC=bot
+#
+# After it finishes, open a new Copilot chat and paste the summary file path.
+
+MINS ?= 60
+SVC  ?= bot
+
+.PHONY: log-collect
+log-collect:
+	@echo "Starting log collection for $(MINS) minute(s) on service '$(SVC)'..."
+	@echo "Press Ctrl-C to stop early — the summary is written on exit."
+	@bash scripts/collect_logs.sh $(MINS) $(SVC)
+
+# Show the most recent summary file in the terminal.
+.PHONY: log-latest
+log-latest:
+	@ls -t output/logs/summary_*.txt 2>/dev/null | head -1 | xargs cat || \
+	  echo "No summary files found. Run 'make log-collect' first."
+
+# List all collected log sessions.
+.PHONY: log-list
+log-list:
+	@ls -lt output/logs/summary_*.txt 2>/dev/null || echo "No summaries yet."
+
+# Re-run Phase 2+3 analysis on a previously collected raw log file.
+# Usage: make log-analyze LOG=output/logs/raw_20260501_232953.log
+.PHONY: log-analyze
+log-analyze:
+	@[[ -n "$(LOG)" ]] || (echo "Usage: make log-analyze LOG=output/logs/raw_TIMESTAMP.log" && exit 1)
+	@bash scripts/collect_logs.sh --analyze $(LOG)
+
 # ── Docker targets ────────────────────────────────────────────────────────────
 
 # Build the Docker image (does not start any services).

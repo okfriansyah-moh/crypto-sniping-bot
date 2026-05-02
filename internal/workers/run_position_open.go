@@ -108,6 +108,7 @@ func (w *PositionOpenWorker) Process(ctx context.Context, evt *database.Event) (
 		"sl_bps", pos.SlBps,
 		"status", pos.Status,
 		"trace_id", pos.TraceID,
+		"version_id", pos.VersionID,
 	)
 
 	return makeOutputEvent(

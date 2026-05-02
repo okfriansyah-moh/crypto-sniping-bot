@@ -96,6 +96,16 @@ type SolanaConfig struct {
 	// notifications — all DTO fields are derived from the WS log payload.
 	// Default true (set explicitly in config/chains.yaml).
 	PumpfunDecodeFromLogs bool `yaml:"pumpfun_decode_from_logs"`
+	// PumpfunVirtualSolLamports is the pump.fun bonding-curve virtual SOL
+	// reserve at launch (BondingCurveProgress=0). Protocol constant: 30 SOL
+	// = 30_000_000_000 lamports. Injected into MarketDataDTO.ReserveBaseRaw
+	// and MarketDataDTO.LiquidityUsd on the log-only ingest path where no
+	// on-chain reserve data is available. Set 0 to disable injection.
+	PumpfunVirtualSolLamports uint64 `yaml:"pumpfun_virtual_sol_lamports"`
+	// SolEstimatedPriceUsd is a conservative SOL price fallback (USD) used
+	// only when no live price feed is available. Used to compute LiquidityUsd
+	// = PumpfunVirtualSolLamports / 1e9 × SolEstimatedPriceUsd.
+	SolEstimatedPriceUsd float64 `yaml:"sol_estimated_price_usd"`
 
 	// Phase 11 (Reference-Repo Improvements R2 — INGEST) — hybrid
 	// transport. Mode "rpc" (default, legacy) uses the existing
