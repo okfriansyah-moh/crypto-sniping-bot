@@ -18,8 +18,10 @@ type SolanaHolderDistConfig struct {
 	TimeoutMs  int    `yaml:"timeout_ms"`
 	Commitment string `yaml:"commitment"`
 	// TopK is the number of largest holders summed for Top5HolderPct.
-	// Defaults to 5; the field is named TopK to leave room for tuning
-	// (e.g. Top10) without a contract change.
+	// MUST be 5 — the DTO field is named Top5HolderPct and the downstream
+	// data-quality layer interprets it as such. Any value other than 5 is
+	// clamped back to 5 by NewSolanaHolderDistProbe to avoid semantic
+	// corruption. To support a different K, a new DTO field is required.
 	TopK int `yaml:"top_k"`
 }
 
@@ -39,7 +41,9 @@ func NewSolanaHolderDistProbe(rpc SolanaProbeRPCClient, cfg SolanaHolderDistConf
 	if cfg.Commitment == "" {
 		cfg.Commitment = "confirmed"
 	}
-	if cfg.TopK <= 0 {
+	// Clamp TopK to exactly 5: the DTO field is Top5HolderPct and any
+	// other value produces a semantically incorrect result.
+	if cfg.TopK != 5 {
 		cfg.TopK = 5
 	}
 	return &SolanaHolderDistProbe{rpc: rpc, cfg: cfg, logger: logger}
@@ -47,9 +51,11 @@ func NewSolanaHolderDistProbe(rpc SolanaProbeRPCClient, cfg SolanaHolderDistConf
 
 func (p *SolanaHolderDistProbe) Name() string { return "solana_holder_dist" }
 
-// Probe sums the top-K holder amounts and divides by total supply.
-// Skips non-Solana inputs and inputs whose total supply is unknown
-// (denominator would be unsafe).
+// Probe sums the top-K holder amounts and divides by total supply when known.
+// Skips non-Solana inputs. If total supply is unknown, it falls back to using
+// the sum of the returned largest-holder balances as the denominator, so the
+// resulting percentage is relative to the returned holder set rather than the
+// full mint supply.
 func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDataDTO) (contracts.MarketDataDTO, error) {
 	if !strings.EqualFold(in.Chain, "solana") {
 		return in, nil

@@ -154,18 +154,31 @@ func (d *DB) GetClosedPositions(ctx context.Context, sinceSeconds int) ([]contra
 	}
 	since := time.Now().UTC().Add(-time.Duration(sinceSeconds) * time.Second).Format(time.RFC3339Nano)
 
+	// DISTINCT ON requires ORDER BY to start with position_id so that
+	// PostgreSQL selects the latest snapshot per position. The outer
+	// query then re-orders globally by exited_at DESC so callers receive
+	// newest-first results as documented.
 	const q = `
-SELECT DISTINCT ON (position_id)
-    event_id, trace_id, correlation_id, COALESCE(causation_id,''), version_id,
+SELECT event_id, trace_id, correlation_id, causation_id, version_id,
     token_lifecycle_id, position_id, execution_id, token_address, chain,
-    status, entry_price, entry_size_usd, COALESCE(current_price,''),
-    COALESCE(exit_price,''), COALESCE(exit_reason,''), pnl_usd, pnl_pct,
+    status, entry_price, entry_size_usd, current_price,
+    exit_price, exit_reason, pnl_usd, pnl_pct,
     tp1_bps, tp2_bps, sl_bps, max_hold_seconds,
-    COALESCE(expires_at,''), priority, opened_at, COALESCE(exited_at,''), snapshot_at
-FROM positions
-WHERE status IN ('exited', 'closed')
-  AND COALESCE(exited_at, snapshot_at) >= $1
-ORDER BY position_id, snapshot_at DESC`
+    expires_at, priority, opened_at, exited_at, snapshot_at
+FROM (
+    SELECT DISTINCT ON (position_id)
+        event_id, trace_id, correlation_id, COALESCE(causation_id,'') AS causation_id, version_id,
+        token_lifecycle_id, position_id, execution_id, token_address, chain,
+        status, entry_price, entry_size_usd, COALESCE(current_price,'') AS current_price,
+        COALESCE(exit_price,'') AS exit_price, COALESCE(exit_reason,'') AS exit_reason, pnl_usd, pnl_pct,
+        tp1_bps, tp2_bps, sl_bps, max_hold_seconds,
+        COALESCE(expires_at,'') AS expires_at, priority, opened_at, COALESCE(exited_at,'') AS exited_at, snapshot_at
+    FROM positions
+    WHERE status IN ('exited', 'closed')
+      AND COALESCE(exited_at, snapshot_at) >= $1
+    ORDER BY position_id, snapshot_at DESC
+) latest
+ORDER BY COALESCE(exited_at, snapshot_at) DESC`
 
 	rows, err := d.pool.QueryContext(ctx, q, since)
 	if err != nil {

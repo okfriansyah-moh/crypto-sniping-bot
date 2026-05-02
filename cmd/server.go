@@ -479,15 +479,11 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 
 	// EVM enrichment probes — dormant until a concrete EVM RPC client is
 	// wired in cmd/server.go (see TODO at honeypot_sim above). The probe
-	// itself returns an error when invoked with a nil RPC, so we only
-	// register it after the RPC is non-nil. Until then the YAML default
-	// keeps it disabled.
-	if cfg.Probes.EVMPairReserves.Enabled {
-		out = append(out, probes.NewEVMPairReservesProbe(nil, probes.EVMPairReservesConfig{
-			Enabled:   true,
-			TimeoutMs: cfg.Probes.EVMPairReserves.TimeoutMs,
-		}, logger))
-	}
+	// itself returns an error when invoked with a nil RPC, so do not
+	// register it until a non-nil RPC implementation is available.
+	// cfg.Probes.EVMPairReserves.Enabled is intentionally ignored here
+	// until the EVM RPC client is wired — keeping the block as a TODO.
+	// TODO(evm-rpc): pass real RPC client and enable registration.
 	return out
 }
 

@@ -15,8 +15,8 @@
 //	offset 4   u32  version
 //	offset 16  u32  price_type
 //	offset 20  i32  exponent       (typically negative)
-//	offset 224 i64  aggregate.price
-//	offset 240 u32  aggregate.status (1 = trading)
+//	 offset 208 i64  aggregate.price
+//	 offset 224 u32  aggregate.status (1 = trading)
 //
 // Source: https://github.com/pyth-network/pyth-client-go (PriceAccount struct).
 package price_oracle
