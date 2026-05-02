@@ -367,15 +367,16 @@ func buildSolanaExecutionModule(sc *rpc.SolanaClient, cfg *config.Config, logger
 
 	// Derive default market from the first Raydium program in cfg.Solana.Programs.
 	// Falls back to "solana-raydium-v4" when the programs list is empty.
+	// Derive default market from the first Solana program in cfg.Solana.Programs.
+	// Falls back to "solana-raydium-v4" when the programs list is empty.
 	defaultMarket := "solana-raydium-v4"
-	for _, prog := range cfg.Solana.Programs {
-		switch prog.Family {
+	if len(cfg.Solana.Programs) > 0 {
+		switch cfg.Solana.Programs[0].Family {
 		case "raydium-v4", "raydium":
 			defaultMarket = "solana-raydium-v4"
 		case "pumpfun":
 			defaultMarket = "solana-pumpfun"
 		}
-		break // first program wins
 	}
 
 	mod, err := execution_solana.New(&cfg.Execution.Solana, sc, keypairs, defaultMarket, logger)
