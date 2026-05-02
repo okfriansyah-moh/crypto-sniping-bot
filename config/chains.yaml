@@ -129,6 +129,12 @@ solana:
   # unavailable. Injected into LiquidityUsd = lamports / 1e9 × sol_estimated_price_usd.
   # Update this when the long-run SOL price range shifts significantly.
   sol_estimated_price_usd: 150.0
+  # Phase 3 (recovery): live SOL/USD via Pyth on-chain price account.
+  # Set pyth_sol_usd_account to "" to disable and force the static estimate.
+  # Mainnet SOL/USD = H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG.
+  pyth_sol_usd_account: "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
+  pyth_cache_ttl_seconds: 5
+  pyth_stale_after_seconds: 60
   ingestion_backoff:
     initial_ms: 200
     max_ms: 30000

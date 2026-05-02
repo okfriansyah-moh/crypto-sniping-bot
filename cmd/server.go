@@ -18,6 +18,7 @@ import (
 	"crypto-sniping-bot/internal/modules/execution"
 	"crypto-sniping-bot/internal/modules/execution_solana"
 	"crypto-sniping-bot/internal/modules/ingestion_solana"
+	"crypto-sniping-bot/internal/modules/price_oracle"
 	"crypto-sniping-bot/internal/modules/probes"
 	"crypto-sniping-bot/internal/orchestrator"
 	"crypto-sniping-bot/internal/rpc"
@@ -75,6 +76,24 @@ func runServer() {
 		}
 	}
 
+	// Phase 3 (recovery): wire Pyth on-chain SOL/USD price feed.
+	// Disabled when no RPC client OR no pyth account configured —
+	// ingestion then falls back to cfg.Solana.SolEstimatedPriceUsd.
+	var solUsdSource ingestion_solana.SolUsdSource
+	if solanaRPCClient != nil && cfg.Solana.PythSolUsdAccount != "" {
+		fetcher := &solanaPythFetcher{client: solanaRPCClient}
+		provider := price_oracle.NewSolUsdProvider(fetcher, price_oracle.SolUsdConfig{
+			Pubkey:     cfg.Solana.PythSolUsdAccount,
+			TTL:        time.Duration(cfg.Solana.PythCacheTTLSeconds) * time.Second,
+			StaleAfter: time.Duration(cfg.Solana.PythStaleAfterSeconds) * time.Second,
+		})
+		solUsdSource = &pythSolUsdShim{provider: provider, logger: logger}
+		logger.Info("pyth_sol_usd_enabled",
+			"account", cfg.Solana.PythSolUsdAccount,
+			"ttl_seconds", cfg.Solana.PythCacheTTLSeconds,
+		)
+	}
+
 	// Wire Telegram dispatcher (event bus → outbound) and poller (inbound commands).
 	if dispatcher, poller := buildTelegramComponents(db, logger); dispatcher != nil {
 		go func() {
@@ -98,7 +117,7 @@ func runServer() {
 	// pipeline is identical to its pre-probes wiring.
 	dqInputType := "market_data_event"
 	if cfg.Probes.Enabled {
-		probeList := buildMarketProbes(cfg, logger)
+		probeList := buildMarketProbes(cfg, solanaRPCClient, solUsdSource, logger)
 		orch.RegisterStage(
 			"market_probes_worker",
 			workers.NewMarketProbesWorker(db, probeList, logger),
@@ -241,7 +260,7 @@ func runServer() {
 	// Gracefully noops when cfg.Solana.Programs is empty (Solana not configured)
 	// or when no RPC client is injected (nil = no-op until a client is wired).
 	go func() {
-		if err := workers.RunIngestionSolana(ctx, db, cfg, solanaClient, logger); err != nil && err != ctx.Err() {
+		if err := workers.RunIngestionSolana(ctx, db, cfg, solanaClient, solUsdSource, logger); err != nil && err != ctx.Err() {
 			logger.Error("solana_ingestion_failed", "error", err)
 		}
 	}()
@@ -280,6 +299,42 @@ func runServer() {
 	}
 
 	logger.Info("server_shutdown")
+}
+
+// solanaPythFetcher adapts *rpc.SolanaClient → price_oracle.AccountFetcher.
+// Kept in cmd/ to avoid an internal/rpc → internal/modules import cycle.
+type solanaPythFetcher struct {
+	client *rpc.SolanaClient
+}
+
+func (f *solanaPythFetcher) GetAccountInfo(ctx context.Context, pubkey, commitment string) (*price_oracle.RawAccount, error) {
+	acct, err := f.client.GetAccountInfo(ctx, pubkey, commitment)
+	if err != nil {
+		return nil, err
+	}
+	if acct == nil || len(acct.Data) == 0 {
+		return nil, nil
+	}
+	return &price_oracle.RawAccount{DataB64: acct.Data[0], Slot: acct.Slot}, nil
+}
+
+// pythSolUsdShim adapts *price_oracle.SolUsdProvider → ingestion_solana.SolUsdSource.
+// Returns ok=false on any error so callers fall back to the static
+// SolEstimatedPriceUsd estimate (no fabricated prices).
+type pythSolUsdShim struct {
+	provider *price_oracle.SolUsdProvider
+	logger   *slog.Logger
+}
+
+func (s *pythSolUsdShim) SolUsd(ctx context.Context) (float64, bool) {
+	q, err := s.provider.Get(ctx)
+	if err != nil || q == nil || q.Price <= 0 {
+		if err != nil && s.logger != nil {
+			s.logger.Debug("pyth_sol_usd_unavailable", "error", err)
+		}
+		return 0, false
+	}
+	return q.Price, true
 }
 
 // buildSolanaExecutionModule constructs the Solana execution module from keypair files
@@ -376,11 +431,10 @@ func buildWalletShards(cfg *config.Config) []execution.WalletConfig {
 // instantiated. Returns an empty slice when no probes are configured —
 // the worker then operates as pass-through.
 //
-// TODO: add tax_probe, lp_lock_probe, owner_privileges_probe,
-// holder_dist_probe, wash_stats_probe registrations here once each
-// implementation lands. The slice ordering defines probe execution
-// order; later probes see the enrichment from earlier probes.
-func buildMarketProbes(cfg *config.Config, logger *slog.Logger) []probes.MarketProbe {
+// solanaRPC and solUsd may be nil — Solana probes are skipped when the
+// Solana RPC client is unconfigured. The slice ordering defines probe
+// execution order; later probes see the enrichment from earlier probes.
+func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd ingestion_solana.SolUsdSource, logger *slog.Logger) []probes.MarketProbe {
 	var out []probes.MarketProbe
 	if cfg.Probes.HoneypotSim.Enabled {
 		// rpc client is not yet wired here — production deployments
@@ -394,5 +448,91 @@ func buildMarketProbes(cfg *config.Config, logger *slog.Logger) []probes.MarketP
 		}
 		out = append(out, probes.NewHoneypotSimProbe(nil, hpCfg, logger))
 	}
+
+	// Solana enrichment probes — require a live RPC client. Without one
+	// they would always error; skip registration entirely.
+	if solanaRPC != nil {
+		probeRPC := &solanaProbeRPCAdapter{client: solanaRPC}
+		if cfg.Probes.SolanaAuthorities.Enabled {
+			out = append(out, probes.NewSolanaAuthoritiesProbe(probeRPC, probes.SolanaAuthoritiesConfig{
+				Enabled:    true,
+				TimeoutMs:  cfg.Probes.SolanaAuthorities.TimeoutMs,
+				Commitment: cfg.Probes.SolanaAuthorities.Commitment,
+			}, logger))
+		}
+		if cfg.Probes.SolanaPumpfunLp.Enabled {
+			out = append(out, probes.NewSolanaPumpfunLpProbe(probeRPC, &solUsdProbeAdapter{src: solUsd}, probes.SolanaPumpfunLpConfig{
+				Enabled:    true,
+				TimeoutMs:  cfg.Probes.SolanaPumpfunLp.TimeoutMs,
+				Commitment: cfg.Probes.SolanaPumpfunLp.Commitment,
+			}, logger))
+		}
+		if cfg.Probes.SolanaHolderDist.Enabled {
+			out = append(out, probes.NewSolanaHolderDistProbe(probeRPC, probes.SolanaHolderDistConfig{
+				Enabled:    true,
+				TimeoutMs:  cfg.Probes.SolanaHolderDist.TimeoutMs,
+				Commitment: cfg.Probes.SolanaHolderDist.Commitment,
+				TopK:       cfg.Probes.SolanaHolderDist.TopK,
+			}, logger))
+		}
+	}
+
+	// EVM enrichment probes — dormant until a concrete EVM RPC client is
+	// wired in cmd/server.go (see TODO at honeypot_sim above). The probe
+	// itself returns an error when invoked with a nil RPC, so do not
+	// register it until a non-nil RPC implementation is available.
+	// cfg.Probes.EVMPairReserves.Enabled is intentionally ignored here
+	// until the EVM RPC client is wired — keeping the block as a TODO.
+	// TODO(evm-rpc): pass real RPC client and enable registration.
 	return out
+}
+
+// solanaProbeRPCAdapter adapts *rpc.SolanaClient → probes.SolanaProbeRPCClient.
+type solanaProbeRPCAdapter struct {
+	client *rpc.SolanaClient
+}
+
+func (a *solanaProbeRPCAdapter) GetAccountInfo(ctx context.Context, pubkey, commitment string) (*probes.SolanaAccountData, error) {
+	acct, err := a.client.GetAccountInfo(ctx, pubkey, commitment)
+	if err != nil {
+		return nil, err
+	}
+	if acct == nil || len(acct.Data) == 0 {
+		return nil, nil
+	}
+	return &probes.SolanaAccountData{
+		DataB64: acct.Data[0],
+		Owner:   acct.Owner,
+		Slot:    acct.Slot,
+	}, nil
+}
+
+func (a *solanaProbeRPCAdapter) GetTokenLargestAccounts(ctx context.Context, mint, commitment string) ([]probes.SolanaTokenHolder, error) {
+	holders, err := a.client.GetTokenLargestAccounts(ctx, mint, commitment)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]probes.SolanaTokenHolder, 0, len(holders))
+	for _, h := range holders {
+		out = append(out, probes.SolanaTokenHolder{
+			Address:  h.Address,
+			Amount:   h.Amount,
+			Decimals: h.Decimals,
+		})
+	}
+	return out, nil
+}
+
+// solUsdProbeAdapter bridges ingestion_solana.SolUsdSource → probes.SolUsdSource.
+// Both interfaces share the same method signature; Go requires an
+// explicit adapter to convert between unrelated interface types.
+type solUsdProbeAdapter struct {
+	src ingestion_solana.SolUsdSource
+}
+
+func (a *solUsdProbeAdapter) SolUsd(ctx context.Context) (float64, bool) {
+	if a.src == nil {
+		return 0, false
+	}
+	return a.src.SolUsd(ctx)
 }

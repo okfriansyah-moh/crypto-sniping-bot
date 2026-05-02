@@ -42,6 +42,12 @@ func New(cfg *config.PositionConfig) *Module {
 
 // OpenPosition creates the initial position snapshot from an ExecutionResultDTO.
 // PositionID = SHA256(execution_id)[:16].
+//
+// Belt-and-suspenders guard (log-reviewer F-1, 2026-05-02): if the execution
+// claims Success=true but reports an empty RealizedEntryPrice, we DO NOT
+// open a live position. An open position with no entry price cannot be
+// monitored (TP/SL/PnL all require a numeric entry) and will permanently
+// occupy a slot under max_open_positions. Treat it as a failed open.
 func (m *Module) OpenPosition(
 	_ context.Context,
 	in contracts.ExecutionResultDTO,
@@ -50,7 +56,7 @@ func (m *Module) OpenPosition(
 ) (contracts.PositionStateDTO, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	if !in.Success {
+	if !in.Success || in.RealizedEntryPrice == "" {
 		eventID := contracts.ContentIDFromString(fmt.Sprintf("pos-fail:%s", in.EventID))
 		return contracts.PositionStateDTO{
 			EventID:       eventID,
@@ -152,13 +158,30 @@ func (m *Module) PollExitWithVolume(
 	updated.SnapshotAt = now
 
 	entryPrice, err := parsePrice(pos.EntryPrice)
+	priceUnusable := false
 	if err != nil || entryPrice == 0 {
-		updated.EventID = contracts.ContentIDFromString(fmt.Sprintf("pos-snap:%s:%s", pos.PositionID, now))
-		return updated, nil
+		priceUnusable = true
 	}
 
 	currentPrice, err := parsePrice(currentPriceStr)
 	if err != nil || currentPrice == 0 {
+		priceUnusable = true
+	}
+
+	// Phase 2 (recovery) — TIME exit must fire even when the price feed is
+	// unavailable. Without this, a nil/failing price client (or a token
+	// briefly delisted from the AMM) leaves the position open past
+	// MaxHoldSeconds, occupies a slot under max_open_positions, and
+	// blocks new entries indefinitely.  TP/SL/TRAILING/VOLUME-STALE all
+	// require a live price and are intentionally skipped here.
+	if priceUnusable {
+		if pos.OpenedAt != "" {
+			openedAt, parseErr := time.Parse(time.RFC3339Nano, pos.OpenedAt)
+			if parseErr == nil &&
+				evaluatedAt.Sub(openedAt) >= time.Duration(pos.MaxHoldSeconds)*time.Second {
+				return m.buildExit(updated, currentPriceStr, 0, 0, "TIME", now), nil
+			}
+		}
 		updated.EventID = contracts.ContentIDFromString(fmt.Sprintf("pos-snap:%s:%s", pos.PositionID, now))
 		return updated, nil
 	}
@@ -278,8 +301,20 @@ func (m *Module) buildExit(
 	currentPrice, entryPrice float64,
 	reason, now string,
 ) contracts.PositionStateDTO {
-	pnlPct := (currentPrice - entryPrice) / entryPrice
-	pnlUsd := pos.EntrySizeUsd * pnlPct
+	// Phase 2 (recovery): TIME exit may fire without a live price quote
+	// (priceUnusable path). In that case currentPrice/entryPrice are 0
+	// and we MUST avoid dividing by zero. PnL is unknown, ExitPrice is
+	// left empty — closing the position is more important than computing
+	// PnL on fabricated data; the learning engine treats unknown-PnL TIME
+	// exits separately.
+	var pnlPct, pnlUsd float64
+	exitPrice := currentPriceStr
+	if entryPrice > 0 && currentPrice > 0 {
+		pnlPct = (currentPrice - entryPrice) / entryPrice
+		pnlUsd = pos.EntrySizeUsd * pnlPct
+	} else {
+		exitPrice = ""
+	}
 
 	eventID := contracts.ContentIDFromString(fmt.Sprintf("pos-exit:%s:%s", pos.PositionID, reason))
 
@@ -300,7 +335,7 @@ func (m *Module) buildExit(
 		EntryPrice:   pos.EntryPrice,
 		EntrySizeUsd: pos.EntrySizeUsd,
 		CurrentPrice: currentPriceStr,
-		ExitPrice:    currentPriceStr,
+		ExitPrice:    exitPrice,
 		ExitReason:   reason,
 		PnlUsd:       math.Round(pnlUsd*100) / 100,
 		PnlPct:       math.Round(pnlPct*10000) / 10000,

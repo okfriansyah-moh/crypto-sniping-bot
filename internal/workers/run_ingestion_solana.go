@@ -18,6 +18,8 @@ import (
 
 // RunIngestionSolana starts the Solana ingestion module.
 // client is the SolanaRPCClient implementation (nil = noop mode for tests).
+// solUsdSource (Phase 3) is the optional live SOL/USD price provider; pass
+// nil to fall back to cfg.Solana.SolEstimatedPriceUsd.
 //
 // Flow:
 //  1. Pin the active strategy version.
@@ -29,6 +31,7 @@ func RunIngestionSolana(
 	adapter database.Adapter,
 	cfg *config.Config,
 	client ingestion_solana.SolanaRPCClient,
+	solUsdSource ingestion_solana.SolUsdSource,
 	logger *slog.Logger,
 ) error {
 	if logger == nil {
@@ -68,6 +71,9 @@ func RunIngestionSolana(
 	mod := ingestion_solana.New(solanaCfg, versionID, emit, logger)
 	if client != nil {
 		mod.WithClient(client)
+	}
+	if solUsdSource != nil {
+		mod.WithSolUsdSource(solUsdSource)
 	}
 
 	if err := mod.Start(ctx); err != nil && err != ctx.Err() {

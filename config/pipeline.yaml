@@ -88,7 +88,12 @@ validation:
   join_poll_interval_ms: 20
 
 selection:
-  max_open_positions: 1 # Phase 2: one concurrent position only
+  # Raised from 1 → 10 after F-1 (phantom position) fix verified
+  # in log-reviewer 2026-05-02. With execution disabled at boot,
+  # allocations now produce rejected (not phantom-confirmed) results,
+  # so slots cannot leak. Cap chosen for moderate concurrency on
+  # Solana pump.fun feed; tune with operator P&L data.
+  max_open_positions: 10
   # Phase 11 (Reference-Repo R2 — SELECT) — per-creator dedup gate.
   # Caps concurrent open positions originating from the same creator
   # wallet across the candidate pool. 0 disables the gate.
@@ -283,8 +288,34 @@ execution_quality:
 # false — DQ will continue to consume the raw market_data_event and degrade
 # via *Known flags per the active operational-mode profile.
 probes:
-  enabled: false
+  enabled: true
   honeypot_sim:
     enabled: false
     simulation_contract: "" # EIP-55 address of deployed sim contract
     timeout_ms: 2000 # bounded by validate_ranges to [100, 30000]
+  # Solana SPL mint/freeze authority probe — sets MintAuthorityRenounced,
+  # FreezeAuthorityRenounced, SolanaAuthoritiesKnown.
+  solana_authorities:
+    enabled: true
+    timeout_ms: 300
+    commitment: confirmed
+  # Pump.fun bonding-curve reserve probe — replaces the virtual reserve
+  # estimate with live (virtual+real) reserves and a USD liquidity figure
+  # derived from the live SOL/USD feed.
+  solana_pumpfun_lp:
+    enabled: true
+    timeout_ms: 300
+    commitment: confirmed
+  # SPL holder-concentration probe — sets HolderCount, Top5HolderPct,
+  # HolderDistKnown via getTokenLargestAccounts.
+  solana_holder_dist:
+    enabled: true
+    timeout_ms: 300
+    commitment: confirmed
+    top_k: 5
+  # Uniswap-V2 getReserves probe — replaces ingestion-time per-swap flow
+  # values with live pool depth. Default disabled until an EVM RPC client
+  # is wired in cmd/server.go.
+  evm_pair_reserves:
+    enabled: false
+    timeout_ms: 300

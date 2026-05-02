@@ -479,9 +479,20 @@ func TestNormalizePumpFunCreateFromLogs_VirtualReserve(t *testing.T) {
 		t.Error("LpStatsKnown should be true when virtual reserve is injected")
 	}
 
-	// WashStats must be marked known with zero counts (brand-new token).
-	if !dto.WashStatsKnown {
-		t.Error("WashStatsKnown should be true (0 txns at launch is factually correct)")
+	// Phase 0 (log-reviewer 2026-05-02): WashStats/HolderDist must NOT be
+	// claimed known until Phase 4 enrichment populates real signal.
+	// Tax IS genuinely known for pump.fun pre-graduation (zero rates).
+	if dto.WashStatsKnown {
+		t.Error("WashStatsKnown must be false until Phase 4 enrichment")
+	}
+	if dto.HolderDistKnown {
+		t.Error("HolderDistKnown must be false until Phase 4 enrichment")
+	}
+	if !dto.TaxKnown {
+		t.Error("TaxKnown must be true (pump.fun pre-graduation has no tax)")
+	}
+	if dto.BuyTaxBps != 0 || dto.SellTaxBps != 0 {
+		t.Errorf("taxes must be zero for pump.fun pre-graduation, got buy=%d sell=%d", dto.BuyTaxBps, dto.SellTaxBps)
 	}
 	if dto.TxCount1m != 0 {
 		t.Errorf("TxCount1m: got %d, want 0", dto.TxCount1m)
@@ -523,9 +534,13 @@ func TestNormalizePumpFunCreateFromLogs_ZeroLamports_NoInjection(t *testing.T) {
 	if dto.LpStatsKnown {
 		t.Error("LpStatsKnown should be false when lamports=0")
 	}
-	// WashStats still marked known even without virtual reserve.
-	if !dto.WashStatsKnown {
-		t.Error("WashStatsKnown should be true regardless of virtual reserve")
+	// Phase 0: WashStats remains NOT known regardless of virtual reserve;
+	// real wash stats land in Phase 4 enrichment.
+	if dto.WashStatsKnown {
+		t.Error("WashStatsKnown must be false until Phase 4 enrichment")
+	}
+	if dto.HolderDistKnown {
+		t.Error("HolderDistKnown must be false until Phase 4 enrichment")
 	}
 }
 

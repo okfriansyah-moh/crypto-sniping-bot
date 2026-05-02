@@ -294,6 +294,12 @@ func (m *memAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionSt
 func (m *memAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotImplemented
 }
+func (m *memAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotImplemented
+}
+func (m *memAdapter) FindPositionByPrefix(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotFound
+}
 
 func (m *memAdapter) MarkEventExpired(_ context.Context, _ string, _ string) error {
 	return database.ErrNotImplemented

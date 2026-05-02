@@ -14,7 +14,13 @@ probability:
 
   # ── Model confidence threshold ────────────────────────────────
   # If probDTO.Confidence < this, fall back to prior and log low_model_confidence.
-  min_model_confidence: 0.40
+  #
+  # Phase 0 (safety net, log-reviewer 2026-05-02): raised 0.40 → 0.70.
+  # Stub features have feature_confidence ≈ 0.5; this gate forces fallback
+  # to prior_probability=0.35 → EV ≈ −1900 bps → blanket REJECT until
+  # Phase 4 enrichment lands real signals. Lower again only after the
+  # 48h shadow gate proves dispersion (Phase 6).
+  min_model_confidence: 0.70
 
   # ── Probability join (validation worker) ──────────────────────
   prob_join_timeout_ms: 200 # max wait for prob_event before fallback

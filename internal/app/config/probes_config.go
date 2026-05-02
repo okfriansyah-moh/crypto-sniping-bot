@@ -14,9 +14,17 @@ type ProbesConfig struct {
 	// internal/modules/probes/honeypot_sim.go.
 	HoneypotSim HoneypotSimYAML `yaml:"honeypot_sim"`
 
-	// TODO: tax, lp_lock, owner_privileges, holder_dist, wash_stats —
-	// add their YAML structs alongside HoneypotSim once each probe
-	// implementation lands. Leave the parent ProbesConfig stable.
+	// SolanaAuthorities configures the SPL mint/freeze authority probe.
+	SolanaAuthorities SolanaProbeYAML `yaml:"solana_authorities"`
+
+	// SolanaPumpfunLp configures the pump.fun bonding-curve reserve probe.
+	SolanaPumpfunLp SolanaProbeYAML `yaml:"solana_pumpfun_lp"`
+
+	// SolanaHolderDist configures the SPL holder-concentration probe.
+	SolanaHolderDist SolanaHolderDistYAML `yaml:"solana_holder_dist"`
+
+	// EVMPairReserves configures the Uniswap-V2 getReserves probe.
+	EVMPairReserves EVMPairReservesYAML `yaml:"evm_pair_reserves"`
 }
 
 // HoneypotSimYAML mirrors probes.HoneypotSimConfig but lives in the
@@ -26,4 +34,26 @@ type HoneypotSimYAML struct {
 	Enabled            bool   `yaml:"enabled"`
 	SimulationContract string `yaml:"simulation_contract"`
 	TimeoutMs          int    `yaml:"timeout_ms"`
+}
+
+// SolanaProbeYAML is the common shape for Solana enrichment probes that
+// only need a timeout + commitment (authorities, pumpfun_lp).
+type SolanaProbeYAML struct {
+	Enabled    bool   `yaml:"enabled"`
+	TimeoutMs  int    `yaml:"timeout_ms"`
+	Commitment string `yaml:"commitment"`
+}
+
+// SolanaHolderDistYAML adds a top-K knob on top of the common shape.
+type SolanaHolderDistYAML struct {
+	Enabled    bool   `yaml:"enabled"`
+	TimeoutMs  int    `yaml:"timeout_ms"`
+	Commitment string `yaml:"commitment"`
+	TopK       int    `yaml:"top_k"`
+}
+
+// EVMPairReservesYAML configures the Uniswap-V2 pair getReserves probe.
+type EVMPairReservesYAML struct {
+	Enabled   bool `yaml:"enabled"`
+	TimeoutMs int  `yaml:"timeout_ms"`
 }

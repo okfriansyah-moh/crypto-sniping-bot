@@ -144,3 +144,100 @@ func scanPositionState(rows *sql.Rows) (contracts.PositionStateDTO, error) {
 	}
 	return dto, nil
 }
+
+// GetClosedPositions returns latest snapshots for positions that exited within
+// the last sinceSeconds. Used by /pnl for win-rate and realized PnL summaries.
+// sinceSeconds <= 0 defaults to the last 7 days.
+func (d *DB) GetClosedPositions(ctx context.Context, sinceSeconds int) ([]contracts.PositionStateDTO, error) {
+	if sinceSeconds <= 0 {
+		sinceSeconds = 7 * 24 * 3600
+	}
+	since := time.Now().UTC().Add(-time.Duration(sinceSeconds) * time.Second).Format(time.RFC3339Nano)
+
+	// DISTINCT ON requires ORDER BY to start with position_id so that
+	// PostgreSQL selects the latest snapshot per position. The outer
+	// query then re-orders globally by exited_at DESC so callers receive
+	// newest-first results as documented.
+	const q = `
+SELECT event_id, trace_id, correlation_id, causation_id, version_id,
+    token_lifecycle_id, position_id, execution_id, token_address, chain,
+    status, entry_price, entry_size_usd, current_price,
+    exit_price, exit_reason, pnl_usd, pnl_pct,
+    tp1_bps, tp2_bps, sl_bps, max_hold_seconds,
+    expires_at, priority, opened_at, exited_at, snapshot_at
+FROM (
+    SELECT DISTINCT ON (position_id)
+        event_id, trace_id, correlation_id, COALESCE(causation_id,'') AS causation_id, version_id,
+        token_lifecycle_id, position_id, execution_id, token_address, chain,
+        status, entry_price, entry_size_usd, COALESCE(current_price,'') AS current_price,
+        COALESCE(exit_price,'') AS exit_price, COALESCE(exit_reason,'') AS exit_reason, pnl_usd, pnl_pct,
+        tp1_bps, tp2_bps, sl_bps, max_hold_seconds,
+        COALESCE(expires_at,'') AS expires_at, priority, opened_at, COALESCE(exited_at,'') AS exited_at, snapshot_at
+    FROM positions
+    WHERE status IN ('exited', 'closed')
+      AND COALESCE(exited_at, snapshot_at) >= $1
+    ORDER BY position_id, snapshot_at DESC
+) latest
+ORDER BY COALESCE(exited_at, snapshot_at) DESC`
+
+	rows, err := d.pool.QueryContext(ctx, q, since)
+	if err != nil {
+		return nil, fmt.Errorf("get closed positions: %w", err)
+	}
+	defer rows.Close()
+
+	var result []contracts.PositionStateDTO
+	for rows.Next() {
+		dto, err := scanPositionState(rows)
+		if err != nil {
+			return nil, fmt.Errorf("get closed positions: scan: %w", err)
+		}
+		result = append(result, dto)
+	}
+	return result, rows.Err()
+}
+
+// FindPositionByPrefix returns the latest snapshot of an OPEN position whose
+// position_id or token_address starts with prefix (case-insensitive). Returns
+// database.ErrAmbiguous when more than one open position matches.
+func (d *DB) FindPositionByPrefix(ctx context.Context, prefix string) (*contracts.PositionStateDTO, error) {
+	if prefix == "" {
+		return nil, database.ErrNotFound
+	}
+	pattern := prefix + "%"
+
+	const q = `
+WITH latest AS (
+    SELECT DISTINCT ON (position_id)
+        event_id, trace_id, correlation_id, COALESCE(causation_id,'') AS causation_id, version_id,
+        token_lifecycle_id, position_id, execution_id, token_address, chain,
+        status, entry_price, entry_size_usd, COALESCE(current_price,'') AS current_price,
+        COALESCE(exit_price,'') AS exit_price, COALESCE(exit_reason,'') AS exit_reason, pnl_usd, pnl_pct,
+        tp1_bps, tp2_bps, sl_bps, max_hold_seconds,
+        COALESCE(expires_at,'') AS expires_at, priority, opened_at, COALESCE(exited_at,'') AS exited_at, snapshot_at
+    FROM positions
+    WHERE status = 'open'
+    ORDER BY position_id, snapshot_at DESC
+)
+SELECT * FROM latest
+WHERE position_id ILIKE $1 OR token_address ILIKE $1
+LIMIT 2`
+
+	rows, err := d.pool.QueryContext(ctx, q, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("find position by prefix: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, database.ErrNotFound
+	}
+	first, err := scanPositionState(rows)
+	if err != nil {
+		return nil, fmt.Errorf("find position by prefix: scan: %w", err)
+	}
+	if rows.Next() {
+		return nil, database.ErrAmbiguous
+	}
+	return &first, rows.Err()
+}

@@ -16,20 +16,25 @@ import (
 type CommandType string
 
 const (
-	CmdStatus    CommandType = "/status"
-	CmdPnl       CommandType = "/pnl"
-	CmdPositions CommandType = "/positions"
-	CmdKill      CommandType = "/kill"
-	CmdResume    CommandType = "/resume"
-	CmdVersion   CommandType = "/version"
-	CmdMode      CommandType = "/mode"
-	CmdPipeline  CommandType = "/pipeline"
-	CmdHelp      CommandType = "/help"
+	CmdStatus        CommandType = "/status"
+	CmdPnl           CommandType = "/pnl"
+	CmdPositions     CommandType = "/positions"
+	CmdPosition      CommandType = "/position"
+	CmdHealth        CommandType = "/health"
+	CmdForceClose    CommandType = "/force_close"
+	CmdEnableTrading CommandType = "/enable_trading"
+	CmdKill          CommandType = "/kill"
+	CmdResume        CommandType = "/resume"
+	CmdVersion       CommandType = "/version"
+	CmdMode          CommandType = "/mode"
+	CmdPipeline      CommandType = "/pipeline"
+	CmdHelp          CommandType = "/help"
 )
 
 // isDestructive returns true for commands that modify system state.
 func (c CommandType) isDestructive() bool {
-	return c == CmdKill || c == CmdResume || c == CmdMode
+	return c == CmdKill || c == CmdResume || c == CmdMode ||
+		c == CmdForceClose || c == CmdEnableTrading
 }
 
 // CommandRequest carries the parsed operator command.
@@ -56,7 +61,9 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	}
 	cmd := CommandType(strings.ToLower(parts[0]))
 	switch cmd {
-	case CmdStatus, CmdPnl, CmdPositions, CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdHelp:
+	case CmdStatus, CmdPnl, CmdPositions, CmdPosition, CmdHealth,
+		CmdForceClose, CmdEnableTrading,
+		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
 			Args:     parts[1:],
@@ -71,28 +78,36 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 // It is intentionally interface-driven so the orchestrator or app layer
 // can inject real implementations without coupling to this package's internals.
 type Handler struct {
-	statusFn       func(ctx context.Context) (string, error)
-	pnlFn          func(ctx context.Context) (string, error)
-	positionsFn    func(ctx context.Context) (string, error)
-	killFn         func(ctx context.Context) error
-	resumeFn       func(ctx context.Context) error
-	versionFn      func(ctx context.Context) (string, error)
-	modeFn         func(ctx context.Context, mode string) (string, error)
-	pipelineFn     func(ctx context.Context) (string, error)
-	allowedUserIDs map[string]struct{} // nil means unconfigured
-	logger         *slog.Logger
+	statusFn        func(ctx context.Context) (string, error)
+	pnlFn           func(ctx context.Context) (string, error)
+	positionsFn     func(ctx context.Context) (string, error)
+	positionFn      func(ctx context.Context, idOrAddr string) (string, error)
+	healthFn        func(ctx context.Context) (string, error)
+	forceCloseFn    func(ctx context.Context, idOrAddr, issuer string) (string, error)
+	enableTradingFn func(ctx context.Context, issuer string) (string, error)
+	killFn          func(ctx context.Context) error
+	resumeFn        func(ctx context.Context) error
+	versionFn       func(ctx context.Context) (string, error)
+	modeFn          func(ctx context.Context, mode string) (string, error)
+	pipelineFn      func(ctx context.Context) (string, error)
+	allowedUserIDs  map[string]struct{} // nil means unconfigured
+	logger          *slog.Logger
 }
 
 // HandlerOptions carries the injectable functions for the command handler.
 type HandlerOptions struct {
-	StatusFn    func(ctx context.Context) (string, error)
-	PnlFn       func(ctx context.Context) (string, error)
-	PositionsFn func(ctx context.Context) (string, error)
-	KillFn      func(ctx context.Context) error
-	ResumeFn    func(ctx context.Context) error
-	VersionFn   func(ctx context.Context) (string, error)
-	ModeFn      func(ctx context.Context, mode string) (string, error)
-	PipelineFn  func(ctx context.Context) (string, error)
+	StatusFn        func(ctx context.Context) (string, error)
+	PnlFn           func(ctx context.Context) (string, error)
+	PositionsFn     func(ctx context.Context) (string, error)
+	PositionFn      func(ctx context.Context, idOrAddr string) (string, error)
+	HealthFn        func(ctx context.Context) (string, error)
+	ForceCloseFn    func(ctx context.Context, idOrAddr, issuer string) (string, error)
+	EnableTradingFn func(ctx context.Context, issuer string) (string, error)
+	KillFn          func(ctx context.Context) error
+	ResumeFn        func(ctx context.Context) error
+	VersionFn       func(ctx context.Context) (string, error)
+	ModeFn          func(ctx context.Context, mode string) (string, error)
+	PipelineFn      func(ctx context.Context) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -112,16 +127,20 @@ func NewHandler(opts HandlerOptions) *Handler {
 		logger = slog.Default()
 	}
 	return &Handler{
-		statusFn:       opts.StatusFn,
-		pnlFn:          opts.PnlFn,
-		positionsFn:    opts.PositionsFn,
-		killFn:         opts.KillFn,
-		resumeFn:       opts.ResumeFn,
-		versionFn:      opts.VersionFn,
-		modeFn:         opts.ModeFn,
-		pipelineFn:     opts.PipelineFn,
-		allowedUserIDs: allowedSet(opts.AllowedUserIDs),
-		logger:         logger,
+		statusFn:        opts.StatusFn,
+		pnlFn:           opts.PnlFn,
+		positionsFn:     opts.PositionsFn,
+		positionFn:      opts.PositionFn,
+		healthFn:        opts.HealthFn,
+		forceCloseFn:    opts.ForceCloseFn,
+		enableTradingFn: opts.EnableTradingFn,
+		killFn:          opts.KillFn,
+		resumeFn:        opts.ResumeFn,
+		versionFn:       opts.VersionFn,
+		modeFn:          opts.ModeFn,
+		pipelineFn:      opts.PipelineFn,
+		allowedUserIDs:  allowedSet(opts.AllowedUserIDs),
+		logger:          logger,
 	}
 }
 
@@ -198,6 +217,55 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 			return nil, fmt.Errorf("commands: positions: %w", err)
 		}
 		return &CommandResult{Text: text}, nil
+
+	case CmdPosition:
+		if h.positionFn == nil {
+			return &CommandResult{Text: "position: not configured"}, nil
+		}
+		if len(req.Args) == 0 {
+			return &CommandResult{Text: "Usage: /position <position_id|token_address prefix>"}, nil
+		}
+		text, err := h.positionFn(ctx, req.Args[0])
+		if err != nil {
+			return nil, fmt.Errorf("commands: position: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
+	case CmdHealth:
+		if h.healthFn == nil {
+			return &CommandResult{Text: "health: not configured"}, nil
+		}
+		text, err := h.healthFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: health: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
+	case CmdForceClose:
+		if h.forceCloseFn == nil {
+			return &CommandResult{Text: "force_close: not configured", Destructive: true}, nil
+		}
+		if len(req.Args) == 0 {
+			return &CommandResult{
+				Text:        "Usage: /force_close <token_address|position_id prefix>\nAll open positions for that token are closed.",
+				Destructive: true,
+			}, nil
+		}
+		text, err := h.forceCloseFn(ctx, req.Args[0], req.IssuerID)
+		if err != nil {
+			return nil, fmt.Errorf("commands: force_close: %w", err)
+		}
+		return &CommandResult{Text: text, Destructive: true}, nil
+
+	case CmdEnableTrading:
+		if h.enableTradingFn == nil {
+			return &CommandResult{Text: "enable_trading: not configured", Destructive: true}, nil
+		}
+		text, err := h.enableTradingFn(ctx, req.IssuerID)
+		if err != nil {
+			return nil, fmt.Errorf("commands: enable_trading: %w", err)
+		}
+		return &CommandResult{Text: text, Destructive: true}, nil
 
 	case CmdKill:
 		if h.killFn == nil {
@@ -286,17 +354,21 @@ func helpText() string {
 	return "<b>Available Commands</b>\n\n" +
 		"<b>📊 Read-only</b>\n" +
 		"/status — System mode, drawdown, positions, exposure, strategy\n" +
-		"/pnl — 24h realized drawdown and open exposure summary\n" +
-		"/positions — List all open positions with size and entry price\n" +
+		"/pnl — Realized + unrealized PnL, win rate, stuck position count\n" +
+		"/positions — All open positions: full address, age, entry/current/PnL%\n" +
+		"/position &lt;prefix&gt; — Detail view for one position by id or token prefix\n" +
+		"/health — Worker heartbeats, kill switch, halt reason\n" +
 		"/pipeline — Token validation funnel stats and recent tickers\n" +
 		"/version — Active strategy version ID and status\n\n" +
 		"<b>⚙️ Operational</b>\n" +
 		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +
 		"/mode balanced — Switch to BALANCED mode (default)\n" +
-		"/mode explore — Switch to EXPLORATION mode (relaxed thresholds)\n\n" +
+		"/mode explore — Switch to EXPLORATION mode (relaxed thresholds)\n" +
+		"/enable_trading — Clear the safety-net halt after Phase-6 shadow run\n\n" +
 		"<b>🔴 Destructive</b>\n" +
 		"/kill — Activate kill switch (halts all trading immediately)\n" +
-		"/resume — Clear kill switch (resumes trading)\n\n" +
+		"/resume — Clear kill switch (resumes trading)\n" +
+		"/force_close &lt;token_address prefix&gt; — Force-exit all open positions for a token (logged, gated)\n\n" +
 		"<b>ℹ️ Help</b>\n" +
 		"/help — Show this message\n\n" +
 		"<i>Destructive commands require AllowedUserIDs to be configured.</i>"

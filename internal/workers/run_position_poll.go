@@ -87,13 +87,14 @@ func pollOnce(
 			// Use the chain stored on the position for per-market isolation (arch §2.4).
 			price, priceErr := priceClient.GetTokenPrice(ctx, pos.TokenAddress, pos.Chain)
 			if priceErr != nil {
+				// Phase 2 (recovery): do NOT continue here. We still want
+				// PollExit to run so the TIME exit can fire on stale/missing
+				// price feeds. Without this, a transient RPC failure leaves
+				// positions stuck past MaxHoldSeconds.
 				posLog.Warn("position_poll_price_failed", "error", priceErr)
-				continue
+			} else {
+				currentPrice = price
 			}
-			currentPrice = price
-		}
-		if currentPrice == "" {
-			continue
 		}
 
 		// Lazy entry-price initialization: simulated (and some early real)
@@ -101,7 +102,7 @@ func pollOnce(
 		// RealizedEntryPrice is not yet decoded from on-chain logs.  On the
 		// first successful price poll we anchor EntryPrice to the observed
 		// market price so TP/SL/TIME checks can proceed correctly.
-		if pos.EntryPrice == "" {
+		if pos.EntryPrice == "" && currentPrice != "" {
 			posLog.Info("position_entry_price_initialized",
 				"position_id", pos.PositionID,
 				"entry_price", currentPrice,
@@ -110,6 +111,8 @@ func pollOnce(
 			pos.CurrentPrice = currentPrice
 		}
 
+		// Always evaluate exits — PollExit handles missing prices by
+		// running the TIME exit only (Phase 2 recovery contract).
 		updated, exitErr := mod.PollExit(ctx, pos, currentPrice, evaluatedAt)
 		if exitErr != nil {
 			posLog.Warn("position_poll_exit_eval_failed", "error", exitErr)
