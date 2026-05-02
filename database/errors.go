@@ -65,3 +65,7 @@ var ErrDrainTimeout = errors.New("database: drain timeout — pipeline not idle"
 // ErrAlreadyClaimed is returned by ClaimExecution when another worker has
 // already reserved the execution_id.
 var ErrAlreadyClaimed = errors.New("database: execution already claimed by another worker")
+
+// ErrAmbiguous is returned when a prefix lookup matches more than one record
+// (e.g. /position with too-short prefix matching multiple open positions).
+var ErrAmbiguous = errors.New("database: prefix matches multiple records")

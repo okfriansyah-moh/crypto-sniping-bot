@@ -198,7 +198,15 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		// Solana execution path (Phase 7).
 		result = w.processSolanaAlloc(ctx, alloc, now)
 	} else if w.evmClient == nil || w.privKey == "" {
-		result = simulatedExecResult(alloc, now)
+		// EVM execution disabled (no client/key wired). Reject the allocation
+		// instead of producing a phantom "confirmed" simulated result —
+		// otherwise downstream Position Engine opens slots that never close,
+		// permanently starving the pipeline at max_open_positions.
+		w.logger.Info("execution_worker_evm_disabled",
+			"execution_id", alloc.ExecutionID,
+			"reason", "evm_execution_disabled_no_client_or_key",
+		)
+		result = executionDisabledResult(alloc, now, "evm_execution_disabled_no_client_or_key")
 	} else {
 		// Circuit-breaker pre-check: refuse to attempt execution if the RPC
 		// endpoint has recorded too many consecutive failures.
@@ -297,16 +305,20 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 }
 
 // processSolanaAlloc delegates to the Solana execution path.
-// If no SolanaExecutor is configured, falls back to simulated result.
+// If no SolanaExecutor is configured the allocation is REJECTED — never
+// silently "simulated" as confirmed, since a phantom confirmed result causes
+// the Position Engine to open slots with empty entry_price that never close,
+// permanently starving the pipeline at max_open_positions (see log-reviewer
+// finding F-1, 2026-05-02).
 // On real execution the submitted signature is persisted via InsertSolanaSignature
 // so the solana_signatures table is the idempotency and observability record.
 func (w *ExecutionWorker) processSolanaAlloc(ctx context.Context, alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {
 	if w.solanaExec == nil {
-		w.logger.Info("execution_worker_solana_simulated",
+		w.logger.Info("execution_worker_solana_disabled",
 			"execution_id", alloc.ExecutionID,
 			"reason", "no_solana_executor_configured",
 		)
-		return simulatedExecResult(alloc, now)
+		return executionDisabledResult(alloc, now, "solana_execution_disabled_no_wallet")
 	}
 	result, err := w.solanaExec.Execute(ctx, alloc, "", "")
 	if err != nil {
@@ -367,6 +379,10 @@ func (w *ExecutionWorker) processSolanaAlloc(ctx context.Context, alloc contract
 	return result
 }
 
+// simulatedExecResult is retained for any future legitimate paper-trading
+// mode that produces a fully-formed synthetic fill (with realistic
+// RealizedEntryPrice). It is NOT used for the execution-disabled fallback —
+// see executionDisabledResult.
 func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {
 	eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-sim:%s", alloc.EventID))
 	return contracts.ExecutionResultDTO{
@@ -386,6 +402,41 @@ func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.Ex
 		MempoolRoute:  "public",
 		WalletAddress: alloc.WalletAddress,
 		CompletedAt:   now,
+	}
+}
+
+// executionDisabledResult produces a REJECTED ExecutionResultDTO for use when
+// no real executor is wired (no EVM client, no Solana keypair). This MUST
+// return Success=false so that:
+//
+//  1. The Position Engine creates a Status="failed" snapshot which is NOT
+//     counted in GetOpenPositions (status='open' filter), so the slot is
+//     not occupied and selection keeps flowing.
+//  2. Operators see a clear rejection reason in logs instead of phantom
+//     "confirmed" trades that never close.
+//
+// The reason argument should be a short, machine-readable code
+// (e.g. "solana_execution_disabled_no_wallet").
+func executionDisabledResult(alloc contracts.AllocationDTO, now string, reason string) contracts.ExecutionResultDTO {
+	eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-disabled:%s", alloc.EventID))
+	return contracts.ExecutionResultDTO{
+		EventID:       eventID,
+		TraceID:       alloc.TraceID,
+		CorrelationID: alloc.CorrelationID,
+		CausationID:   alloc.EventID,
+		VersionID:     alloc.VersionID,
+
+		TokenLifecycleID: alloc.TokenLifecycleID,
+		ExecutionID:      alloc.ExecutionID,
+		AllocationID:     alloc.EventID,
+
+		Status:          "rejected",
+		Success:         false,
+		RejectionReason: reason,
+		ErrorCode:       "EXECUTION_DISABLED",
+		MempoolRoute:    "public",
+		WalletAddress:   alloc.WalletAddress,
+		CompletedAt:     now,
 	}
 }
 

@@ -247,6 +247,19 @@ type Adapter interface {
 	// GetPosition fetches a single position by ID.
 	GetPosition(ctx context.Context, positionID string) (*contracts.PositionStateDTO, error)
 
+	// GetClosedPositions returns positions that exited within the last
+	// sinceSeconds. The latest snapshot per position_id is returned, ordered
+	// newest-first by exited_at. Used by /pnl for win-rate and realized
+	// PnL summaries. sinceSeconds <= 0 returns the last 7 days.
+	GetClosedPositions(ctx context.Context, sinceSeconds int) ([]contracts.PositionStateDTO, error)
+
+	// FindPositionByPrefix returns the latest snapshot of a position whose
+	// position_id OR token_address starts with the given prefix (case-insensitive).
+	// Returns ErrNotFound if no match. Returns ErrAmbiguous if more than one
+	// open position matches the prefix. Used by /position and /force_close
+	// to accept short user input without forcing operators to copy/paste full IDs.
+	FindPositionByPrefix(ctx context.Context, prefix string) (*contracts.PositionStateDTO, error)
+
 	// ── Strategy Versions ────────────────────────────────────────────────────
 
 	// CreateStrategyVersion persists an immutable strategy version snapshot.

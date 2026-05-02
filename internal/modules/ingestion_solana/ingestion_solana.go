@@ -85,6 +85,12 @@ type Module struct {
 	logger    *slog.Logger
 	client    SolanaRPCClient // injected via WithClient; nil = noop
 
+	// solUsdSource is the optional Phase-3 live SOL/USD price provider.
+	// When set, NormalizePumpFunCreateFromLogs is fed the live (or
+	// last-good) Pyth price; when nil or when the provider returns an
+	// error, normalization falls back to cfg.SolEstimatedPriceUsd.
+	solUsdSource SolUsdSource
+
 	mu     sync.Mutex
 	stopFn context.CancelFunc
 
@@ -92,6 +98,14 @@ type Module struct {
 	// are suppressed after receiving an RPC -32003 rate-limit error.
 	// Zero means no active backoff.
 	rateLimitUntil atomic.Int64
+}
+
+// SolUsdSource is the minimal interface the ingestion module consumes from
+// the Phase-3 price oracle.  Implementations MUST return ok=false (rather
+// than fabricating a number) when no usable quote is available, so the
+// caller can fall back to the static config estimate without confusion.
+type SolUsdSource interface {
+	SolUsd(ctx context.Context) (price float64, ok bool)
 }
 
 // New creates a Module ready to Start.
@@ -111,6 +125,26 @@ func New(cfg config.SolanaConfig, versionID string, emit EventEmitter, logger *s
 func (m *Module) WithClient(c SolanaRPCClient) *Module {
 	m.client = c
 	return m
+}
+
+// WithSolUsdSource injects the Phase-3 live SOL/USD price provider.
+// Call sites that pass nil (or never call this) get the legacy behaviour:
+// LiquidityUsd derived from cfg.SolEstimatedPriceUsd.
+func (m *Module) WithSolUsdSource(s SolUsdSource) *Module {
+	m.solUsdSource = s
+	return m
+}
+
+// resolveSolPriceUsd returns the SOL/USD price to use for the next
+// normalization. It prefers the live provider, falls back to the static
+// config value when the provider is absent or returns ok=false.
+func (m *Module) resolveSolPriceUsd(ctx context.Context) float64 {
+	if m.solUsdSource != nil {
+		if price, ok := m.solUsdSource.SolUsd(ctx); ok && price > 0 {
+			return price
+		}
+	}
+	return m.cfg.SolEstimatedPriceUsd
 }
 
 // Start begins the ingestion loop for all configured programs.
@@ -293,6 +327,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				"events_emitted", emitted.Load(),
 				"events_emitted_from_logs", emittedFromLogs.Load(),
 				"path", pathLabel(logPath),
+				"version_id", m.versionID,
 			)
 
 		case notif, ok := <-notifs:
@@ -379,7 +414,7 @@ func (m *Module) handlePumpfunFromLogs(
 		return
 	}
 	dto := NormalizePumpFunCreateFromLogs(notif.Signature, notif.Slot, event, m.versionID, nowUTC(),
-		m.cfg.PumpfunVirtualSolLamports, m.cfg.SolEstimatedPriceUsd)
+		m.cfg.PumpfunVirtualSolLamports, m.resolveSolPriceUsd(ctx))
 	if dto == nil {
 		return
 	}
@@ -395,6 +430,8 @@ func (m *Module) handlePumpfunFromLogs(
 	emittedFromLogs.Add(1)
 	m.logger.Info("solana_ingestion_emitted",
 		"event_id", dto.EventID,
+		"trace_id", dto.TraceID,
+		"version_id", dto.VersionID,
 		"market", dto.Market,
 		"token", dto.TokenAddress,
 		"symbol", dto.Symbol,
@@ -535,6 +572,8 @@ func (m *Module) processNotification(
 		emitted.Add(1)
 		m.logger.Info("solana_ingestion_emitted",
 			"event_id", dto.EventID,
+			"trace_id", dto.TraceID,
+			"version_id", dto.VersionID,
 			"market", dto.Market,
 			"token", dto.TokenAddress,
 			"symbol", dto.Symbol,

@@ -107,6 +107,20 @@ type SolanaConfig struct {
 	// = PumpfunVirtualSolLamports / 1e9 × SolEstimatedPriceUsd.
 	SolEstimatedPriceUsd float64 `yaml:"sol_estimated_price_usd"`
 
+	// PythSolUsdAccount is the on-chain Pyth price account for SOL/USD.
+	// Mainnet: H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG.
+	// Empty disables the live price feed and forces the static
+	// SolEstimatedPriceUsd fallback. Phase 3 (recovery).
+	PythSolUsdAccount string `yaml:"pyth_sol_usd_account"`
+	// PythCacheTTLSeconds is the cache freshness window for Pyth quotes.
+	// Default 5s when zero. Higher values reduce RPC load at the cost of
+	// staler liquidity estimates.
+	PythCacheTTLSeconds int `yaml:"pyth_cache_ttl_seconds"`
+	// PythStaleAfterSeconds is the grace window during which a cached
+	// quote is still served (with Stale=true) when the RPC is failing.
+	// Default 60s when zero.
+	PythStaleAfterSeconds int `yaml:"pyth_stale_after_seconds"`
+
 	// Phase 11 (Reference-Repo Improvements R2 — INGEST) — hybrid
 	// transport. Mode "rpc" (default, legacy) uses the existing
 	// websocket+RPC stack. Mode "grpc" prefers a Yellowstone/Geyser

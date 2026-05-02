@@ -69,27 +69,32 @@ func NormalizePumpFunCreate(tx *TransactionResult, instr InstructionData, versio
 	const wrappedSOL = "So11111111111111111111111111111111111111112"
 
 	dto := &contracts.MarketDataDTO{
-		EventID:           solanaEventID(tx.Signature, instr.Index),
-		TraceID:           solanaEventID(tx.Signature, instr.Index),
-		CorrelationID:     solanaEventID(tx.Signature, instr.Index),
-		CausationID:       "", // Layer 0 root
-		VersionID:         versionID,
-		Chain:             "solana",
-		Market:            "solana-pumpfun",
-		BlockNumber:       tx.Slot,
-		BlockHash:         tx.RecentBlockhash,
-		TxHash:            tx.Signature,
-		LogIndex:          uint32(instr.Index),
-		EventTopic:        "PumpFunCreate",
-		PoolAddress:       bondingCurve,
-		TokenAddress:      mint,
-		BaseAddress:       wrappedSOL,
-		Token0Address:     mint,
-		Token1Address:     wrappedSOL,
-		Amount0Raw:        "0",
-		Amount1Raw:        "0",
-		ReserveBaseRaw:    "0",
-		ReserveTokenRaw:   "0",
+		EventID:         solanaEventID(tx.Signature, instr.Index),
+		TraceID:         solanaEventID(tx.Signature, instr.Index),
+		CorrelationID:   solanaEventID(tx.Signature, instr.Index),
+		CausationID:     "", // Layer 0 root
+		VersionID:       versionID,
+		Chain:           "solana",
+		Market:          "solana-pumpfun",
+		BlockNumber:     tx.Slot,
+		BlockHash:       tx.RecentBlockhash,
+		TxHash:          tx.Signature,
+		LogIndex:        uint32(instr.Index),
+		EventTopic:      "PumpFunCreate",
+		PoolAddress:     bondingCurve,
+		TokenAddress:    mint,
+		BaseAddress:     wrappedSOL,
+		Token0Address:   mint,
+		Token1Address:   wrappedSOL,
+		Amount0Raw:      "0",
+		Amount1Raw:      "0",
+		ReserveBaseRaw:  "0",
+		ReserveTokenRaw: "0",
+		// Phase 0: pump.fun pre-graduation has no transfer tax — genuine signal.
+		// Wash/Holder/Lp left as zero-value (Known=false) until Phase 4 enrichment.
+		TaxKnown:          true,
+		BuyTaxBps:         0,
+		SellTaxBps:        0,
 		BlockTimestamp:    blockTimestamp(tx.BlockTime),
 		IngestedAt:        blockTimestamp(tx.BlockTime),
 		RpcEndpoint:       "",
@@ -214,12 +219,13 @@ func NormalizePumpFunCreateFromLogs(
 	// model and feature-extraction layer work from a real liquidity estimate
 	// rather than cold-starting at zero.
 	//
-	// WashStatsKnown=true + TxCount1m=0 is semantically accurate: the token
-	// was just created, so there genuinely are 0 transactions in the 1-minute
-	// window. Marking it "known" (vs "absent") lets the feature module compute
-	// a proper non-zero confidence (base=0.4) instead of a cold-start floor
-	// (base=0.0), which in turn keeps minFeatureConfidence above the
-	// validation min_model_confidence threshold.
+	// Phase 0 (safety net, log-reviewer 2026-05-02): we no longer claim
+	// Wash/Holder stats are "known" at create time. Those flags previously
+	// coupled a Layer-2 confidence-floor concern into Layer-1 risk semantics
+	// and were the root cause of the constant risk_score=0.225 stub.
+	// They are flipped to false until Phase 4 enrichment populates them
+	// with real signal. Tax IS truly known for pump.fun pre-graduation
+	// (no transfer tax exists), so TaxKnown=true with zero rates is genuine.
 	reserveBaseRaw := "0"
 	liquidityUsd := 0.0
 	lpStatsKnown := false
@@ -253,17 +259,19 @@ func NormalizePumpFunCreateFromLogs(
 		ReserveTokenRaw: "1000000000000000", // pump.fun: 1B tokens × 1e6 decimals = 1e15 raw
 		LiquidityUsd:    liquidityUsd,
 		LpStatsKnown:    lpStatsKnown,
-		WashStatsKnown:  true, // known: brand-new token has 0 txns in 1m window
+		// Phase 0: untruthful claims removed. Real values land in Phase 4.
+		WashStatsKnown:  false,
 		TxCount1m:       0,
 		UniqueWallets1m: 0,
-		// At BCP=0 the creator holds 100% of supply — accurately reflects
-		// pre-distribution state.  Marking known=true lets the features
-		// module compute a real confidence (0.4+) instead of the 0.1 cold-
-		// start floor, which keeps minFeatureConfidence above the 0.40
-		// min_model_confidence gate and unlocks the real probability model.
-		HolderDistKnown: true,
-		HolderCount:     1,
-		Top5HolderPct:   1.0,
+		HolderDistKnown: false,
+		HolderCount:     0,
+		Top5HolderPct:   0,
+		// Tax IS genuinely known for pump.fun pre-graduation: there is no
+		// transfer tax on the bonding curve. Setting TaxKnown=true with
+		// zero rates removes the dq_unknown_tax flag without lying.
+		TaxKnown:   true,
+		BuyTaxBps:  0,
+		SellTaxBps: 0,
 		// PoolAgeSeconds=1 (non-zero) marks the age as "known: brand-new"
 		// so deriveTokenAgeConfidence returns 0.95 instead of 0.1.
 		PoolAgeSeconds:    1,

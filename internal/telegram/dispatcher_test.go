@@ -156,6 +156,12 @@ func (a *dispatcherStubAdapter) GetOpenPositions(_ context.Context) ([]contracts
 func (a *dispatcherStubAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (a *dispatcherStubAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
+	return nil, nil
+}
+func (a *dispatcherStubAdapter) FindPositionByPrefix(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotFound
+}
 func (a *dispatcherStubAdapter) CreateStrategyVersion(_ context.Context, _ database.StrategyVersion) error {
 	return nil
 }

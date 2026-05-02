@@ -464,6 +464,83 @@ func (c *SolanaClient) GetSlot(ctx context.Context, commitment string) (uint64, 
 	return slot, nil
 }
 
+// AccountInfo is the minimal subset of getAccountInfo response we need for
+// Pyth price-account decoding (Phase 3 — price-feed-integration).
+//
+// Solana's getAccountInfo returns Data as a 2-element array [base64Data, "base64"]
+// when encoding="base64" is requested; this struct preserves that wire shape.
+type AccountInfo struct {
+	Data       []string `json:"data"`     // ["<base64>","base64"]
+	Owner      string   `json:"owner"`    // program owner (e.g. Pyth oracle program)
+	Lamports   uint64   `json:"lamports"` // 0 means account does not exist
+	Slot       uint64   `json:"-"`        // populated from context.slot wrapper
+	Executable bool     `json:"executable"`
+}
+
+// GetAccountInfo fetches an account's raw data + owner at the given commitment.
+// Used by the Phase 3 Pyth SOL/USD price feed and (later) Phase 4 enrichment
+// for AMM reserve decoding. Returns ("", nil) when the account does not exist.
+func (c *SolanaClient) GetAccountInfo(ctx context.Context, pubkey, commitment string) (*AccountInfo, error) {
+	if commitment == "" {
+		commitment = "confirmed"
+	}
+	params := []interface{}{
+		pubkey,
+		map[string]interface{}{
+			"commitment": commitment,
+			"encoding":   "base64",
+		},
+	}
+
+	var result struct {
+		Context struct {
+			Slot uint64 `json:"slot"`
+		} `json:"context"`
+		Value *AccountInfo `json:"value"`
+	}
+	if err := c.httpRPC(ctx, "getAccountInfo", params, &result); err != nil {
+		return nil, err
+	}
+	if result.Value == nil {
+		return nil, nil
+	}
+	result.Value.Slot = result.Context.Slot
+	return result.Value, nil
+}
+
+// TokenLargestAccount is one entry returned by getTokenLargestAccounts.
+// Amount is the raw token amount (uint64 as string in JSON-RPC).
+type TokenLargestAccount struct {
+	Address  string `json:"address"`
+	Amount   string `json:"amount"`
+	Decimals int    `json:"decimals"`
+}
+
+// GetTokenLargestAccounts returns up to 20 largest token-account holders
+// for an SPL mint, ordered by amount descending. Used by enrichment
+// probes to compute holder concentration. Empty slice when the mint
+// has no holders or does not exist.
+func (c *SolanaClient) GetTokenLargestAccounts(ctx context.Context, mint, commitment string) ([]TokenLargestAccount, error) {
+	if commitment == "" {
+		commitment = "confirmed"
+	}
+	params := []interface{}{
+		mint,
+		map[string]interface{}{"commitment": commitment},
+	}
+
+	var result struct {
+		Context struct {
+			Slot uint64 `json:"slot"`
+		} `json:"context"`
+		Value []TokenLargestAccount `json:"value"`
+	}
+	if err := c.httpRPC(ctx, "getTokenLargestAccounts", params, &result); err != nil {
+		return nil, err
+	}
+	return result.Value, nil
+}
+
 // GetSignaturesForAddress returns up to limit signatures for programID within
 // the given slot range. Results are newest-first per the Solana API contract.
 func (c *SolanaClient) GetSignaturesForAddress(ctx context.Context, programID string, fromSlot, toSlot uint64, limit int) ([]string, error) {

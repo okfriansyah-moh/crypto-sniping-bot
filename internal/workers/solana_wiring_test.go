@@ -34,7 +34,7 @@ func TestRunIngestionSolana_AdapterError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := RunIngestionSolana(ctx, adapter, cfg, nil, nil)
+	err := RunIngestionSolana(ctx, adapter, cfg, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error from failed GetActiveStrategyVersion, got nil")
 	}
@@ -52,7 +52,7 @@ func TestRunIngestionSolana_NoProgramsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := RunIngestionSolana(ctx, adapter, cfg, nil, nil)
+	err := RunIngestionSolana(ctx, adapter, cfg, nil, nil, nil)
 	// ctx.Err() is returned; treat as nil-equivalent (graceful shutdown).
 	if err != nil && err != ctx.Err() {
 		t.Fatalf("unexpected error: %v", err)
@@ -75,7 +75,7 @@ func TestRunIngestionSolana_NilClient_Noop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := RunIngestionSolana(ctx, adapter, cfg, nil, nil)
+	err := RunIngestionSolana(ctx, adapter, cfg, nil, nil, nil)
 	// nil client → module logs "solana_ingestion_no_client_noop" and waits on ctx.Done().
 	if err != nil && err != ctx.Err() {
 		t.Fatalf("unexpected error with nil client: %v", err)
@@ -140,9 +140,13 @@ func makeSolanaAllocationEvent(lifecycleID string) *database.Event {
 	}
 }
 
-// TestExecutionWorker_SolanaChain_NilExecutor_Simulated verifies that a
-// Solana allocation with no executor wired produces a simulated result.
-func TestExecutionWorker_SolanaChain_NilExecutor_Simulated(t *testing.T) {
+// TestExecutionWorker_SolanaChain_NilExecutor_Rejected verifies that a
+// Solana allocation with no executor wired produces a REJECTED result
+// (not a phantom "simulated/confirmed" result). This guard exists because
+// a phantom confirmed result causes the Position Engine to open a slot
+// with empty entry_price that never closes — permanently starving the
+// pipeline at max_open_positions (log-reviewer F-1, 2026-05-02).
+func TestExecutionWorker_SolanaChain_NilExecutor_Rejected(t *testing.T) {
 	lcID := "lc-sol-sim-1"
 	adapter := &stubAdapter{lifecycleResult: defaultLC(lcID)}
 
@@ -174,11 +178,17 @@ func TestExecutionWorker_SolanaChain_NilExecutor_Simulated(t *testing.T) {
 	if err := json.Unmarshal(out.Payload, &result); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}
-	if !result.Simulated {
-		t.Error("expected Simulated=true when no executor is configured")
+	if result.Success {
+		t.Error("expected Success=false when no executor is configured (rejection, not simulation)")
 	}
-	if !result.Success {
-		t.Error("expected Success=true for simulated result")
+	if result.Status != "rejected" {
+		t.Errorf("expected Status=rejected, got %q", result.Status)
+	}
+	if result.RejectionReason == "" {
+		t.Error("expected non-empty RejectionReason for execution-disabled result")
+	}
+	if result.ErrorCode != "EXECUTION_DISABLED" {
+		t.Errorf("expected ErrorCode=EXECUTION_DISABLED, got %q", result.ErrorCode)
 	}
 }
 

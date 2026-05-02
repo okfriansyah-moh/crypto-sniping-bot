@@ -218,6 +218,12 @@ func (m *mockAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionS
 func (m *mockAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotImplemented
 }
+func (m *mockAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotImplemented
+}
+func (m *mockAdapter) FindPositionByPrefix(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotFound
+}
 
 func (m *mockAdapter) MarkEventExpired(_ context.Context, _ string, _ string) error {
 	return database.ErrNotImplemented

@@ -173,6 +173,12 @@ func (s *stubAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionS
 func (s *stubAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, nil
 }
+func (s *stubAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
+	return nil, nil
+}
+func (s *stubAdapter) FindPositionByPrefix(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
+	return nil, database.ErrNotFound
+}
 func (s *stubAdapter) CreateStrategyVersion(_ context.Context, _ database.StrategyVersion) error {
 	return nil
 }
