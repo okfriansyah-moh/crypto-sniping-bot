@@ -317,53 +317,95 @@ func buildHealthFn(db database.Adapter) func(ctx context.Context) (string, error
 func buildForceCloseFn(db database.Adapter, logger *slog.Logger) func(ctx context.Context, idOrAddr, issuer string) (string, error) {
 	return func(ctx context.Context, idOrAddr, issuer string) (string, error) {
 		idOrAddr = strings.TrimSpace(idOrAddr)
-		p, err := db.FindPositionByPrefix(ctx, idOrAddr)
-		if errors.Is(err, database.ErrAmbiguous) {
-			return fmt.Sprintf("⚠️ Prefix <code>%s</code> matches multiple positions — give more characters.", idOrAddr), nil
-		}
-		if errors.Is(err, database.ErrNotFound) {
-			return fmt.Sprintf("No open position matches prefix <code>%s</code>.", idOrAddr), nil
-		}
+		prefix := strings.ToLower(idOrAddr)
+
+		allOpen, err := db.GetOpenPositions(ctx)
 		if err != nil {
-			return "", fmt.Errorf("find position: %w", err)
+			return "", fmt.Errorf("get open positions: %w", err)
 		}
 
-		// Emit a final PositionStateDTO snapshot with status=exited and
-		// reason=MANUAL. The position monitoring loop and learning engine
-		// will treat this as an operator-driven close. Exit price and PnL
-		// stay at their last polled values — best truth available without
-		// blocking on a fresh on-chain quote.
+		// Phase 1: match by token_address prefix.
+		var matching []contracts.PositionStateDTO
+		for _, p := range allOpen {
+			if strings.HasPrefix(strings.ToLower(p.TokenAddress), prefix) {
+				matching = append(matching, p)
+			}
+		}
+
+		// Phase 2: if no token match, fall back to position_id prefix.
+		if len(matching) == 0 {
+			for _, p := range allOpen {
+				if strings.HasPrefix(strings.ToLower(p.PositionID), prefix) {
+					matching = append(matching, p)
+				}
+			}
+		}
+
+		if len(matching) == 0 {
+			return fmt.Sprintf("No open position matches <code>%s</code>.", idOrAddr), nil
+		}
+
+		// Reject if the prefix is so short it spans multiple different tokens.
+		distinctTokens := make(map[string]struct{}, len(matching))
+		for _, p := range matching {
+			distinctTokens[strings.ToLower(p.TokenAddress)] = struct{}{}
+		}
+		if len(distinctTokens) > 1 {
+			return fmt.Sprintf(
+				"⚠️ Prefix <code>%s</code> matches %d different tokens — give more characters.",
+				idOrAddr, len(distinctTokens),
+			), nil
+		}
+
+		// Close all matching positions (same token may have multiple open slots).
 		now := time.Now().UTC().Format(time.RFC3339)
-		exit := *p
-		exit.Status = "exited"
-		exit.ExitReason = "MANUAL"
-		exit.ExitedAt = now
-		exit.SnapshotAt = now
-		// Re-derive event_id so the insert is idempotent and trace fields
-		// chain off the previous snapshot via causation_id.
-		seed := fmt.Sprintf("force_close|%s|%s|%s", p.PositionID, issuer, now)
-		sum := sha256.Sum256([]byte(seed))
-		exit.EventID = hex.EncodeToString(sum[:])[:16]
-		exit.CausationID = p.EventID
-		if exit.ExitPrice == "" {
-			exit.ExitPrice = exit.CurrentPrice
+		var closedIDs []string
+		for _, p := range matching {
+			// Emit a final PositionStateDTO snapshot with status=exited and
+			// reason=MANUAL. The position monitoring loop and learning engine
+			// treat this as an operator-driven close. Exit price stays at
+			// last polled value — best truth available without a live quote.
+			exit := p
+			exit.Status = "exited"
+			exit.ExitReason = "MANUAL"
+			exit.ExitedAt = now
+			exit.SnapshotAt = now
+			// Re-derive event_id: idempotent + chains causation off prior snapshot.
+			seed := fmt.Sprintf("force_close|%s|%s|%s", p.PositionID, issuer, now)
+			sum := sha256.Sum256([]byte(seed))
+			exit.EventID = hex.EncodeToString(sum[:])[:16]
+			exit.CausationID = p.EventID
+			if exit.ExitPrice == "" {
+				exit.ExitPrice = exit.CurrentPrice
+			}
+			if err := db.InsertPositionState(ctx, exit); err != nil {
+				return "", fmt.Errorf("insert force-close state for %s: %w", p.PositionID, err)
+			}
+			logger.Warn("telegram_force_close",
+				"position_id", p.PositionID,
+				"token_address", p.TokenAddress,
+				"chain", p.Chain,
+				"issuer", issuer,
+				"reason", "MANUAL",
+			)
+			closedIDs = append(closedIDs, p.PositionID)
 		}
 
-		if err := db.InsertPositionState(ctx, exit); err != nil {
-			return "", fmt.Errorf("insert force-close state: %w", err)
+		tokenAddr := matching[0].TokenAddress
+		chain := matching[0].Chain
+		if len(closedIDs) == 1 {
+			return fmt.Sprintf(
+				"✅ Force-close emitted for <code>%s</code> [%s]\n"+
+					"Position <code>%s</code> marked MANUAL exited.\n"+
+					"<i>Note: this records the exit; on-chain unwind (if needed) is the operator's responsibility.</i>",
+				tokenAddr, chain, closedIDs[0],
+			), nil
 		}
-		logger.Warn("telegram_force_close",
-			"position_id", p.PositionID,
-			"token_address", p.TokenAddress,
-			"chain", p.Chain,
-			"issuer", issuer,
-			"reason", "MANUAL",
-		)
 		return fmt.Sprintf(
-			"✅ Force-close emitted for <code>%s</code> [%s]\n"+
-				"Position <code>%s</code> marked MANUAL exited.\n"+
-				"<i>Note: this records the exit; on-chain unwind (if needed) is the operator's responsibility.</i>",
-			p.TokenAddress, p.Chain, p.PositionID,
+			"✅ Force-close emitted for <code>%s</code> [%s] — <b>%d positions</b> closed.\n"+
+				"Position IDs: <code>%s</code>\n"+
+				"<i>Note: this records the exits; on-chain unwind (if needed) is the operator's responsibility.</i>",
+			tokenAddr, chain, len(closedIDs), strings.Join(closedIDs, ", "),
 		), nil
 	}
 }

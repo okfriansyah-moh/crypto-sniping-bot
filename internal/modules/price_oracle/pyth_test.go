@@ -1,5 +1,4 @@
 package price_oracle
-package price_oracle
 
 import (
 	"context"

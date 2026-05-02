@@ -1,4 +1,3 @@
-package price_oracle
 // Package price_oracle implements Layer-0/Layer-2 helper price feeds.
 //
 // Phase 3 (recovery): a Pyth-based SOL/USD live price feed.  The decoder

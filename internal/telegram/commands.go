@@ -247,7 +247,7 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 		}
 		if len(req.Args) == 0 {
 			return &CommandResult{
-				Text:        "Usage: /force_close <position_id|token_address prefix>",
+				Text:        "Usage: /force_close <token_address|position_id prefix>\nAll open positions for that token are closed.",
 				Destructive: true,
 			}, nil
 		}
@@ -368,7 +368,7 @@ func helpText() string {
 		"<b>🔴 Destructive</b>\n" +
 		"/kill — Activate kill switch (halts all trading immediately)\n" +
 		"/resume — Clear kill switch (resumes trading)\n" +
-		"/force_close &lt;prefix&gt; — Force-exit a stuck position (logged, gated)\n\n" +
+		"/force_close &lt;token_address prefix&gt; — Force-exit all open positions for a token (logged, gated)\n\n" +
 		"<b>ℹ️ Help</b>\n" +
 		"/help — Show this message\n\n" +
 		"<i>Destructive commands require AllowedUserIDs to be configured.</i>"
