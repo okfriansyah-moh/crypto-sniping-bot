@@ -60,7 +60,8 @@ func validationRejectReason(reason string) string {
 var urlKeyPathRe = regexp.MustCompile(`(?i)(/v\d+/)([a-zA-Z0-9_\-]{20,})`)
 
 // urlKeyQueryRe matches API keys embedded as query parameters.
-var urlKeyQueryRe = regexp.MustCompile(`(?i)([?&](?:token|key|apikey|api_key)=)([a-zA-Z0-9_\-]+)`)
+// Covers ?token=KEY &key=KEY &apikey=KEY &api_key=KEY &api-key=KEY (Helius)
+var urlKeyQueryRe = regexp.MustCompile(`(?i)([?&](?:token|key|apikey|api[_\-]key)=)([a-zA-Z0-9_\-]+)`)
 
 // urlKeyTrailingRe matches QuickNode-style trailing-segment keys.
 var urlKeyTrailingRe = regexp.MustCompile(`(?i)(://[^/]+/)([a-zA-Z0-9]{32,})(/|$)`)

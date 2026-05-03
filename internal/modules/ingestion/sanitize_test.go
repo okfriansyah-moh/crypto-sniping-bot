@@ -34,6 +34,11 @@ func TestSanitizeEndpoint(t *testing.T) {
 			want:  "https://rpc.example.com/eth?apikey=[REDACTED]",
 		},
 		{
+			name:  "helius_api_key_hyphen",
+			input: "https://mainnet.helius-rpc.com/?api-key=ca537ca0-122c-4e5e-86f6-3449c3ed76cf",
+			want:  "https://mainnet.helius-rpc.com/?api-key=[REDACTED]",
+		},
+		{
 			name:  "no_key_passthrough",
 			input: "http://localhost:8545",
 			want:  "http://localhost:8545",
