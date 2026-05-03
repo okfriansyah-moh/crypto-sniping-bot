@@ -149,6 +149,7 @@ declare -A PHASE_NAMES=()
 declare -A PHASE_COMPLEXITY=()
 declare -A PHASE_TO_GROUP=()
 declare -A PHASE_SKILLS=()
+declare -A PHASE_PLAN_DOC=()    # Optional: path to a PLAN.md spec file (plan_doc field in phases.yaml)
 
 load_phase_config() {
     # Load phase metadata from config/phases.yaml using Python
@@ -218,10 +219,12 @@ for num, data in sorted(phases.items(), key=lambda x: int(x[0])):
     complexity = data.get('complexity', '5')
     group = data.get('group', 'A')
     skills = data.get('skills', 'dto, modularity')
+    plan_doc = data.get('plan_doc', '')
     print(f'PHASE_NAMES[{num}]="{name}"')
     print(f'PHASE_COMPLEXITY[{num}]={complexity}')
     print(f'PHASE_TO_GROUP[{num}]="{group}"')
     print(f'PHASE_SKILLS[{num}]="{skills}"')
+    print(f'PHASE_PLAN_DOC[{num}]="{plan_doc}"')
 PYEOF
 )"
 }
@@ -1295,6 +1298,7 @@ generate_phase_task() {
 2. Read `.github/copilot-instructions.md` for hard architectural constraints.
 3. **DO NOT read full documentation** unless skills are insufficient. If you do read docs, explain WHY skills were not enough.
 4. Only consult `docs/implementation_roadmap.md` for specific phase details NOT covered by skills.
+5. **If a phase has a `PLAN.md` spec file listed below, that file is the PRIMARY source of truth for that phase — it supersedes `docs/implementation_roadmap.md` for all implementation details. Read it BEFORE writing any code.**
 5. Implement each phase below sequentially, committing after each one.
 6. Run tests after each phase.
 
@@ -1327,9 +1331,33 @@ HEADER
     for phase in "${phases[@]}"; do
         local name="${PHASE_NAMES[$phase]:-phase-${phase}}"
         local skills="${PHASE_SKILLS[$phase]:-${CORE_SKILLS}}"
+        local plan_doc="${PHASE_PLAN_DOC[$phase]:-}"
+
+        # Build the plan-doc block — injected only when plan_doc is set for this phase
+        local plan_doc_block=""
+        if [[ -n "${plan_doc}" ]]; then
+            plan_doc_block="
+## ⚠ Phase ${phase} — Mandatory Spec File (SOURCE OF TRUTH)
+
+> **Read \`${plan_doc}\` BEFORE writing any code for this phase.**
+>
+> This phase has a dedicated implementation spec that supersedes
+> \`docs/implementation_roadmap.md\` for ALL implementation details:
+> file layout, DTO flow, SQL, task dependency order, exit criteria,
+> and architectural compliance checklist.
+>
+> Steps:
+> 1. Open \`${plan_doc}\` and read it completely.
+> 2. Implement the tasks in the dependency order specified in § 7 of that doc.
+> 3. Verify each task's exit criteria before moving to the next task.
+> 4. Use \`docs/implementation_roadmap.md\` only for context not covered by the spec.
+
+---
+"
+        fi
 
         cat >> "${output_path}" <<EOF
-## Phase ${phase} — ${name}
+${plan_doc_block}## Phase ${phase} — ${name}
 
 **Required skills:** ${skills}
 
@@ -1340,7 +1368,8 @@ HEADER
 - Phase-specific patterns → see required skills above
 - DO NOT read full docs unless skills are insufficient — explain why if you do
 
-**Only if skills are insufficient**, consult \`docs/implementation_roadmap.md\` → Phase ${phase} section.
+**Primary spec (if set above):** \`${plan_doc:-docs/implementation_roadmap.md}\` → Phase ${phase} section.
+**Fallback if no spec:** consult \`docs/implementation_roadmap.md\` → Phase ${phase} section.
 
 **Constraints:**
 - All DTOs must be immutable types in \`contracts/\`
