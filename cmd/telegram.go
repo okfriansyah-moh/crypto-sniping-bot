@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"os"
 	"strconv"
@@ -247,10 +248,10 @@ func buildPositionFn(db database.Adapter) func(ctx context.Context, idOrAddr str
 		}
 		p, err := db.FindPositionByPrefix(ctx, idOrAddr)
 		if errors.Is(err, database.ErrAmbiguous) {
-			return fmt.Sprintf("⚠️ Prefix <code>%s</code> matches multiple open positions — give more characters.", idOrAddr), nil
+			return fmt.Sprintf("⚠️ Prefix <code>%s</code> matches multiple open positions — give more characters.", html.EscapeString(idOrAddr)), nil
 		}
 		if errors.Is(err, database.ErrNotFound) {
-			return fmt.Sprintf("No open position matches prefix <code>%s</code>.", idOrAddr), nil
+			return fmt.Sprintf("No open position matches prefix <code>%s</code>.", html.EscapeString(idOrAddr)), nil
 		}
 		if err != nil {
 			return "", fmt.Errorf("find position: %w", err)
@@ -342,7 +343,7 @@ func buildForceCloseFn(db database.Adapter, logger *slog.Logger) func(ctx contex
 		}
 
 		if len(matching) == 0 {
-			return fmt.Sprintf("No open position matches <code>%s</code>.", idOrAddr), nil
+			return fmt.Sprintf("No open position matches <code>%s</code>.", html.EscapeString(idOrAddr)), nil
 		}
 
 		// Reject if the prefix is so short it spans multiple different tokens.
@@ -353,7 +354,7 @@ func buildForceCloseFn(db database.Adapter, logger *slog.Logger) func(ctx contex
 		if len(distinctTokens) > 1 {
 			return fmt.Sprintf(
 				"⚠️ Prefix <code>%s</code> matches %d different tokens — give more characters.",
-				idOrAddr, len(distinctTokens),
+				html.EscapeString(idOrAddr), len(distinctTokens),
 			), nil
 		}
 
