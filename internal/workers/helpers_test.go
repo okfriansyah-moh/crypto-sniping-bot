@@ -764,6 +764,8 @@ func (s *stubAdapter) SaveBaseline(_ context.Context, _, _, _ string, _ []float6
 func (s *stubAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[string][]float64, error) {
 	return map[string]map[string][]float64{}, nil
 }
+
+// Phase 10 rescan layer stub.
 func (s *stubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
-	return nil, nil
+	return []contracts.MarketDataDTO{}, nil
 }
