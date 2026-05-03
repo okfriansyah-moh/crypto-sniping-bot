@@ -573,7 +573,7 @@ type Adapter interface {
 
 // RescanQuery carries the eligibility filter parameters for GetTokensForRescan.
 type RescanQuery struct {
-	Chain             string  // optional; "" = all chains
+	Chain             string // optional; "" = all chains
 	MinAgeSeconds     int
 	MaxAgeSeconds     int
 	MaxHoneypotScore  float64

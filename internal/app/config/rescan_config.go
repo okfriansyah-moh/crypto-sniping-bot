@@ -10,13 +10,13 @@ import "fmt"
 // Disabled by default — operators must set enabled: true in pipeline.yaml.
 // See docs/PLAN.md § Task 1 for full design rationale.
 type RescanConfig struct {
-	Enabled             bool                        `yaml:"enabled"`
-	IntervalSeconds     int                         `yaml:"interval_seconds"`
-	MaxPerBandPerTick   int                         `yaml:"max_per_band_per_tick"`
-	SkipOpenPositions   bool                        `yaml:"skip_open_positions"`
-	Eligibility         RescanEligibility           `yaml:"eligibility"`
-	Bands               []RescanBand                `yaml:"bands"`
-	ModeOverrides       map[string]RescanEligibility `yaml:"mode_overrides"`
+	Enabled           bool                         `yaml:"enabled"`
+	IntervalSeconds   int                          `yaml:"interval_seconds"`
+	MaxPerBandPerTick int                          `yaml:"max_per_band_per_tick"`
+	SkipOpenPositions bool                         `yaml:"skip_open_positions"`
+	Eligibility       RescanEligibility            `yaml:"eligibility"`
+	Bands             []RescanBand                 `yaml:"bands"`
+	ModeOverrides     map[string]RescanEligibility `yaml:"mode_overrides"`
 }
 
 // RescanEligibility defines the DQ sub-score thresholds that a token must
@@ -32,7 +32,7 @@ type RescanEligibility struct {
 // RescanBand defines one age window for rescan eligibility.
 // Bands must be sorted by MinAgeSeconds ascending (validated in Validate).
 type RescanBand struct {
-	Name          string `yaml:"name"`           // "15m", "30m", "45m", "1h"
+	Name          string `yaml:"name"` // "15m", "30m", "45m", "1h"
 	MinAgeSeconds int    `yaml:"min_age_seconds"`
 	MaxAgeSeconds int    `yaml:"max_age_seconds"`
 	Priority      int32  `yaml:"priority"` // event priority; later bands = lower

@@ -11,13 +11,13 @@ import (
 
 // BlockhashCache caches the most recent blockhash for a configurable TTL.
 type BlockhashCache struct {
-	mu          sync.Mutex
-	client      SolanaClient
-	commitment  string
-	ttl         time.Duration
-	hash        string
+	mu            sync.Mutex
+	client        SolanaClient
+	commitment    string
+	ttl           time.Duration
+	hash          string
 	lastValidSlot uint64
-	fetchedAt   time.Time
+	fetchedAt     time.Time
 }
 
 // NewBlockhashCache creates a cache with the given TTL.

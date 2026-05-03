@@ -21,10 +21,10 @@ const (
 // CircuitBreaker tracks consecutive failure counts per endpoint.
 // Thread-safe.
 type CircuitBreaker struct {
-	mu              sync.Mutex
-	endpoints       map[string]*endpointState
+	mu               sync.Mutex
+	endpoints        map[string]*endpointState
 	failureThreshold int
-	cooldown        time.Duration
+	cooldown         time.Duration
 }
 
 type endpointState struct {

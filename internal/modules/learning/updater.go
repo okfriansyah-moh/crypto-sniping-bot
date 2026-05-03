@@ -100,7 +100,6 @@ func (u *Updater) ProposeVersion(
 	return BuildStrategyVersion(params, parentVersionID, family, eval.SampleSize, traceID)
 }
 
-
 func NewVersionID(params paramMap) (string, error) {
 	// Sort keys for determinism.
 	keys := make([]string, 0, len(params))

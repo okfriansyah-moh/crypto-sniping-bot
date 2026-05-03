@@ -17,9 +17,12 @@ import (
 // for the two methods exercised by the alpha aggregator.
 type alphaAggStub struct {
 	stubAdapter
-	mu        sync.Mutex
-	samples   map[string][]database.FillSample
-	upserts   map[string]struct{ alpha, ep, er float64; n int }
+	mu      sync.Mutex
+	samples map[string][]database.FillSample
+	upserts map[string]struct {
+		alpha, ep, er float64
+		n             int
+	}
 	upsertErr error
 }
 
@@ -34,9 +37,15 @@ func (a *alphaAggStub) UpsertSlippageAlpha(_ context.Context, market string, alp
 		return a.upsertErr
 	}
 	if a.upserts == nil {
-		a.upserts = make(map[string]struct{ alpha, ep, er float64; n int })
+		a.upserts = make(map[string]struct {
+			alpha, ep, er float64
+			n             int
+		})
 	}
-	a.upserts[market] = struct{ alpha, ep, er float64; n int }{alpha, ep, er, n}
+	a.upserts[market] = struct {
+		alpha, ep, er float64
+		n             int
+	}{alpha, ep, er, n}
 	return nil
 }
 

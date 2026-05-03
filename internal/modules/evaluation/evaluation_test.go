@@ -18,18 +18,18 @@ func defaultCfg() config.EvaluationConfig {
 
 func exitedPosition(pnlPct float64) contracts.PositionStateDTO {
 	return contracts.PositionStateDTO{
-		EventID:         "pos-evt-1",
-		TraceID:         "trace-1",
-		CorrelationID:   "corr-1",
-		CausationID:     "cause-1",
-		VersionID:       "v1",
-		PositionID:      "pos-1",
-		ExecutionID:     "exec-1",
-		TokenAddress:    "0xTOKEN",
-		Status:          "exited",
-		PnlPct:          pnlPct,
-		ExitReason:      "TP1",
-		ExitedAt:        "2026-01-01T00:00:00Z",
+		EventID:       "pos-evt-1",
+		TraceID:       "trace-1",
+		CorrelationID: "corr-1",
+		CausationID:   "cause-1",
+		VersionID:     "v1",
+		PositionID:    "pos-1",
+		ExecutionID:   "exec-1",
+		TokenAddress:  "0xTOKEN",
+		Status:        "exited",
+		PnlPct:        pnlPct,
+		ExitReason:    "TP1",
+		ExitedAt:      "2026-01-01T00:00:00Z",
 	}
 }
 

@@ -34,12 +34,12 @@ func nopLogger() *slog.Logger {
 // rescanRecorder extends memAdapter for rescan-specific recording.
 type rescanRecorder struct {
 	memAdapter
-	mu              sync.Mutex
-	rows            []contracts.MarketDataDTO
-	insertedDTOs    []contracts.MarketDataDTO
-	insertedEvents  []database.Event
-	activeVersion   *database.StrategyVersion
-	mode            string
+	mu             sync.Mutex
+	rows           []contracts.MarketDataDTO
+	insertedDTOs   []contracts.MarketDataDTO
+	insertedEvents []database.Event
+	activeVersion  *database.StrategyVersion
+	mode           string
 }
 
 func newRescanRecorder(rows []contracts.MarketDataDTO, mode string) *rescanRecorder {

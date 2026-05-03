@@ -85,13 +85,13 @@ func TestExceedsToleranceBps_JustOverBoundary(t *testing.T) {
 
 func TestDLQEntry_DefaultFields(t *testing.T) {
 	e := database.DLQEntry{
-		EventID:   "evt-001",
-		Chain:     "eth",
-		Consumer:  "execution",
-		Reason:    "transient_exceeded",
+		EventID:    "evt-001",
+		Chain:      "eth",
+		Consumer:   "execution",
+		Reason:     "transient_exceeded",
 		RetryCount: 5,
-		TraceID:   "trace-001",
-		VersionID: "ver-001",
+		TraceID:    "trace-001",
+		VersionID:  "ver-001",
 	}
 	if e.EventID != "evt-001" {
 		t.Errorf("EventID mismatch: %s", e.EventID)

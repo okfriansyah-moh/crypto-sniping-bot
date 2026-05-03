@@ -56,13 +56,13 @@ func (p *ABPromoter) ShouldPromote(
 // ShouldRollback returns true when promotedEval.Expectancy has degraded by
 // more than rollbackThreshold relative to baselineEval.Expectancy.
 func ShouldRollback(
-promotedEval contracts.EvaluationDTO,
-baselineEval contracts.EvaluationDTO,
-rollbackThreshold float64,
+	promotedEval contracts.EvaluationDTO,
+	baselineEval contracts.EvaluationDTO,
+	rollbackThreshold float64,
 ) bool {
-if baselineEval.Expectancy <= 0 {
-return false
-}
-degradation := (baselineEval.Expectancy - promotedEval.Expectancy) / baselineEval.Expectancy
-return degradation > rollbackThreshold
+	if baselineEval.Expectancy <= 0 {
+		return false
+	}
+	degradation := (baselineEval.Expectancy - promotedEval.Expectancy) / baselineEval.Expectancy
+	return degradation > rollbackThreshold
 }

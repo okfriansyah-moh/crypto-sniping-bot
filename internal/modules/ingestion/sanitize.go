@@ -4,8 +4,9 @@ import "regexp"
 
 // rpcKeyPathRe matches API keys embedded as a path segment after /v<N>/.
 // Covers Infura  wss://mainnet.infura.io/ws/v3/<KEY>
-//         Alchemy  https://eth-mainnet.g.alchemy.com/v2/<KEY>
-//         QuickNode https://shy-aged-sky.quiknode.pro/<KEY>/
+//
+//	Alchemy  https://eth-mainnet.g.alchemy.com/v2/<KEY>
+//	QuickNode https://shy-aged-sky.quiknode.pro/<KEY>/
 var rpcKeyPathRe = regexp.MustCompile(`(?i)(/v\d+/)([a-zA-Z0-9_\-]{20,})`)
 
 // rpcKeyQueryRe matches API keys embedded as query parameters.
