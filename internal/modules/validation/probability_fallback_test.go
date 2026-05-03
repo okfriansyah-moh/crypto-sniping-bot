@@ -59,7 +59,9 @@ func TestProcessWithEstimates_OutOfRange_RejectsInvalid(t *testing.T) {
 
 func TestProcessWithEstimates_LowConfidence_FallsBack(t *testing.T) {
 	mod := New(validationCfg()).WithProbabilityRuntime(phase9ProbCfg())
-	prob := &contracts.ProbabilityEstimateDTO{Probability: 0.7, Calibration: 0.2}
+	// Confidence=0.10 is below MinModelConfidence=0.40 → fallback to prior.
+	// Calibration is a model-accuracy metric and must NOT be used as the confidence value.
+	prob := &contracts.ProbabilityEstimateDTO{Probability: 0.7, Confidence: 0.10, Calibration: 0.2}
 	got, _ := mod.ProcessWithEstimates(context.Background(), goodEdge(), prob, nil, nil)
 	// low_model_confidence is a fallback signal, NOT a reject reason.
 	// Per contracts/validated_edge.go RejectReason MUST be empty on ACCEPT;

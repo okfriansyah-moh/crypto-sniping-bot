@@ -199,10 +199,23 @@ STUB_EDGE_STR=$(check_stub "edge_strength")
 MISSING_TRACE=$(count_jq 'select(.trace_id == null or .trace_id == "")')
 MISSING_VERSION=$(count_jq 'select(.version_id == null or .version_id == "")')
 
-# Duplicate event_id check — exclude stage_completed events because they
-# intentionally reuse the consumed event's event_id for trace correlation
-# (not a database collision). Only count true duplicates in other log lines.
-DUP_EVENT_IDS=$(jq -r 'select(.event_id != null and .msg != "stage_completed") | .event_id' "$CLEAN_LOG" 2>/dev/null \
+# Duplicate event_id check — only flag TRUE idempotency violations where the
+# same event_id is consumed more than once by the same worker processing step.
+# Excluded messages carry the INPUT event_id as context (not as their own id):
+#   - stage_completed      : reuses consumed event_id for trace correlation
+#   - market_probe_failed  : logs input event_id while reporting a probe error
+#   - market_probes_completed : logs input event_id for the probe summary
+#   - solana_ingestion_emitted: the source event — its id is legitimately
+#                               referenced by downstream probe log lines
+# Counting these as "duplicates" produces a false-positive on every token that
+# triggers a probe failure, incorrectly reducing D6 and inflating OPEN_CRITICAL.
+DUP_EVENT_IDS=$(jq -r 'select(
+    .event_id != null and
+    .msg != "stage_completed" and
+    .msg != "market_probe_failed" and
+    .msg != "market_probes_completed" and
+    .msg != "solana_ingestion_emitted"
+  ) | .event_id' "$CLEAN_LOG" 2>/dev/null \
   | sort | uniq -d | wc -l | tr -d ' ')
 
 # Heartbeat zero-emitted check

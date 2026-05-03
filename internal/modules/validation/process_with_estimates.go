@@ -85,13 +85,15 @@ func (m *Module) ProcessWithEstimatesAt(
 			// honoured exactly (no silent prior substitution).
 			//
 			// Confidence gate: low-confidence model output → prior fallback.
-			// B3a: prefer ProbabilityEstimateDTO.Confidence (populated by B2);
-			// fall back to .Calibration for legacy rows persisted before B2
-			// where Confidence==0 to preserve backward-compat.
+			// Use prob.Confidence directly. When Confidence==0 the probability
+			// model had no feature-confidence data (cold-start) — this is NOT
+			// low confidence and must NOT trigger fallback.
+			// NOTE: the former legacy fallback to prob.Calibration (BrierCalibration)
+			// was incorrect: Brier score (lower=better) is a model-accuracy metric,
+			// not a feature-confidence signal. Using BrierCalibration=0.18 against
+			// MinModelConfidence=0.70 caused all cold-start tokens to fall back to
+			// prior=0.35 → ev≈-1900 bps → 100% reject.
 			conf := prob.Confidence
-			if conf == 0 {
-				conf = prob.Calibration // legacy fallback (pre-B2 rows)
-			}
 			if m.probCfg != nil && m.probCfg.MinModelConfidence > 0 &&
 				conf > 0 && conf < m.probCfg.MinModelConfidence {
 				fallbackReasons = append(fallbackReasons, "low_model_confidence")

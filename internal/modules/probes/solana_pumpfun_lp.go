@@ -34,6 +34,12 @@ const (
 	offsetComplete          = 48
 
 	lamportsPerSol = 1_000_000_000.0
+
+	// pumpfunTokenDecimals is the SPL token decimal precision for all pump.fun
+	// tokens (always 6). The bonding curve stores tokenTotalSupply as raw
+	// atomic units, so we divide by 10^6 to get the human-readable token count
+	// before comparing against the max_total_supply config threshold.
+	pumpfunTokenDecimals = 1_000_000.0
 )
 
 // PumpfunCurveState is the decoded view the LP probe consumes.
@@ -160,8 +166,13 @@ func (p *SolanaPumpfunLpProbe) Probe(ctx context.Context, in contracts.MarketDat
 	}
 
 	// Set TotalSupply when ingestion missed it.
+	// Divide by pumpfunTokenDecimals to convert from raw atomic units to
+	// human-readable token count (e.g. 1_000_000_000_000_000 raw → 1_000_000_000
+	// tokens for a standard 1B-supply pump.fun token with 6 decimal places).
+	// Without this adjustment, the raw value (~10^15) always exceeds the
+	// max_total_supply config threshold (10^9) and rejects every pumpfun token.
 	if !out.TotalSupplyKnown && state.TokenTotalSupply > 0 {
-		out.TotalSupply = float64(state.TokenTotalSupply)
+		out.TotalSupply = float64(state.TokenTotalSupply) / pumpfunTokenDecimals
 		out.TotalSupplyKnown = true
 	}
 	return out, nil

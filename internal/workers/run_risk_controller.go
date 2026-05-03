@@ -17,6 +17,12 @@ import (
 // systemTraceID is the fixed trace ID for system-originated events (SHA256("system")[:16]).
 const systemTraceID = "9f86d081884c7d65" // SHA256("system")[:8] in hex
 
+// systemVersionID is the fixed version ID for system-originated events that
+// are emitted outside any active strategy version context (e.g., when no
+// strategy version is pinned yet or the lookup fails). Derived as
+// SHA256("system_version")[:16].
+const systemVersionID = "2e5d7a3f9c1b4e8a" // SHA256("system_version")[:8] in hex
+
 // Operational modes governed by the adaptive risk-appetite controller.
 // DEGRADED and HALTED are owned by the safety-mode (drawdown) controller and
 // are intentionally NOT in this set.
@@ -593,12 +599,17 @@ func emitAdaptiveCriticalAlert(
 	eventID := contracts.ContentIDFromString(
 		fmt.Sprintf("adaptive-alert:%s:%s", subtype, summary),
 	)
+	versionID := systemVersionID
+	if sv, svErr := adapter.GetActiveStrategyVersion(ctx); svErr == nil {
+		versionID = sv.StrategyVersionID
+	}
 	evt := database.Event{
 		EventID:       eventID,
 		EventType:     "system_event",
 		Payload:       payload,
 		TraceID:       systemTraceID,
 		CorrelationID: systemTraceID,
+		VersionID:     versionID,
 	}
 	if err := adapter.InsertEvent(ctx, evt); err != nil {
 		logger.Warn("risk_controller_adaptive_alert_insert_failed", "error", err)

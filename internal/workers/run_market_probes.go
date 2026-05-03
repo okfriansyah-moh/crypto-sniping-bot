@@ -55,9 +55,9 @@ type MarketProbesWorker struct {
 }
 
 // NewMarketProbesWorker constructs a worker. Pass nil/empty `probeList`
-// for pass-through mode. The adapter is held only for symmetry with
-// other workers — this worker does NOT write to the database; the
-// orchestrator emits the returned event onto the bus.
+// for pass-through mode. The adapter is used to persist the enriched
+// MarketDataDTO so that downstream workers (e.g. FeaturesWorker) can
+// retrieve it by event ID via GetMarketData.
 func NewMarketProbesWorker(adapter database.Adapter, probeList []probes.MarketProbe, logger *slog.Logger) *MarketProbesWorker {
 	if logger == nil {
 		logger = slog.Default()
@@ -100,6 +100,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 				"probe", p.Name(),
 				"event_id", evt.EventID,
 				"trace_id", evt.TraceID,
+				"version_id", evt.VersionID,
 				"error", err,
 			)
 		} else {
@@ -113,6 +114,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	probeAttrs = append(probeAttrs,
 		"event_id", evt.EventID,
 		"trace_id", evt.TraceID,
+		"version_id", evt.VersionID,
 		"probe_count", len(w.probes),
 		"honeypot_sim_known", enriched.HoneypotSimKnown,
 	)
@@ -129,6 +131,23 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	// content-addressable derivation rooted in the upstream EventID so
 	// replays produce identical IDs.
 	enriched.EventID = contracts.ContentIDFromString(fmt.Sprintf("md_enriched:%s", md.EventID))
+
+	// Persist the enriched MarketDataDTO so that FeaturesWorker can
+	// retrieve it by event ID via GetMarketData. Without this, the
+	// features module degrades to cold-start (LiquidityUsdRaw=0, all
+	// confidences=0.1) which cascades to a probability_used fallback and
+	// 100% validation rejection. InsertMarketData is idempotent
+	// (ON CONFLICT DO NOTHING) so retries are safe.
+	if err := w.adapter.InsertMarketData(ctx, enriched); err != nil {
+		w.logger.Warn("market_probes_persist_failed",
+			"event_id", enriched.EventID,
+			"trace_id", evt.TraceID,
+			"error", err,
+		)
+		// Non-fatal: proceed with event emission so the pipeline is not
+		// blocked. FeaturesWorker will degrade to cold-start for this
+		// token but the DQ decision is still emitted.
+	}
 
 	return makeOutputEvent(
 		enriched.EventID, enriched, MarketDataEnrichedEventType,

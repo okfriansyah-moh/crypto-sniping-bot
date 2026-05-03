@@ -1,15 +1,16 @@
-// B3a/B3b regression tests:
-//   - confidence read prefers prob.Confidence (B2) with legacy fallback to
-//     prob.Calibration when Confidence==0
+// confidence_gate_test.go tests the confidence gate logic in ProcessWithEstimates
+// and the EV int32 overflow clamping (clipInt32):
+//   - low Confidence triggers prior fallback ("low_model_confidence")
+//   - Confidence==0 (cold-start) must NOT trigger fallback — model probability used directly
+//   - high Confidence uses model probability with no fallback
 //   - F-SEC-07: EV int32 cast is clamped to [MinInt32+1, MaxInt32-1]
 package validation
 
 import (
 	"context"
+	"crypto-sniping-bot/contracts"
 	"math"
 	"testing"
-
-	"crypto-sniping-bot/contracts"
 )
 
 // B3a — Confidence (populated by B2) is read instead of Calibration.
@@ -32,19 +33,22 @@ func TestProcessWithEstimates_LowConfidenceField_FallsBack(t *testing.T) {
 	}
 }
 
-// B3a — legacy fallback: when Confidence==0 (pre-B2 row), reader falls
-// back to Calibration to preserve the old semantic.
-func TestProcessWithEstimates_LegacyConfidenceFallback(t *testing.T) {
+// B3a — when Confidence==0 (cold-start, no feature-confidence data), the
+// model probability MUST be used directly. Calibration (BrierCalibration) is
+// a model-accuracy metric (lower=better) and MUST NOT be used as a confidence
+// proxy — doing so caused all cold-start tokens to fail the gate.
+func TestProcessWithEstimates_ZeroConfidenceUsesProbability(t *testing.T) {
 	mod := New(validationCfg()).WithProbabilityRuntime(phase9ProbCfg())
-	// Confidence==0 (legacy), Calibration low → must trigger fallback.
+	// Confidence==0 (cold-start), Calibration low (BrierCalibration = 0.18).
+	// The gate must NOT fire: p must be set to prob.Probability, not the prior.
 	prob := &contracts.ProbabilityEstimateDTO{
 		Probability: 0.7,
 		Confidence:  0,
 		Calibration: 0.10,
 	}
 	got, _ := mod.ProcessWithEstimates(context.Background(), goodEdge(), prob, nil, nil)
-	if math.Abs(got.ProbabilityUsed-0.55) > 1e-9 {
-		t.Fatalf("expected legacy fallback via Calibration → prior 0.55; got %v", got.ProbabilityUsed)
+	if math.Abs(got.ProbabilityUsed-0.7) > 1e-9 {
+		t.Fatalf("cold-start (Confidence=0) must use model probability 0.7; got ProbabilityUsed=%v (prior fallback regression)", got.ProbabilityUsed)
 	}
 }
 

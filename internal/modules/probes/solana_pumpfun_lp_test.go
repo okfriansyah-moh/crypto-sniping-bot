@@ -78,6 +78,12 @@ func TestSolanaPumpfunLpProbe_HappyPath_ComputesLiquidityUsd(t *testing.T) {
 	if !out.TotalSupplyKnown {
 		t.Fatal("expected TotalSupplyKnown to be set when ingestion missed it")
 	}
+	// supply=1_000_000_000_000_000 raw atomic units / 1_000_000 (6 decimals) = 1_000_000_000 tokens.
+	// The decimal adjustment prevents the raw value from triggering max_total_supply rejection.
+	const wantSupply = 1_000_000_000.0
+	if out.TotalSupply != wantSupply {
+		t.Fatalf("expected TotalSupply=%v (decimal-adjusted), got %v", wantSupply, out.TotalSupply)
+	}
 }
 
 func TestSolanaPumpfunLpProbe_NoSolPrice_LeavesLpStatsUnknown(t *testing.T) {
