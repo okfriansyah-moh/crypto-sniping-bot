@@ -29,7 +29,7 @@
 #               monitoring-loop-engine, learning-engine, loss-pattern-analyzer,
 #               strategy-decay-detector, strategy-auto-disable, strategy-versioning,
 #               observability, operational-modes, telegram-dispatcher, traceability,
-#               price-feed-integration, profit-first
+#               price-feed-integration, profit-first, rescan-orchestration
 #
 # Group rules (see docs/PARALLEL_DEV.md § 5):
 #   Group A — SEQUENTIAL ONLY:  Phases 0-2 (infra, ingestion, first-trade)
@@ -38,6 +38,7 @@
 #   Group D — MARKET EXTENSION: Phase 7 (Solana market) — isolated, after Phase 6
 #   Group E — FINAL HARDENING:  Phase 8 (final production hardening) — mandatory before mainnet, after Phase 7
 #   Group F — PROFITABILITY:    Phase 9 (profitability restoration) — mandatory before mainnet, after Phase 8
+#   Group G — RESCAN LAYER:     Phase 10 (time-banded rescan, Layer 0.5) — after Phase 9
 # ─────────────────────────────────────────────────────────────────────────────
 
 phases:
@@ -91,3 +92,9 @@ phases:
     complexity: 10
     group: "F"
     skills: "data-quality-engine, anti-manipulation, signal-normalizer, feature-stability-checker, probability-modeling, capital-sizing, position-management, monitoring-loop-engine, learning-engine, loss-pattern-analyzer, price-feed-integration, rpc-management, profit-first, dto, modularity, determinism, idempotency, traceability, config-validation, code-quality, coding-standards, test-generation, test-driven-development"
+  10:
+    name: "rescan-layer"
+    complexity: 5
+    group: "G"
+    skills: "rescan-orchestration, event-bus, idempotency, determinism, traceability, failure, config-validation, database-portability, migration-management, modularity, dto, code-quality, coding-standards, test-generation, test-driven-development, observability, operational-modes, monitoring-loop-engine, profit-first"
+    plan_doc: "docs/PLAN.md"

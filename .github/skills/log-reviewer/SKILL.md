@@ -57,7 +57,7 @@ For each `trace_id`, the canonical sequence (per `docs/architecture.md` § 3
 and § 1) is:
 
 ```
-solana_ingestion_emitted | dex_pool_detected           # Layer 0
+solana_ingestion_emitted | dex_pool_detected | rescan_band_completed   # Layer 0 / 0.5
   → dq_decision                                        # Layer 1
   → features_extracted                                 # Layer 2
   → edge_decision                                      # Layer 3
@@ -69,6 +69,11 @@ solana_ingestion_emitted | dex_pool_detected           # Layer 0
   → position_opened → position_closed                  # Layer 9
   → learning_record_emitted                            # Layer 10
 ```
+
+Rescanned traces (events with `transport="rescan_<band>"`) start at Layer
+0.5 and follow the same canonical sequence from Layer 1 onward. They are
+identified by a fresh `trace_id` but share `token_address` with their
+original Layer-0 ingestion event.
 
 A trace that **terminates before validation_decision** is normal noise (most
 candidates die in DQ or EV). A trace that **terminates AT validation with
@@ -102,6 +107,12 @@ The following exact patterns MUST be flagged when observed:
 | Stage X `stage_completed` count >> Stage X+1 input count (sustained ≥3 windows)                                | STUCK    | any   | event-bus (consumer_offsets lag)                                                                 |
 | Same `event_id` appears as input to a worker_group **>1×**                                                     | BAD      | any   | idempotency, event-bus                                                                           |
 | Missing `version_id` on any event                                                                              | BAD      | any   | strategy-versioning, traceability                                                                |
+| `rescan_worker_started` absent for ≥10 min while `cfg.rescan.enabled=true`                                     | STUCK    | 0.5   | rescan-orchestration, event-bus                                                                  |
+| `rescan_band_completed.candidates=0` for **all** bands sustained ≥30 min                                       | DEGRADED | 0.5   | rescan-orchestration, data-quality-engine (eligibility too tight)                                |
+| `rescan_emit_failed` rate > 5% of candidates per band                                                          | DEGRADED | 0.5   | rescan-orchestration, event-bus                                                                  |
+| Same `(token_address, band)` re-emitted within one bucket window                                               | BAD      | 0.5   | idempotency, rescan-orchestration                                                                |
+| `transport="rescan_*"` market_data_event with no downstream `dq_decision` within 60 s                          | STUCK    | 0.5→1 | event-bus, data-quality-engine                                                                   |
+| `MOMENTUM_EDGE` count from rescanned traces >> `NEW_LAUNCH_EDGE` count from fresh traces (sustained 24 h)      | DEGRADED | 3     | edge-detection (NEW_LAUNCH window may be mis-tuned)                                              |
 
 ### R5 — Stub detection heuristic
 
@@ -314,18 +325,18 @@ no moving target.
 
 ### Scoring Rubric
 
-| #   | Dimension                                                      | 10 pts                                              | 5 pts                                   | 0 pts                                                      |
-| --- | -------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------- |
-| 1   | **Pipeline completeness** — all stages L0–L10 observed ≥1×     | ≥1 end-to-end trace (L0→L10)                        | L0–L5 observed, L6–L10 absent           | L0–L5 incomplete                                           |
-| 2   | **Data Quality** — DQ detectors not constant-zero              | `risk_score` varies AND ≥1 reject in window         | detectors present, all pass             | R5 STUBBED on DQ (`risk_score=0` on ≥95% tokens)           |
-| 3   | **Feature signals** — no constant features                     | All 8 feature fields vary across trace_ids          | ≥5 vary                                 | R5 STUBBED on features (identical values across trace_ids) |
-| 4   | **Probability model** — real model, not fixed prior            | `probability_used` varies AND ≤1% prob_join_timeout | varies but mismatch < 5%                | constant 0.35 OR `prob_join_timeout` on ≥5%                |
-| 5   | **Slippage model** — p50/p95 not constant                      | p50 and p95 both vary across trace_ids              | one varies                              | both constant (R5 STUBBED)                                 |
-| 6   | **Capital safety** — kill-switch, DLQ, drawdown wired          | Zero CRITICAL capital/execution findings            | Only LOW capital findings               | Any CRITICAL finding touching capital/execution            |
-| 7   | **Execution engine** — ≥1 confirmed execution observed         | `execution_confirmed` ≥1 in window                  | `execution_submitted` ≥1 but no confirm | Zero execution events while wallet is funded               |
-| 8   | **Learning / adaptation** — ≥30 real trade outcomes            | `learning_record_emitted` count ≥30 in DB history   | 1–29 records                            | Zero records (cold start)                                  |
-| 9   | **Probe coverage** — at least one live `*Known=true` flag      | ≥1 `*Known` flag non-zero (live RPC probe running)  | Probes deployed but returning zero      | No probes wired, all flags false                           |
-| 10  | **Live P&L evidence** — positive rolling EV over ≥30 positions | `mean(ev_bps) > 0` over last 30 closed positions    | Insufficient data (< 30 closed)         | Negative rolling EV over ≥30 closed positions              |
+| #   | Dimension                                                      | 10 pts                                                                                         | 5 pts                                   | 0 pts                                                      |
+| --- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------- |
+| 1   | **Pipeline completeness** — all stages L0–L10 observed ≥1×     | ≥1 end-to-end trace (L0→L10) AND (rescan disabled OR ≥1 rescanned trace reaches edge_decision) | L0–L5 observed, L6–L10 absent           | L0–L5 incomplete                                           |
+| 2   | **Data Quality** — DQ detectors not constant-zero              | `risk_score` varies AND ≥1 reject in window                                                    | detectors present, all pass             | R5 STUBBED on DQ (`risk_score=0` on ≥95% tokens)           |
+| 3   | **Feature signals** — no constant features                     | All 8 feature fields vary across trace_ids                                                     | ≥5 vary                                 | R5 STUBBED on features (identical values across trace_ids) |
+| 4   | **Probability model** — real model, not fixed prior            | `probability_used` varies AND ≤1% prob_join_timeout                                            | varies but mismatch < 5%                | constant 0.35 OR `prob_join_timeout` on ≥5%                |
+| 5   | **Slippage model** — p50/p95 not constant                      | p50 and p95 both vary across trace_ids                                                         | one varies                              | both constant (R5 STUBBED)                                 |
+| 6   | **Capital safety** — kill-switch, DLQ, drawdown wired          | Zero CRITICAL capital/execution findings                                                       | Only LOW capital findings               | Any CRITICAL finding touching capital/execution            |
+| 7   | **Execution engine** — ≥1 confirmed execution observed         | `execution_confirmed` ≥1 in window                                                             | `execution_submitted` ≥1 but no confirm | Zero execution events while wallet is funded               |
+| 8   | **Learning / adaptation** — ≥30 real trade outcomes            | `learning_record_emitted` count ≥30 in DB history                                              | 1–29 records                            | Zero records (cold start)                                  |
+| 9   | **Probe coverage** — at least one live `*Known=true` flag      | ≥1 `*Known` flag non-zero (live RPC probe running)                                             | Probes deployed but returning zero      | No probes wired, all flags false                           |
+| 10  | **Live P&L evidence** — positive rolling EV over ≥30 positions | `mean(ev_bps) > 0` over last 30 closed positions                                               | Insufficient data (< 30 closed)         | Negative rolling EV over ≥30 closed positions              |
 
 ### PRS Tier Thresholds
 
