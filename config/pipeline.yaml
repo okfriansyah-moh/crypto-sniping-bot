@@ -319,3 +319,50 @@ probes:
   evm_pair_reserves:
     enabled: false
     timeout_ms: 300
+
+# Phase 10 — time-banded rescan worker (Layer 0.5).
+# Disabled by default. Set enabled: true when Phase 9 DQ sub-scores are live.
+# See docs/PLAN.md for full design rationale.
+rescan:
+  enabled: false
+  interval_seconds: 60
+  max_per_band_per_tick: 100
+  skip_open_positions: true
+  eligibility:
+    max_honeypot_score: 0.5
+    max_rug_score: 0.65
+    max_buy_tax_bps: 3000
+    include_passed: true
+  bands:
+    - name: "15m"
+      min_age_seconds: 900
+      max_age_seconds: 1800
+      priority: 80
+    - name: "30m"
+      min_age_seconds: 1800
+      max_age_seconds: 2700
+      priority: 60
+    - name: "45m"
+      min_age_seconds: 2700
+      max_age_seconds: 3600
+      priority: 40
+    - name: "1h"
+      min_age_seconds: 3600
+      max_age_seconds: 7200
+      priority: 20
+  mode_overrides:
+    STRICT:
+      max_honeypot_score: 0.30
+      max_rug_score: 0.50
+      max_buy_tax_bps: 1500
+      include_passed: false
+    BALANCED:
+      max_honeypot_score: 0.50
+      max_rug_score: 0.65
+      max_buy_tax_bps: 3000
+      include_passed: true
+    EXPLORATION:
+      max_honeypot_score: 0.60
+      max_rug_score: 0.75
+      max_buy_tax_bps: 4500
+      include_passed: true

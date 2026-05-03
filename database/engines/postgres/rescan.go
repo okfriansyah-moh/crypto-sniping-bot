@@ -1,0 +1,274 @@
+package postgres
+
+// rescan.go — Postgres implementation of Adapter.GetTokensForRescan.
+// Pure read-only query with parameterised SQL.
+// See docs/PLAN.md § Task 4 for design rationale.
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"context"
+
+	"crypto-sniping-bot/contracts"
+	"crypto-sniping-bot/database"
+)
+
+// GetTokensForRescan returns up to q.Limit MarketDataDTOs that are eligible
+// for a rescan band. All filters are applied server-side.
+//
+// Results are deterministic: ORDER BY md.token_address ASC, md.ingested_at DESC;
+// one row per token (latest market_data row).
+//
+// Empty result is not an error — returns ([]MarketDataDTO{}, nil).
+func (d *DB) GetTokensForRescan(ctx context.Context, q database.RescanQuery) ([]contracts.MarketDataDTO, error) {
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// DISTINCT ON (md.token_address) picks the latest row per token via the
+	// inner ORDER BY md.token_address, md.ingested_at DESC.
+	// Outer ORDER BY enforces deterministic result ordering.
+	const queryBase = `
+WITH latest_dq AS (
+    SELECT DISTINCT ON (token_address)
+        token_address, decision, honeypot_score, rug_score, buy_tax_bps
+    FROM data_quality
+    ORDER BY token_address, evaluated_at DESC
+),
+latest_lifecycle AS (
+    SELECT DISTINCT ON (token_address)
+        token_address, current_state
+    FROM token_lifecycle
+    ORDER BY token_address, updated_at DESC
+)
+SELECT DISTINCT ON (md.token_address)
+    md.event_id,
+    md.trace_id,
+    COALESCE(md.correlation_id, ''),
+    COALESCE(md.causation_id, ''),
+    md.version_id,
+    md.chain,
+    md.market,
+    md.block_number,
+    md.block_hash,
+    md.tx_hash,
+    md.log_index,
+    md.event_topic,
+    md.pool_address,
+    md.token_address,
+    md.base_address,
+    md.token0_address,
+    md.token1_address,
+    md.amount0_raw,
+    md.amount1_raw,
+    md.reserve_base_raw,
+    md.reserve_token_raw,
+    md.block_timestamp,
+    md.ingested_at,
+    md.rpc_endpoint,
+    md.transport,
+    md.confirmation_depth,
+    md.reorged,
+    COALESCE(md.expires_at, ''),
+    md.priority,
+    COALESCE(md.liquidity_usd, 0.0),
+    COALESCE(md.lp_stats_known, FALSE),
+    COALESCE(md.wash_stats_known, FALSE),
+    COALESCE(md.tx_count_1m, 0),
+    COALESCE(md.unique_wallets_1m, 0),
+    COALESCE(md.wallet_entropy, 0.0),
+    COALESCE(md.repeat_ratio_1m, 0.0),
+    COALESCE(md.holder_dist_known, FALSE),
+    COALESCE(md.holder_count, 0),
+    COALESCE(md.top5_holder_pct, 0.0),
+    COALESCE(md.pool_age_seconds, 0)
+FROM market_data md
+JOIN latest_dq dq ON dq.token_address = md.token_address
+LEFT JOIN latest_lifecycle ll ON ll.token_address = md.token_address
+WHERE
+    md.ingested_at <= datetime('now', '-' || $1 || ' seconds')
+    AND md.ingested_at >= datetime('now', '-' || $2 || ' seconds')
+    AND ($3 = '' OR md.chain = $3)
+    AND COALESCE(dq.honeypot_score, 0) <= $4
+    AND COALESCE(dq.rug_score, 0)      <= $5
+    AND COALESCE(dq.buy_tax_bps, 0)    <= $6
+    AND (
+        dq.decision = 'REJECT'
+        OR ($7 AND dq.decision IN ('PASS', 'RISKY_PASS'))
+    )
+    AND (
+        NOT $8
+        OR ll.current_state IS NULL
+        OR ll.current_state NOT IN (
+            'POSITION_OPEN', 'EXECUTION_PENDING', 'CAPITAL_ALLOCATED', 'SELECTED'
+        )
+    )
+ORDER BY md.token_address ASC, md.ingested_at DESC
+LIMIT $9
+`
+
+	// Postgres uses NOW() - INTERVAL; SQLite uses datetime() - seconds.
+	// Since we target Postgres per db_adapter_spec.md we use a portable
+	// parameterised approach: cast the integer to an interval string.
+	// The PLAN specifies Postgres syntax; we use a portable integer-cast
+	// approach that works with pgx's standard parameter binding.
+	const queryPostgres = `
+WITH latest_dq AS (
+    SELECT DISTINCT ON (token_address)
+        token_address, decision, honeypot_score, rug_score, buy_tax_bps
+    FROM data_quality
+    ORDER BY token_address, evaluated_at DESC
+),
+latest_lifecycle AS (
+    SELECT DISTINCT ON (token_address)
+        token_address, current_state
+    FROM token_lifecycle
+    ORDER BY token_address, updated_at DESC
+)
+SELECT DISTINCT ON (md.token_address)
+    md.event_id,
+    md.trace_id,
+    COALESCE(md.correlation_id, ''),
+    COALESCE(md.causation_id, ''),
+    md.version_id,
+    md.chain,
+    md.market,
+    md.block_number,
+    md.block_hash,
+    md.tx_hash,
+    md.log_index,
+    md.event_topic,
+    md.pool_address,
+    md.token_address,
+    md.base_address,
+    md.token0_address,
+    md.token1_address,
+    md.amount0_raw,
+    md.amount1_raw,
+    md.reserve_base_raw,
+    md.reserve_token_raw,
+    md.block_timestamp,
+    md.ingested_at,
+    md.rpc_endpoint,
+    md.transport,
+    md.confirmation_depth,
+    md.reorged,
+    COALESCE(md.expires_at, ''),
+    md.priority,
+    COALESCE(md.liquidity_usd, 0.0),
+    COALESCE(md.lp_stats_known, FALSE),
+    COALESCE(md.wash_stats_known, FALSE),
+    COALESCE(md.tx_count_1m, 0),
+    COALESCE(md.unique_wallets_1m, 0),
+    COALESCE(md.wallet_entropy, 0.0),
+    COALESCE(md.repeat_ratio_1m, 0.0),
+    COALESCE(md.holder_dist_known, FALSE),
+    COALESCE(md.holder_count, 0),
+    COALESCE(md.top5_holder_pct, 0.0),
+    COALESCE(md.pool_age_seconds, 0)
+FROM market_data md
+JOIN latest_dq dq ON dq.token_address = md.token_address
+LEFT JOIN latest_lifecycle ll ON ll.token_address = md.token_address
+WHERE
+    md.ingested_at::timestamptz <= NOW() - ($1 || ' seconds')::interval
+    AND md.ingested_at::timestamptz >= NOW() - ($2 || ' seconds')::interval
+    AND ($3 = '' OR md.chain = $3)
+    AND COALESCE(dq.honeypot_score, 0) <= $4
+    AND COALESCE(dq.rug_score, 0)      <= $5
+    AND COALESCE(dq.buy_tax_bps, 0)    <= $6
+    AND (
+        dq.decision = 'REJECT'
+        OR ($7 AND dq.decision IN ('PASS', 'RISKY_PASS'))
+    )
+    AND (
+        NOT $8
+        OR ll.current_state IS NULL
+        OR ll.current_state NOT IN (
+            'POSITION_OPEN', 'EXECUTION_PENDING', 'CAPITAL_ALLOCATED', 'SELECTED'
+        )
+    )
+ORDER BY md.token_address ASC, md.ingested_at DESC
+LIMIT $9
+`
+	_ = queryBase // queryBase kept for documentation; production path is Postgres
+
+	chain := q.Chain
+	rows, err := d.pool.QueryContext(ctx, queryPostgres,
+		fmt.Sprintf("%d", q.MinAgeSeconds),
+		fmt.Sprintf("%d", q.MaxAgeSeconds),
+		chain,
+		q.MaxHoneypotScore,
+		q.MaxRugScore,
+		int(q.MaxBuyTaxBps),
+		q.IncludePassed,
+		q.SkipOpenPositions,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres.GetTokensForRescan: %w", err)
+	}
+	defer rows.Close()
+
+	var result []contracts.MarketDataDTO
+	for rows.Next() {
+		var dto contracts.MarketDataDTO
+		if err := rows.Scan(
+			&dto.EventID,
+			&dto.TraceID,
+			&dto.CorrelationID,
+			&dto.CausationID,
+			&dto.VersionID,
+			&dto.Chain,
+			&dto.Market,
+			&dto.BlockNumber,
+			&dto.BlockHash,
+			&dto.TxHash,
+			&dto.LogIndex,
+			&dto.EventTopic,
+			&dto.PoolAddress,
+			&dto.TokenAddress,
+			&dto.BaseAddress,
+			&dto.Token0Address,
+			&dto.Token1Address,
+			&dto.Amount0Raw,
+			&dto.Amount1Raw,
+			&dto.ReserveBaseRaw,
+			&dto.ReserveTokenRaw,
+			&dto.BlockTimestamp,
+			&dto.IngestedAt,
+			&dto.RpcEndpoint,
+			&dto.Transport,
+			&dto.ConfirmationDepth,
+			&dto.Reorged,
+			&dto.ExpiresAt,
+			&dto.Priority,
+			&dto.LiquidityUsd,
+			&dto.LpStatsKnown,
+			&dto.WashStatsKnown,
+			&dto.TxCount1m,
+			&dto.UniqueWallets1m,
+			&dto.WalletEntropy,
+			&dto.RepeatRatio1m,
+			&dto.HolderDistKnown,
+			&dto.HolderCount,
+			&dto.Top5HolderPct,
+			&dto.PoolAgeSeconds,
+		); err != nil {
+			return nil, fmt.Errorf("postgres.GetTokensForRescan: scan: %w", err)
+		}
+		result = append(result, dto)
+	}
+	if err := rows.Err(); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return []contracts.MarketDataDTO{}, nil
+		}
+		return nil, fmt.Errorf("postgres.GetTokensForRescan: rows: %w", err)
+	}
+	if result == nil {
+		return []contracts.MarketDataDTO{}, nil
+	}
+	return result, nil
+}

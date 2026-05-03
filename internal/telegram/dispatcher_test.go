@@ -435,3 +435,6 @@ func (s *dispatcherStubAdapter) SaveBaseline(_ context.Context, _, _, _ string, 
 func (s *dispatcherStubAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[string][]float64, error) {
 	return map[string]map[string][]float64{}, nil
 }
+func (s *dispatcherStubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
+	return nil, nil
+}

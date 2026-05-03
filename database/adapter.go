@@ -69,6 +69,16 @@ type Adapter interface {
 	// GetMarketData retrieves a MarketDataDTO by event ID.
 	GetMarketData(ctx context.Context, eventID string) (*contracts.MarketDataDTO, error)
 
+	// GetTokensForRescan returns up to q.Limit MarketDataDTOs whose
+	// (current_time - market_data.ingested_at) falls in [minAge, maxAge],
+	// filtered by the latest data_quality row's sub-scores (honeypot_score,
+	// rug_score, buy_tax_bps), excluding tokens in open lifecycle states when
+	// q.SkipOpenPositions is true.
+	//
+	// Results are deterministic: ORDER BY token_address ASC, ingested_at DESC;
+	// one row per token (latest). Read-only. Idempotent. No side effects.
+	GetTokensForRescan(ctx context.Context, q RescanQuery) ([]contracts.MarketDataDTO, error)
+
 	// ── Token Lifecycle State Machine ────────────────────────────────────────
 
 	// StartLifecycle creates a new lifecycle entry at state DETECTED.
@@ -814,6 +824,21 @@ type DLQFilter struct {
 	Consumer string // optional; "" = all consumers
 	Reason   string // optional; "" = all reasons
 	Limit    int    // max rows; 0 = 100
+}
+
+// RescanQuery parameterises the GetTokensForRescan adapter method.
+// All filters are applied server-side in a single parameterised SQL statement.
+// See database/engines/postgres/rescan.go for the implementation.
+type RescanQuery struct {
+	Chain             string  // optional chain filter; "" = all chains
+	MinAgeSeconds     int     // lower bound of age window (inclusive)
+	MaxAgeSeconds     int     // upper bound of age window (exclusive)
+	MaxHoneypotScore  float64 // latest DQ honeypot_score must be ≤ this
+	MaxRugScore       float64 // latest DQ rug_score must be ≤ this
+	MaxBuyTaxBps      int32   // latest DQ buy_tax_bps must be ≤ this
+	IncludePassed     bool    // include decision IN ('PASS','RISKY_PASS') alongside REJECT
+	SkipOpenPositions bool    // exclude tokens in POSITION_OPEN / EXECUTION_PENDING / etc.
+	Limit             int     // max rows returned; 0 = 100
 }
 
 // LatencyEvent is one raw execution latency sample written to latency_events.

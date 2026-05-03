@@ -853,3 +853,6 @@ func (m *memAdapter) SaveBaseline(_ context.Context, _, _, _ string, _ []float64
 func (m *memAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[string][]float64, error) {
 	return map[string]map[string][]float64{}, nil
 }
+func (m *memAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
+	return nil, nil
+}

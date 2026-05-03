@@ -56,6 +56,11 @@ type Config struct {
 	// simulation contract and flips probes.enabled.
 	Probes ProbesConfig `yaml:"probes"`
 
+	// Phase 10 — time-banded rescan worker (Layer 0.5).
+	// Disabled by default. See docs/PLAN.md § Task 1 and
+	// internal/app/config/rescan_config.go for struct definitions.
+	Rescan RescanConfig `yaml:"rescan"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
 }
@@ -691,6 +696,9 @@ func Load(paths ...string) (*Config, error) {
 	// Apply environment variable overrides.
 	applyEnvOverrides(cfg)
 
+	// Apply rescan defaults (Phase 10) before validation.
+	applyRescanDefaults(&cfg.Rescan)
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -729,6 +737,9 @@ func (c *Config) Validate() error {
 
 	if len(missing) > 0 {
 		return fmt.Errorf("config: missing required keys: %s", strings.Join(missing, ", "))
+	}
+	if err := validateRescanConfig(c.Rescan); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
 	return nil
 }
