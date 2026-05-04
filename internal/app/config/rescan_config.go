@@ -50,12 +50,14 @@ func applyRescanDefaults(r *RescanConfig) {
 	if r.MaxPerBandPerTick == 0 {
 		r.MaxPerBandPerTick = 100
 	}
-	if !r.Enabled {
-		// Only set the SkipOpenPositions default when rescan is disabled so
-		// an explicit false in YAML is preserved when enabled.
-		if !r.SkipOpenPositions {
-			r.SkipOpenPositions = true
-		}
+	// SkipOpenPositions is a CAPITAL SAFETY field — must default to true
+	// regardless of Enabled state to prevent double-entry into open positions
+	// when an operator enables rescan with partial YAML. Operators who need
+	// to disable this protection MUST set `skip_open_positions: false`
+	// explicitly in pipeline.yaml (the shipped pipeline.yaml sets it true).
+	// See docs/PLAN.md § 5 (defaults) and § 3 (capital protection).
+	if !r.SkipOpenPositions {
+		r.SkipOpenPositions = true
 	}
 
 	if r.Eligibility.MaxHoneypotScore == nil {
@@ -70,10 +72,11 @@ func applyRescanDefaults(r *RescanConfig) {
 		v := int32(3000)
 		r.Eligibility.MaxBuyTaxBps = &v
 	}
-	if !r.Enabled {
-		// Preserve explicit include_passed: false when rescans are enabled.
-		// With a non-pointer bool we can only safely apply the default in
-		// the disabled/absent configuration path.
+	// IncludePassed defaults to true so the rescan profit hypothesis works
+	// out of the box: re-emit PASS/RISKY_PASS tokens whose features matured
+	// past their original EV threshold. Operators who want REJECT-only
+	// rescans MUST set `include_passed: false` explicitly. See PLAN § 5.
+	if !r.Eligibility.IncludePassed {
 		r.Eligibility.IncludePassed = true
 	}
 

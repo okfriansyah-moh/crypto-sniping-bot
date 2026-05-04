@@ -98,6 +98,10 @@ func runRescanTick(
 	mode := "BALANCED"
 	if state, stateErr := adapter.GetSystemState(ctx); stateErr == nil && state != nil && state.Mode != "" {
 		mode = state.Mode
+	} else if stateErr != nil {
+		// Defensive: never abort on system_state read failure — fall back
+		// to BALANCED. Log at debug so the operator can correlate.
+		logger.Debug("rescan_system_state_unavailable", "error", stateErr)
 	}
 	eligibility := resolveEligibility(cfg.Rescan, mode)
 

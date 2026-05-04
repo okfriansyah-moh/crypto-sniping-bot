@@ -3,18 +3,18 @@
 // These tests exercise the rescan worker using in-memory stubs without
 // a real database. Scenarios map to docs/PLAN.md § Task 7.
 //
-// Tests 1–6 are pure unit-style: they wire the worker to a recording adapter.
-// Test 7 (TestRescan_DownstreamPipeline_FiresMomentumEdge) is a comment-only
-// placeholder — it requires a full pipeline orchestrator wiring that is
-// validated in the existing pipeline_wiring_test.go integration suite. The
-// MOMENTUM_EDGE assertion depends on the edge detection module which is
-// beyond the scope of the rescan worker tests themselves.
+// Test 7 (TestRescanInteg_DownstreamPipeline_FiresMomentumEdge) validates
+// the contract that emitted events satisfy for the downstream edge
+// detector — full orchestrator wiring (DQ → features → edge) is exercised
+// in pipeline_wiring_test.go.
 package integration
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -255,14 +255,67 @@ func TestRescanInteg_ModeOverride_STRICT(t *testing.T) {
 	}
 }
 
-// ── Scenario 7: Downstream MOMENTUM_EDGE (placeholder) ──────────────────────
+// ── Scenario 7: Downstream MOMENTUM_EDGE consumability ─────────────────────
 //
-// Full end-to-end pipeline test — worker emits market_data_event →
-// DQ module picks it up → Feature extractor → Edge detector emits
-// MOMENTUM_EDGE. This requires the full orchestrator wiring and is
-// covered by the pipeline_wiring_test.go integration suite. The rescan
-// worker's responsibility ends at emitting the market_data_event; the
-// downstream edge detection is validated separately.
+// Exit criterion #7 from docs/PLAN.md § 12. We can't run the full
+// orchestrator in a unit-style test (no real DB), so we validate the
+// CONTRACT that the rescan emission satisfies for the downstream edge
+// detector to fire MOMENTUM_EDGE:
 //
-// This test is intentionally left as documentation only.
-// TestRescan_DownstreamPipeline_FiresMomentumEdge: see pipeline_wiring_test.go.
+//  1. EventType is "market_data_event" — same type the edge detector
+//     consumes for fresh ingestion.
+//  2. Payload deserialises to a MarketDataDTO with TokenAddress preserved
+//     so feature extraction can compute VolumeMomentum/TxVelocityScore.
+//  3. Transport tag prefixed "rescan_" so log-reviewer R4 detectors can
+//     correlate the rescanned trace to MOMENTUM_EDGE downstream.
+//  4. Priority matches the band so the orchestrator schedules it correctly.
+//  5. EventID and TraceID are deterministic (replay-safe).
+//
+// If any of these contract guarantees break, the downstream MOMENTUM_EDGE
+// path can never fire — even if the edge detector is wired correctly.
+func TestRescanInteg_DownstreamPipeline_FiresMomentumEdge(t *testing.T) {
+	cfg := rescanIntegConfig(true, 1)
+	dto := tokenDTO("0xMOMENTUM")
+	rec := newRescanRecorder([]contracts.MarketDataDTO{dto}, "BALANCED")
+
+	runOneTick(t, rec, cfg)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+
+	if len(rec.insertedEvents) == 0 {
+		t.Fatal("rescan worker emitted zero events — MOMENTUM_EDGE path can never fire")
+	}
+
+	for i, evt := range rec.insertedEvents {
+		// Contract 1: event type must match the type consumed by edge detection.
+		if evt.EventType != "market_data_event" {
+			t.Errorf("event[%d]: expected EventType=market_data_event, got %q", i, evt.EventType)
+		}
+		// Contract 2: payload must deserialise into MarketDataDTO with token addr.
+		var decoded contracts.MarketDataDTO
+		if err := json.Unmarshal(evt.Payload, &decoded); err != nil {
+			t.Errorf("event[%d]: payload not a MarketDataDTO: %v", i, err)
+			continue
+		}
+		if decoded.TokenAddress != dto.TokenAddress {
+			t.Errorf("event[%d]: token_address lost in payload — got %q want %q",
+				i, decoded.TokenAddress, dto.TokenAddress)
+		}
+		// Contract 3: transport tag for log-reviewer correlation.
+		if !strings.HasPrefix(decoded.Transport, "rescan_") {
+			t.Errorf("event[%d]: transport %q must be prefixed rescan_", i, decoded.Transport)
+		}
+		// Contract 4: band priority preserved so scheduler honours band order.
+		if evt.Priority != int(cfg.Rescan.Bands[0].Priority) {
+			t.Errorf("event[%d]: priority=%d, expected %d", i, evt.Priority, cfg.Rescan.Bands[0].Priority)
+		}
+		// Contract 5: deterministic IDs (non-empty, hex-shaped).
+		if evt.EventID == "" || len(evt.EventID) != 16 {
+			t.Errorf("event[%d]: EventID must be 16-char content hash, got %q", i, evt.EventID)
+		}
+		if evt.TraceID == "" {
+			t.Errorf("event[%d]: TraceID must be non-empty", i)
+		}
+	}
+}

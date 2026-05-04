@@ -31,91 +31,9 @@ func (d *DB) GetTokensForRescan(ctx context.Context, q database.RescanQuery) ([]
 	// DISTINCT ON (md.token_address) picks the latest row per token via the
 	// inner ORDER BY md.token_address, md.ingested_at DESC.
 	// Outer ORDER BY enforces deterministic result ordering.
-	const queryBase = `
-WITH latest_dq AS (
-    SELECT DISTINCT ON (token_address)
-        token_address, decision, honeypot_score, rug_score, buy_tax_bps
-    FROM data_quality
-    ORDER BY token_address, evaluated_at DESC
-),
-latest_lifecycle AS (
-    SELECT DISTINCT ON (token_address)
-        token_address, current_state
-    FROM token_lifecycle
-    ORDER BY token_address, updated_at DESC
-)
-SELECT DISTINCT ON (md.token_address)
-    md.event_id,
-    md.trace_id,
-    COALESCE(md.correlation_id, ''),
-    COALESCE(md.causation_id, ''),
-    md.version_id,
-    md.chain,
-    md.market,
-    md.block_number,
-    md.block_hash,
-    md.tx_hash,
-    md.log_index,
-    md.event_topic,
-    md.pool_address,
-    md.token_address,
-    md.base_address,
-    md.token0_address,
-    md.token1_address,
-    md.amount0_raw,
-    md.amount1_raw,
-    md.reserve_base_raw,
-    md.reserve_token_raw,
-    md.block_timestamp,
-    md.ingested_at,
-    md.rpc_endpoint,
-    md.transport,
-    md.confirmation_depth,
-    md.reorged,
-    COALESCE(md.expires_at, ''),
-    md.priority,
-    COALESCE(md.liquidity_usd, 0.0),
-    COALESCE(md.lp_stats_known, FALSE),
-    COALESCE(md.wash_stats_known, FALSE),
-    COALESCE(md.tx_count_1m, 0),
-    COALESCE(md.unique_wallets_1m, 0),
-    COALESCE(md.wallet_entropy, 0.0),
-    COALESCE(md.repeat_ratio_1m, 0.0),
-    COALESCE(md.holder_dist_known, FALSE),
-    COALESCE(md.holder_count, 0),
-    COALESCE(md.top5_holder_pct, 0.0),
-    COALESCE(md.pool_age_seconds, 0)
-FROM market_data md
-JOIN latest_dq dq ON dq.token_address = md.token_address
-LEFT JOIN latest_lifecycle ll ON ll.token_address = md.token_address
-WHERE
-    md.ingested_at <= datetime('now', '-' || $1 || ' seconds')
-    AND md.ingested_at >= datetime('now', '-' || $2 || ' seconds')
-    AND ($3 = '' OR md.chain = $3)
-    AND COALESCE(dq.honeypot_score, 0) <= $4
-    AND COALESCE(dq.rug_score, 0)      <= $5
-    AND COALESCE(dq.buy_tax_bps, 0)    <= $6
-    AND (
-        dq.decision = 'REJECT'
-        OR ($7 AND dq.decision IN ('PASS', 'RISKY_PASS'))
-    )
-    AND (
-        NOT $8
-        OR ll.current_state IS NULL
-        OR ll.current_state NOT IN (
-            'POSITION_OPEN', 'EXECUTION_PENDING', 'CAPITAL_ALLOCATED', 'SELECTED'
-        )
-    )
-ORDER BY md.token_address ASC, md.ingested_at DESC
-LIMIT $9
-`
-
-	// Postgres uses NOW() - INTERVAL; SQLite uses datetime() - seconds.
-	// Since we target Postgres per db_adapter_spec.md we use a portable
-	// parameterised approach: cast the integer to an interval string.
-	// The PLAN specifies Postgres syntax; we use a portable integer-cast
-	// approach that works with pgx's standard parameter binding.
-	const queryPostgres = `
+	//
+	// Parameterised throughout (no string interpolation) — OWASP A03 safe.
+	const query = `
 WITH latest_dq AS (
     SELECT DISTINCT ON (token_address)
         token_address, decision, honeypot_score, rug_score, buy_tax_bps
@@ -193,10 +111,9 @@ WHERE
 ORDER BY md.token_address ASC, md.ingested_at DESC
 LIMIT $9
 `
-	_ = queryBase // queryBase kept for documentation; production path is Postgres
 
 	chain := q.Chain
-	rows, err := d.pool.QueryContext(ctx, queryPostgres,
+	rows, err := d.pool.QueryContext(ctx, query,
 		q.MinAgeSeconds,
 		q.MaxAgeSeconds,
 		chain,

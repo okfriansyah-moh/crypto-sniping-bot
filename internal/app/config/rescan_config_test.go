@@ -279,8 +279,15 @@ rescan:
 	if len(cfg.Rescan.ModeOverrides) == 0 {
 		t.Error("applyRescanDefaults must populate default mode_overrides when nil")
 	}
-	if cfg.Rescan.Eligibility.IncludePassed {
-		t.Error("applyRescanDefaults must NOT set IncludePassed=true when rescan is enabled; operator must set it explicitly")
+	// Capital-safety default: SkipOpenPositions must be true even when
+	// rescan is enabled but the YAML omits the flag. See PLAN § 5.
+	if !cfg.Rescan.SkipOpenPositions {
+		t.Error("applyRescanDefaults must set SkipOpenPositions=true by default to prevent double-entry")
+	}
+	// Profit-hypothesis default: IncludePassed must be true so PASS/RISKY_PASS
+	// tokens with matured features are eligible for rescan. See PLAN § 5.
+	if !cfg.Rescan.Eligibility.IncludePassed {
+		t.Error("applyRescanDefaults must set Eligibility.IncludePassed=true by default to enable MOMENTUM_EDGE recapture")
 	}
 }
 
