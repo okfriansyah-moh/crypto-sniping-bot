@@ -46,6 +46,18 @@ func TestSanitizeURL_TokenQueryParam_Redacted(t *testing.T) {
 	}
 }
 
+func TestSanitizeURL_HeliusApiKeyHyphen_Redacted(t *testing.T) {
+	// Helius uses ?api-key= (hyphen) — must be redacted to prevent key leakage.
+	raw := "https://mainnet.helius-rpc.com/?api-key=ca537ca0-122c-4e5e-86f6-3449c3ed76cf"
+	got := sanitizeURL(raw)
+	if containsKey(got, "ca537ca0-122c-4e5e-86f6-3449c3ed76cf") {
+		t.Errorf("Helius api-key still present in sanitized URL: %q", got)
+	}
+	if !containsKey(got, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] marker in sanitized URL: %q", got)
+	}
+}
+
 func TestSanitizeURL_NoKey_PassesThrough(t *testing.T) {
 	raw := "wss://localhost:8545"
 	got := sanitizeURL(raw)

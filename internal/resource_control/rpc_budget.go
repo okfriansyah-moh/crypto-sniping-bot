@@ -23,7 +23,7 @@ type tokenBucket struct {
 	mu       sync.Mutex
 	tokens   int
 	capacity int
-	rate     int           // tokens added per second
+	rate     int // tokens added per second
 	lastFill time.Time
 	waitMs   int
 }

@@ -65,13 +65,13 @@ func baseWeight(eventType string, isExit bool, w config.EventPriorityWeights) in
 	}
 
 	weights := map[string]int32{
-		"allocation_event":      w.AllocationEvent,
-		"validated_edge_event":  w.ValidatedEdgeEvent,
-		"edge_event":            w.EdgeEvent,
-		"feature_event":         w.FeatureEvent,
-		"data_quality_event":    w.DataQualityEvent,
-		"market_data_event":     w.MarketDataEvent,
-		"adjustment_event":      w.AdjustmentEvent,
+		"allocation_event":     w.AllocationEvent,
+		"validated_edge_event": w.ValidatedEdgeEvent,
+		"edge_event":           w.EdgeEvent,
+		"feature_event":        w.FeatureEvent,
+		"data_quality_event":   w.DataQualityEvent,
+		"market_data_event":    w.MarketDataEvent,
+		"adjustment_event":     w.AdjustmentEvent,
 	}
 	if v, ok := weights[eventType]; ok {
 		return v

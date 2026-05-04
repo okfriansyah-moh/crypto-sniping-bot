@@ -44,7 +44,8 @@ func BuildSwapInstruction(alloc contracts.AllocationDTO, market, poolAddress str
 
 // buildRaydiumSwapInstruction builds a Raydium V4 SwapBaseIn instruction.
 // Opcode 9 (SwapBaseIn):
-//   [u64 opcode=9][u64 amountIn][u64 minimumAmountOut]
+//
+//	[u64 opcode=9][u64 amountIn][u64 minimumAmountOut]
 func buildRaydiumSwapInstruction(alloc contracts.AllocationDTO, poolAddress string, cfg *config.SolanaExecutionConfig) (*RawInstruction, error) {
 	// Apply slippage cap from config.
 	slippageBps := alloc.MaxSlippageBps

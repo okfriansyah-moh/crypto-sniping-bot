@@ -454,8 +454,8 @@ func TestSelectEndpoint(t *testing.T) {
 	endpoints := []string{"ws://a", "ws://b", "ws://c"}
 
 	cases := []struct {
-		attempt  int
-		wantIdx  int
+		attempt int
+		wantIdx int
 	}{
 		{0, 0},
 		{1, 1},

@@ -15,10 +15,11 @@ import (
 // NormalizePairCreated converts a PairCreated factory log into a MarketDataDTO.
 //
 // PairCreated(address indexed token0, address indexed token1, address pair, uint256 allPairsLength)
-//   Topics[0] = TopicPairCreated
-//   Topics[1] = token0 (indexed, 32-byte padded)
-//   Topics[2] = token1 (indexed, 32-byte padded)
-//   Data      = pair address (32 bytes) + allPairsLength (32 bytes)
+//
+//	Topics[0] = TopicPairCreated
+//	Topics[1] = token0 (indexed, 32-byte padded)
+//	Topics[2] = token1 (indexed, 32-byte padded)
+//	Data      = pair address (32 bytes) + allPairsLength (32 bytes)
 func NormalizePairCreated(
 	l rpc.Log, chain, market, endpoint, versionID string,
 	baseTokens []string, confirmDepth uint32, ingestedAt string,
@@ -82,9 +83,10 @@ func NormalizePairCreated(
 // NormalizeMint converts a Mint pair log into a MarketDataDTO.
 //
 // Mint(address indexed sender, uint256 amount0, uint256 amount1)
-//   Topics[0] = TopicMint
-//   Topics[1] = sender (indexed)
-//   Data      = amount0 (32 bytes) + amount1 (32 bytes)
+//
+//	Topics[0] = TopicMint
+//	Topics[1] = sender (indexed)
+//	Data      = amount0 (32 bytes) + amount1 (32 bytes)
 func NormalizeMint(
 	l rpc.Log, chain, market, endpoint, versionID string,
 	token0Addr, token1Addr string, baseTokens []string,
@@ -151,10 +153,11 @@ func NormalizeMint(
 // NormalizeSwap converts a Swap pair log into a MarketDataDTO.
 //
 // Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)
-//   Topics[0] = TopicSwap
-//   Topics[1] = sender (indexed)
-//   Topics[2] = to (indexed)
-//   Data      = amount0In(32) + amount1In(32) + amount0Out(32) + amount1Out(32)
+//
+//	Topics[0] = TopicSwap
+//	Topics[1] = sender (indexed)
+//	Topics[2] = to (indexed)
+//	Data      = amount0In(32) + amount1In(32) + amount0Out(32) + amount1Out(32)
 func NormalizeSwap(
 	l rpc.Log, chain, market, endpoint, versionID string,
 	token0Addr, token1Addr string, baseTokens []string,
@@ -235,10 +238,11 @@ func NormalizeSwap(
 // NormalizeBurn converts a Burn pair log into a MarketDataDTO.
 //
 // Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to)
-//   Topics[0] = TopicBurn
-//   Topics[1] = sender (indexed)
-//   Topics[2] = to (indexed)
-//   Data      = amount0 (32 bytes) + amount1 (32 bytes)
+//
+//	Topics[0] = TopicBurn
+//	Topics[1] = sender (indexed)
+//	Topics[2] = to (indexed)
+//	Data      = amount0 (32 bytes) + amount1 (32 bytes)
 func NormalizeBurn(
 	l rpc.Log, chain, market, endpoint, versionID string,
 	token0Addr, token1Addr string, baseTokens []string,

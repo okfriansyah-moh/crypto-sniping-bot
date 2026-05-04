@@ -12,18 +12,18 @@ package data_quality
 // graph analysis (Phase 5+).  Inputs are pre-enriched primitives — this file
 // is dependency-free so it can be unit-tested without a contracts.MarketDataDTO.
 func DetectWashTrading(volume24hUsd float64, holderCount int32, poolAgeSeconds int32) bool {
-if holderCount <= 0 || holderCount >= 50 {
-return false
-}
-if volume24hUsd <= 0 {
-return false
-}
-perHolder := volume24hUsd / float64(holderCount)
-if perHolder < 5000.0 {
-return false
-}
-if poolAgeSeconds <= 0 || poolAgeSeconds > 3600 {
-return false
-}
-return true
+	if holderCount <= 0 || holderCount >= 50 {
+		return false
+	}
+	if volume24hUsd <= 0 {
+		return false
+	}
+	perHolder := volume24hUsd / float64(holderCount)
+	if perHolder < 5000.0 {
+		return false
+	}
+	if poolAgeSeconds <= 0 || poolAgeSeconds > 3600 {
+		return false
+	}
+	return true
 }

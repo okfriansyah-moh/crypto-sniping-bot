@@ -166,6 +166,15 @@ func runServer() {
 		}
 	}()
 
+	// Rescan worker — Phase 10 (Layer 0.5). Disabled unless cfg.Rescan.Enabled.
+	// Re-emits market_data_event for tokens in configured age bands so the
+	// MOMENTUM_EDGE path can capture alpha that NEW_LAUNCH_EDGE missed.
+	go func() {
+		if err := workers.RunRescan(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+			logger.Error("rescan_worker_exited", "error", err)
+		}
+	}()
+
 	// Latency profile emitter — periodic per-chain profile generator (Phase 4).
 	latencyWorker := workers.NewLatencyWorker(db, cfg, orch.VersionID(), logger)
 	go func() {

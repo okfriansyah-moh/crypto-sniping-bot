@@ -32,12 +32,12 @@ type walletState struct {
 
 // GasBudgetImpl is the in-memory daily gas budget tracker.
 type GasBudgetImpl struct {
-	mu                    sync.Mutex
-	wallets               map[string]*walletState
-	systemSpentGwei       int64
-	walletDailyCapGwei    int64
-	systemDailyCapGwei    int64
-	resetDate             string // "YYYY-MM-DD" of the last reset
+	mu                 sync.Mutex
+	wallets            map[string]*walletState
+	systemSpentGwei    int64
+	walletDailyCapGwei int64
+	systemDailyCapGwei int64
+	resetDate          string // "YYYY-MM-DD" of the last reset
 }
 
 // NewGasBudget creates a new GasBudget with the given per-wallet and system caps in gwei.

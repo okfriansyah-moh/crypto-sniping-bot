@@ -140,16 +140,16 @@ func TestBackpressureExitProtected(t *testing.T) {
 func TestHaltEvaluateMode(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		current string
-		dd      float64
+		current  string
+		dd       float64
 		wantMode string
 	}{
 		{"BALANCED", 0.02, "BALANCED"},
 		{"BALANCED", 0.06, "DEGRADED"},
 		{"BALANCED", 0.11, "HALTED"},
-		{"HALTED", 0.02, "BALANCED"},    // auto-resume
-		{"DEGRADED", 0.02, "BALANCED"},  // DEGRADED also resumes when below resume threshold
-		{"DEGRADED", 0.07, "DEGRADED"},  // stays degraded
+		{"HALTED", 0.02, "BALANCED"},   // auto-resume
+		{"DEGRADED", 0.02, "BALANCED"}, // DEGRADED also resumes when below resume threshold
+		{"DEGRADED", 0.07, "DEGRADED"}, // stays degraded
 	}
 	for _, tc := range cases {
 		result := EvaluateMode(tc.current, tc.dd, 0.05, 0.10, 0.03)
