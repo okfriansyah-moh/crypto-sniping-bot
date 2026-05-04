@@ -22,11 +22,14 @@ type RescanConfig struct {
 // RescanEligibility defines the DQ sub-score thresholds that a token must
 // satisfy to be eligible for a rescan band. Tokens exceeding any threshold
 // are permanently excluded, regardless of mode.
+//
+// Threshold fields use pointers to distinguish "not configured" (nil → use
+// default) from an intentional strict-zero threshold (pointer to 0).
 type RescanEligibility struct {
-	MaxHoneypotScore float64 `yaml:"max_honeypot_score"` // [0.0, 1.0]
-	MaxRugScore      float64 `yaml:"max_rug_score"`      // [0.0, 1.0]
-	MaxBuyTaxBps     int32   `yaml:"max_buy_tax_bps"`    // [0, 10000]
-	IncludePassed    bool    `yaml:"include_passed"`     // also rescan PASS/RISKY_PASS tokens
+	MaxHoneypotScore *float64 `yaml:"max_honeypot_score"` // [0.0, 1.0]; nil = use default 0.5
+	MaxRugScore      *float64 `yaml:"max_rug_score"`      // [0.0, 1.0]; nil = use default 0.65
+	MaxBuyTaxBps     *int32   `yaml:"max_buy_tax_bps"`    // [0, 10000]; nil = use default 3000
+	IncludePassed    bool     `yaml:"include_passed"`     // also rescan PASS/RISKY_PASS tokens
 }
 
 // RescanBand defines one age window for rescan eligibility.
@@ -55,16 +58,24 @@ func applyRescanDefaults(r *RescanConfig) {
 		}
 	}
 
-	if r.Eligibility.MaxHoneypotScore == 0 {
-		r.Eligibility.MaxHoneypotScore = 0.5
+	if r.Eligibility.MaxHoneypotScore == nil {
+		v := 0.5
+		r.Eligibility.MaxHoneypotScore = &v
 	}
-	if r.Eligibility.MaxRugScore == 0 {
-		r.Eligibility.MaxRugScore = 0.65
+	if r.Eligibility.MaxRugScore == nil {
+		v := 0.65
+		r.Eligibility.MaxRugScore = &v
 	}
-	if r.Eligibility.MaxBuyTaxBps == 0 {
-		r.Eligibility.MaxBuyTaxBps = 3000
+	if r.Eligibility.MaxBuyTaxBps == nil {
+		v := int32(3000)
+		r.Eligibility.MaxBuyTaxBps = &v
 	}
-	r.Eligibility.IncludePassed = true
+	if !r.Enabled {
+		// Preserve explicit include_passed: false when rescans are enabled.
+		// With a non-pointer bool we can only safely apply the default in
+		// the disabled/absent configuration path.
+		r.Eligibility.IncludePassed = true
+	}
 
 	if len(r.Bands) == 0 {
 		r.Bands = []RescanBand{
@@ -78,26 +89,34 @@ func applyRescanDefaults(r *RescanConfig) {
 	if r.ModeOverrides == nil {
 		r.ModeOverrides = map[string]RescanEligibility{
 			"STRICT": {
-				MaxHoneypotScore: 0.30,
-				MaxRugScore:      0.50,
-				MaxBuyTaxBps:     1500,
+				MaxHoneypotScore: float64Ptr(0.30),
+				MaxRugScore:      float64Ptr(0.50),
+				MaxBuyTaxBps:     int32Ptr(1500),
 				IncludePassed:    false,
 			},
 			"BALANCED": {
-				MaxHoneypotScore: 0.5,
-				MaxRugScore:      0.65,
-				MaxBuyTaxBps:     3000,
+				MaxHoneypotScore: float64Ptr(0.5),
+				MaxRugScore:      float64Ptr(0.65),
+				MaxBuyTaxBps:     int32Ptr(3000),
 				IncludePassed:    true,
 			},
 			"EXPLORATION": {
-				MaxHoneypotScore: 0.60,
-				MaxRugScore:      0.75,
-				MaxBuyTaxBps:     4500,
+				MaxHoneypotScore: float64Ptr(0.60),
+				MaxRugScore:      float64Ptr(0.75),
+				MaxBuyTaxBps:     int32Ptr(4500),
 				IncludePassed:    true,
 			},
 		}
 	}
 }
+
+// float64Ptr returns a pointer to v. Used to express optional float64 config
+// thresholds where nil means "use default" and &0.0 means "strict zero".
+func float64Ptr(v float64) *float64 { return &v }
+
+// int32Ptr returns a pointer to v. Used to express optional int32 config
+// thresholds where nil means "use default" and &0 means "strict zero".
+func int32Ptr(v int32) *int32 { return &v }
 
 // validateRescanConfig enforces structural correctness rules.
 // Returns a non-nil error describing the first violation found.
@@ -122,13 +141,17 @@ func validateRescanConfig(r RescanConfig) error {
 				i, i-1)
 		}
 	}
-	if r.Eligibility.MaxHoneypotScore < 0 || r.Eligibility.MaxHoneypotScore > 1.0 {
+	if r.Eligibility.MaxHoneypotScore != nil && (*r.Eligibility.MaxHoneypotScore < 0 || *r.Eligibility.MaxHoneypotScore > 1.0) {
 		return fmt.Errorf("rescan.eligibility.max_honeypot_score must be in [0.0, 1.0], got %f",
-			r.Eligibility.MaxHoneypotScore)
+			*r.Eligibility.MaxHoneypotScore)
 	}
-	if r.Eligibility.MaxBuyTaxBps < 0 || r.Eligibility.MaxBuyTaxBps > 10000 {
+	if r.Eligibility.MaxRugScore != nil && (*r.Eligibility.MaxRugScore < 0 || *r.Eligibility.MaxRugScore > 1.0) {
+		return fmt.Errorf("rescan.eligibility.max_rug_score must be in [0.0, 1.0], got %f",
+			*r.Eligibility.MaxRugScore)
+	}
+	if r.Eligibility.MaxBuyTaxBps != nil && (*r.Eligibility.MaxBuyTaxBps < 0 || *r.Eligibility.MaxBuyTaxBps > 10000) {
 		return fmt.Errorf("rescan.eligibility.max_buy_tax_bps must be in [0, 10000], got %d",
-			r.Eligibility.MaxBuyTaxBps)
+			*r.Eligibility.MaxBuyTaxBps)
 	}
 	validModes := map[string]bool{"STRICT": true, "BALANCED": true, "EXPLORATION": true}
 	for k := range r.ModeOverrides {

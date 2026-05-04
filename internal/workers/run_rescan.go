@@ -110,9 +110,9 @@ func runRescanTick(
 		rows, err := adapter.GetTokensForRescan(ctx, database.RescanQuery{
 			MinAgeSeconds:     band.MinAgeSeconds,
 			MaxAgeSeconds:     band.MaxAgeSeconds,
-			MaxHoneypotScore:  eligibility.MaxHoneypotScore,
-			MaxRugScore:       eligibility.MaxRugScore,
-			MaxBuyTaxBps:      eligibility.MaxBuyTaxBps,
+			MaxHoneypotScore:  *eligibility.MaxHoneypotScore,
+			MaxRugScore:       *eligibility.MaxRugScore,
+			MaxBuyTaxBps:      *eligibility.MaxBuyTaxBps,
 			IncludePassed:     eligibility.IncludePassed,
 			SkipOpenPositions: cfg.Rescan.SkipOpenPositions,
 			Limit:             cfg.Rescan.MaxPerBandPerTick,
@@ -177,7 +177,7 @@ func emitRescanEvent(
 	rescanned.CorrelationID = traceID
 	rescanned.CausationID = "" // Layer 0 root convention
 	rescanned.VersionID = versionID
-	rescanned.IngestedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	rescanned.IngestedAt = time.Unix(bucketTs, 0).UTC().Format(time.RFC3339Nano)
 	rescanned.Transport = "rescan_" + band.Name // diagnostic tag for log-reviewer
 	rescanned.Priority = band.Priority
 

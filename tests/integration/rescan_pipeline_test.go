@@ -49,7 +49,6 @@ func newRescanRecorder(rows []contracts.MarketDataDTO, mode string) *rescanRecor
 		activeVersion: &database.StrategyVersion{StrategyVersionID: "v-integ-1"},
 	}
 	r.memAdapter.runs = make(map[string]*database.PipelineRun)
-	r.memAdapter.runs = make(map[string]*database.PipelineRun)
 	return r
 }
 
@@ -101,9 +100,9 @@ func rescanIntegConfig(enabled bool, intervalSec int) *config.Config {
 		MaxPerBandPerTick: 100,
 		SkipOpenPositions: true,
 		Eligibility: config.RescanEligibility{
-			MaxHoneypotScore: 0.5,
-			MaxRugScore:      0.65,
-			MaxBuyTaxBps:     3000,
+			MaxHoneypotScore: func() *float64 { v := 0.5; return &v }(),
+			MaxRugScore:      func() *float64 { v := 0.65; return &v }(),
+			MaxBuyTaxBps:     func() *int32 { v := int32(3000); return &v }(),
 			IncludePassed:    true,
 		},
 		Bands: []config.RescanBand{
@@ -111,9 +110,9 @@ func rescanIntegConfig(enabled bool, intervalSec int) *config.Config {
 		},
 		ModeOverrides: map[string]config.RescanEligibility{
 			"STRICT": {
-				MaxHoneypotScore: 0.30,
-				MaxRugScore:      0.50,
-				MaxBuyTaxBps:     1500,
+				MaxHoneypotScore: func() *float64 { v := 0.30; return &v }(),
+				MaxRugScore:      func() *float64 { v := 0.50; return &v }(),
+				MaxBuyTaxBps:     func() *int32 { v := int32(1500); return &v }(),
 				IncludePassed:    false,
 			},
 		},

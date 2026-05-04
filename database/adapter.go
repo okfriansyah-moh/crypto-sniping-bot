@@ -558,30 +558,6 @@ type Adapter interface {
 	// rehydrate their in-memory ring buffers.
 	// Returns an empty (non-nil) outer map when no rows exist.
 	LoadBaselines(ctx context.Context, module string) (map[string]map[string][]float64, error)
-
-	// ── Phase 10: Rescan Layer (Layer 0.5) ───────────────────────────────────
-
-	// GetTokensForRescan returns up to q.Limit MarketDataDTOs whose
-	// (current_time - market_data.ingested_at) falls in [q.MinAgeSeconds,
-	// q.MaxAgeSeconds], filtered by the latest data_quality row's eligibility
-	// (sub-scores ≤ thresholds), excluding tokens whose token_lifecycle.current_state
-	// is in the in-flight set when q.SkipOpenPositions is true.
-	// Results are deterministic: ordered by ingested_at DESC, token_address ASC;
-	// one row per token (latest). Read-only. Idempotent. No side effects.
-	GetTokensForRescan(ctx context.Context, q RescanQuery) ([]contracts.MarketDataDTO, error)
-}
-
-// RescanQuery carries the eligibility filter parameters for GetTokensForRescan.
-type RescanQuery struct {
-	Chain             string // optional; "" = all chains
-	MinAgeSeconds     int
-	MaxAgeSeconds     int
-	MaxHoneypotScore  float64
-	MaxRugScore       float64
-	MaxBuyTaxBps      int32
-	IncludePassed     bool // include decision IN ('PASS','RISKY_PASS') alongside REJECT
-	SkipOpenPositions bool
-	Limit             int
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────

@@ -107,9 +107,9 @@ func minRescanConfig(enabled bool) *config.Config {
 			MaxPerBandPerTick: 10,
 			SkipOpenPositions: true,
 			Eligibility: config.RescanEligibility{
-				MaxHoneypotScore: 0.5,
-				MaxRugScore:      0.65,
-				MaxBuyTaxBps:     3000,
+				MaxHoneypotScore: func() *float64 { v := 0.5; return &v }(),
+				MaxRugScore:      func() *float64 { v := 0.65; return &v }(),
+				MaxBuyTaxBps:     func() *int32 { v := int32(3000); return &v }(),
 				IncludePassed:    true,
 			},
 			Bands: []config.RescanBand{
@@ -118,15 +118,15 @@ func minRescanConfig(enabled bool) *config.Config {
 			},
 			ModeOverrides: map[string]config.RescanEligibility{
 				"STRICT": {
-					MaxHoneypotScore: 0.30,
-					MaxRugScore:      0.50,
-					MaxBuyTaxBps:     1500,
+					MaxHoneypotScore: func() *float64 { v := 0.30; return &v }(),
+					MaxRugScore:      func() *float64 { v := 0.50; return &v }(),
+					MaxBuyTaxBps:     func() *int32 { v := int32(1500); return &v }(),
 					IncludePassed:    false,
 				},
 				"BALANCED": {
-					MaxHoneypotScore: 0.5,
-					MaxRugScore:      0.65,
-					MaxBuyTaxBps:     3000,
+					MaxHoneypotScore: func() *float64 { v := 0.5; return &v }(),
+					MaxRugScore:      func() *float64 { v := 0.65; return &v }(),
+					MaxBuyTaxBps:     func() *int32 { v := int32(3000); return &v }(),
 					IncludePassed:    true,
 				},
 			},
@@ -273,8 +273,12 @@ func TestRescanWorker_ModeOverride_STRICT(t *testing.T) {
 
 	// STRICT override has max_honeypot_score=0.30.
 	eligibility := resolveEligibility(cfg.Rescan, "STRICT")
-	if eligibility.MaxHoneypotScore != 0.30 {
-		t.Errorf("STRICT MaxHoneypotScore: want 0.30, got %f", eligibility.MaxHoneypotScore)
+	if eligibility.MaxHoneypotScore == nil || *eligibility.MaxHoneypotScore != 0.30 {
+		v := float64(0)
+		if eligibility.MaxHoneypotScore != nil {
+			v = *eligibility.MaxHoneypotScore
+		}
+		t.Errorf("STRICT MaxHoneypotScore: want 0.30, got %f", v)
 	}
 	if eligibility.IncludePassed {
 		t.Error("STRICT IncludePassed must be false")
@@ -288,8 +292,14 @@ func TestRescanWorker_UnknownModeUsesDefault(t *testing.T) {
 	cfg := minRescanConfig(true)
 	eligibility := resolveEligibility(cfg.Rescan, "INVALID_MODE")
 	if eligibility.MaxHoneypotScore != cfg.Rescan.Eligibility.MaxHoneypotScore {
-		t.Errorf("fallback: want %f, got %f",
-			cfg.Rescan.Eligibility.MaxHoneypotScore, eligibility.MaxHoneypotScore)
+		var got, want float64
+		if eligibility.MaxHoneypotScore != nil {
+			got = *eligibility.MaxHoneypotScore
+		}
+		if cfg.Rescan.Eligibility.MaxHoneypotScore != nil {
+			want = *cfg.Rescan.Eligibility.MaxHoneypotScore
+		}
+		t.Errorf("fallback: want %f, got %f", want, got)
 	}
 }
 

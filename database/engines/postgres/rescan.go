@@ -173,8 +173,8 @@ FROM market_data md
 JOIN latest_dq dq ON dq.token_address = md.token_address
 LEFT JOIN latest_lifecycle ll ON ll.token_address = md.token_address
 WHERE
-    md.ingested_at::timestamptz <= NOW() - ($1 * INTERVAL '1 second')
-    AND md.ingested_at::timestamptz >= NOW() - ($2 * INTERVAL '1 second')
+    NULLIF(md.ingested_at, '')::timestamptz <= NOW() - ($1 * INTERVAL '1 second')
+    AND NULLIF(md.ingested_at, '')::timestamptz >= NOW() - ($2 * INTERVAL '1 second')
     AND ($3 = '' OR md.chain = $3)
     AND COALESCE(dq.honeypot_score, 0) <= $4
     AND COALESCE(dq.rug_score, 0)      <= $5

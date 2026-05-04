@@ -285,7 +285,7 @@ func (c *Config) validateRanges(logger *slog.Logger) error {
 
 	// ── Phase 10: rescan structural invariants ─────────────────────
 	if c.Rescan.Enabled {
-		if err := validateRescan(c.Rescan); err != nil {
+		if err := validateRescanConfig(c.Rescan); err != nil {
 			return err
 		}
 	}

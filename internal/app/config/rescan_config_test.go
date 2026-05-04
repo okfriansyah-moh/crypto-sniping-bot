@@ -10,6 +10,12 @@ import (
 	"crypto-sniping-bot/internal/app/config"
 )
 
+// fp returns a pointer to v; used when constructing RescanEligibility literals.
+func fp(v float64) *float64 { return &v }
+
+// ip returns a pointer to v; used when constructing RescanEligibility literals.
+func ip(v int32) *int32 { return &v }
+
 // rescanValidConfig returns a minimal config with a valid, enabled RescanConfig.
 func rescanValidConfig() *config.Config {
 	cfg := minimalValidConfig()
@@ -19,9 +25,9 @@ func rescanValidConfig() *config.Config {
 		MaxPerBandPerTick: 10,
 		SkipOpenPositions: true,
 		Eligibility: config.RescanEligibility{
-			MaxHoneypotScore: 0.5,
-			MaxRugScore:      0.65,
-			MaxBuyTaxBps:     3000,
+			MaxHoneypotScore: fp(0.5),
+			MaxRugScore:      fp(0.65),
+			MaxBuyTaxBps:     ip(3000),
 			IncludePassed:    true,
 		},
 		Bands: []config.RescanBand{
@@ -30,9 +36,9 @@ func rescanValidConfig() *config.Config {
 		},
 		ModeOverrides: map[string]config.RescanEligibility{
 			"STRICT": {
-				MaxHoneypotScore: 0.30,
-				MaxRugScore:      0.50,
-				MaxBuyTaxBps:     1500,
+				MaxHoneypotScore: fp(0.30),
+				MaxRugScore:      fp(0.50),
+				MaxBuyTaxBps:     ip(1500),
 				IncludePassed:    false,
 			},
 		},
@@ -152,7 +158,7 @@ func TestRescanConfig_BandsNotSortedAscending_Fails(t *testing.T) {
 func TestRescanConfig_HoneypotScoreAboveOne_Fails(t *testing.T) {
 	// Arrange
 	cfg := rescanValidConfig()
-	cfg.Rescan.Eligibility.MaxHoneypotScore = 1.1 // out of [0,1]
+	cfg.Rescan.Eligibility.MaxHoneypotScore = fp(1.1) // out of [0,1]
 
 	// Act
 	err := cfg.Validate()
@@ -166,7 +172,7 @@ func TestRescanConfig_HoneypotScoreAboveOne_Fails(t *testing.T) {
 func TestRescanConfig_HoneypotScoreNegative_Fails(t *testing.T) {
 	// Arrange
 	cfg := rescanValidConfig()
-	cfg.Rescan.Eligibility.MaxHoneypotScore = -0.1
+	cfg.Rescan.Eligibility.MaxHoneypotScore = fp(-0.1)
 
 	// Act
 	err := cfg.Validate()
@@ -180,7 +186,7 @@ func TestRescanConfig_HoneypotScoreNegative_Fails(t *testing.T) {
 func TestRescanConfig_BuyTaxBpsAboveMax_Fails(t *testing.T) {
 	// Arrange
 	cfg := rescanValidConfig()
-	cfg.Rescan.Eligibility.MaxBuyTaxBps = 10001 // above [0, 10000]
+	cfg.Rescan.Eligibility.MaxBuyTaxBps = ip(10001) // above [0, 10000]
 
 	// Act
 	err := cfg.Validate()
@@ -194,7 +200,7 @@ func TestRescanConfig_BuyTaxBpsAboveMax_Fails(t *testing.T) {
 func TestRescanConfig_BuyTaxBpsNegative_Fails(t *testing.T) {
 	// Arrange
 	cfg := rescanValidConfig()
-	cfg.Rescan.Eligibility.MaxBuyTaxBps = -1
+	cfg.Rescan.Eligibility.MaxBuyTaxBps = ip(-1)
 
 	// Act
 	err := cfg.Validate()
@@ -209,7 +215,7 @@ func TestRescanConfig_InvalidModeOverrideKey_Fails(t *testing.T) {
 	// Arrange
 	cfg := rescanValidConfig()
 	cfg.Rescan.ModeOverrides = map[string]config.RescanEligibility{
-		"UNKNOWN_MODE": {MaxHoneypotScore: 0.5, MaxRugScore: 0.5, MaxBuyTaxBps: 1000},
+		"UNKNOWN_MODE": {MaxHoneypotScore: fp(0.5), MaxRugScore: fp(0.5), MaxBuyTaxBps: ip(1000)},
 	}
 
 	// Act
@@ -225,9 +231,9 @@ func TestRescanConfig_ValidModeOverrideKeys_Passes(t *testing.T) {
 	// Arrange
 	cfg := rescanValidConfig()
 	cfg.Rescan.ModeOverrides = map[string]config.RescanEligibility{
-		"STRICT":      {MaxHoneypotScore: 0.3, MaxRugScore: 0.5, MaxBuyTaxBps: 1500},
-		"BALANCED":    {MaxHoneypotScore: 0.5, MaxRugScore: 0.65, MaxBuyTaxBps: 3000},
-		"EXPLORATION": {MaxHoneypotScore: 0.6, MaxRugScore: 0.75, MaxBuyTaxBps: 4500},
+		"STRICT":      {MaxHoneypotScore: fp(0.3), MaxRugScore: fp(0.5), MaxBuyTaxBps: ip(1500)},
+		"BALANCED":    {MaxHoneypotScore: fp(0.5), MaxRugScore: fp(0.65), MaxBuyTaxBps: ip(3000)},
+		"EXPLORATION": {MaxHoneypotScore: fp(0.6), MaxRugScore: fp(0.75), MaxBuyTaxBps: ip(4500)},
 	}
 
 	// Act
@@ -273,8 +279,8 @@ rescan:
 	if len(cfg.Rescan.ModeOverrides) == 0 {
 		t.Error("applyRescanDefaults must populate default mode_overrides when nil")
 	}
-	if !cfg.Rescan.Eligibility.IncludePassed {
-		t.Error("applyRescanDefaults must set IncludePassed=true by default")
+	if cfg.Rescan.Eligibility.IncludePassed {
+		t.Error("applyRescanDefaults must NOT set IncludePassed=true when rescan is enabled; operator must set it explicitly")
 	}
 }
 
