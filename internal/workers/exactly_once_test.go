@@ -29,9 +29,13 @@ type exactlyOnceAdapter struct {
 	priorExecResult *contracts.ExecutionResultDTO
 }
 
-func newExactlyOnceAdapter() *exactlyOnceAdapter {
+func newExactlyOnceAdapter(currentState string) *exactlyOnceAdapter {
 	return &exactlyOnceAdapter{
-		stubAdapter: &stubAdapter{lifecycleResult: defaultLC("lc-exec-1")},
+		stubAdapter: &stubAdapter{lifecycleResult: &database.Lifecycle{
+			TokenLifecycleID: "lc-exec-1",
+			CurrentState:     currentState,
+			StateVersion:     1,
+		}},
 	}
 }
 
@@ -85,7 +89,8 @@ func (a *exactlyOnceAdapter) TransitionState(_ context.Context, _ database.Trans
 //     The downstream InsertEvent is idempotent via ON CONFLICT (event_id),
 //     making re-emission safe.
 func TestExecutionWorker_DuplicateAllocation_Suppressed(t *testing.T) {
-	adapter := newExactlyOnceAdapter()
+	// Execution worker transitions from "SELECTED"; lifecycle must start there.
+	adapter := newExactlyOnceAdapter("SELECTED")
 	w := NewExecutionWorker(adapter, minConfig(), nil, "", 1, "", nil, nil)
 
 	alloc := contracts.AllocationDTO{
@@ -164,7 +169,8 @@ func TestExecutionWorker_DuplicateAllocation_Suppressed(t *testing.T) {
 // so the downstream InsertEvent (idempotent via ON CONFLICT) cannot lose
 // the event during a crash window between Upsert and InsertEvent.
 func TestPositionOpenWorker_DuplicateExecution_Suppressed(t *testing.T) {
-	adapter := newExactlyOnceAdapter()
+	// Position open worker transitions from "EXECUTED"; lifecycle must start there.
+	adapter := newExactlyOnceAdapter("EXECUTED")
 	w := NewPositionOpenWorker(adapter, minConfig(), nil)
 
 	exec := contracts.ExecutionResultDTO{

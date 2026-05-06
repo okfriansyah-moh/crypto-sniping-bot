@@ -23,6 +23,11 @@ type ProbesConfig struct {
 	// SolanaHolderDist configures the SPL holder-concentration probe.
 	SolanaHolderDist SolanaHolderDistYAML `yaml:"solana_holder_dist"`
 
+	// SolanaMetadata configures the off-chain metadata fetch probe.
+	// Fetches the MetadataURI (IPFS/Arweave/HTTPS) and sets
+	// SocialLinksKnown + HasSocialLinks. No RPC client required.
+	SolanaMetadata SolanaMetadataYAML `yaml:"solana_metadata"`
+
 	// EVMPairReserves configures the Uniswap-V2 getReserves probe.
 	EVMPairReserves EVMPairReservesYAML `yaml:"evm_pair_reserves"`
 }
@@ -56,4 +61,14 @@ type SolanaHolderDistYAML struct {
 type EVMPairReservesYAML struct {
 	Enabled   bool `yaml:"enabled"`
 	TimeoutMs int  `yaml:"timeout_ms"`
+}
+
+// SolanaMetadataYAML configures the off-chain metadata fetch probe.
+// The probe resolves IPFS/Arweave URIs via the configured gateway and
+// parses the JSON for social link fields.
+type SolanaMetadataYAML struct {
+	Enabled      bool   `yaml:"enabled"`
+	TimeoutMs    int    `yaml:"timeout_ms"`
+	IPFSGateway  string `yaml:"ipfs_gateway"`
+	MaxBodyBytes int64  `yaml:"max_body_bytes"`
 }

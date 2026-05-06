@@ -155,6 +155,13 @@ func doMandatoryTransition(
 	if err != nil {
 		return fmt.Errorf("fetch_lifecycle %s: %w", lifecycleID, err)
 	}
+	if lc.CurrentState != from {
+		// Idempotent skip: lifecycle already advanced past the expected from-state.
+		// This occurs when a stale unprocessed event from a prior session is
+		// re-consumed. Return the sentinel so the worker can drain it cleanly.
+		return fmt.Errorf("lifecycle_already_advanced %s: state=%q, expected=%q: %w",
+			lifecycleID, lc.CurrentState, from, database.ErrLifecycleAlreadyAdvanced)
+	}
 	return transitionMandatory(ctx, adapter, database.TransitionRequest{
 		LifecycleID:       lifecycleID,
 		ExpectedFromState: from,

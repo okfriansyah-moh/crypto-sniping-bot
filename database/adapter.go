@@ -241,6 +241,12 @@ type Adapter interface {
 	// a chain. Returns (nil, nil) when absent.
 	GetCreatorBlacklistEntry(ctx context.Context, creatorAddress string, chain string) (*CreatorBlacklistEntry, error)
 
+	// CountTokensByCreator returns the number of distinct tokens in market_data
+	// whose creator_address matches creatorAddress (excluding excludeToken).
+	// Returns 0 (not an error) when the column is absent or the creator is new.
+	// Used by the Layer 1 dev-reputation detector to detect serial launchers.
+	CountTokensByCreator(ctx context.Context, creatorAddress string, excludeToken string) (int32, error)
+
 	// ── Execution: Nonce Manager ─────────────────────────────────────────────
 
 	// AllocateNonce atomically reserves the next nonce for a wallet.
@@ -564,26 +570,53 @@ type Adapter interface {
 
 // PipelineStats is a snapshot of token funnel counts over a time window.
 // Returned by GetPipelineStats for the /pipeline Telegram command.
+//
+// Counts are CUMULATIVE — each value represents "tokens that reached AT LEAST
+// this stage", not "tokens currently sitting in this state". This matches the
+// operator's mental model of a funnel: SELECTED ≤ VALIDATED ≤ DQ_PASSED ≤ DETECTED.
+// DETECTED equals the total token count in the window (all tokens were at
+// DETECTED at some point). REJECTED and FAILED are raw (non-cumulative) terminal counts.
 type PipelineStats struct {
-	// Funnel counts — how many tokens reached each lifecycle state.
-	Detected       int64
-	DQPassed       int64
-	FeatureReady   int64
-	EdgeDetected   int64
-	Validated      int64
-	Selected       int64
-	Executed       int64
-	PositionOpen   int64
-	PositionClosed int64
-	Rejected       int64
-	Failed         int64
+	// Funnel counts (cumulative — see comment above).
+	Detected       int64 // total tokens in window (all started at DETECTED)
+	DQPassed       int64 // reached at least DQ_PASSED
+	FeatureReady   int64 // reached at least FEATURE_READY
+	EdgeDetected   int64 // reached at least EDGE_DETECTED
+	Validated      int64 // reached at least VALIDATED
+	Selected       int64 // reached at least SELECTED (incl. FAILED from SELECTED+)
+	Executed       int64 // reached at least EXECUTED (incl. FAILED from EXECUTED+)
+	PositionOpen   int64 // reached at least POSITION_OPEN (incl. FAILED from POSITION_OPEN+)
+	PositionClosed int64 // reached POSITION_CLOSED or EVALUATED
+	Evaluated      int64 // reached terminal EVALUATED state
 
-	// Recent is the last 10 tokens that passed DQ validation in the window,
-	// newest first. Includes ticker/name when available (Solana tokens).
+	// Terminal counts (non-cumulative).
+	Rejected int64 // terminal REJECTED (failed DQ or a validation gate)
+	Failed   int64 // terminal FAILED (execution or position failure)
+
+	// Failure breakdown — how many FAILED tokens failed at each stage.
+	// Sums to Failed. Useful for diagnosing whether failures are execution
+	// failures (FailedAtSelected, SELECTED→FAILED) vs position-open failures
+	// (FailedAtExecuted, EXECUTED→FAILED) vs position-close failures
+	// (FailedAtPositionOpen, POSITION_OPEN→FAILED).
+	FailedAtSelected     int64 // failed during execution attempt (SELECTED→FAILED)
+	FailedAtExecuted     int64 // failed during position-open (EXECUTED→FAILED)
+	FailedAtPositionOpen int64 // failed during position-close (POSITION_OPEN→FAILED)
+
+	// Recent is the last 10 tokens detected in the window, newest first.
+	// Includes ticker/name when available (Solana tokens).
 	Recent []RecentToken
 
 	// WindowHours is the lookback window used for the query.
 	WindowHours int
+}
+
+// RescanStats holds emission counts for the rescan worker over a time window.
+// Returned by GetRescanStats (concrete method on the postgres engine, not part
+// of the Adapter interface — callers type-assert to rescanQueryer when needed).
+type RescanStats struct {
+	TotalEmitted int64            // market_data rows with transport LIKE 'rescan_%' in window
+	ByBand       map[string]int64 // band name (e.g. "15m") → count; nil when none
+	WindowHours  int
 }
 
 // RecentToken is one row in PipelineStats.Recent.

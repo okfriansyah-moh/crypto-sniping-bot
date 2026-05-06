@@ -147,6 +147,18 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 			"max_total_supply_threshold", m.runtime.Thresholds.MaxTotalSupply,
 		)
 	}
+	if m.runtime != nil && m.runtime.Thresholds.MinTokenAgeSeconds > 0 {
+		// Hard-reject tokens younger than the minimum age. Tokens under this
+		// threshold have incomplete data: holder distribution is not settled,
+		// wash patterns are not yet visible, and metadata probes may not have
+		// propagated. The rescan pipeline re-evaluates when age ≥ threshold.
+		// Unknown age (empty timestamps) returns -1 → check is skipped to
+		// avoid false rejections on tokens whose timestamps were not populated.
+		age := tokenAgeSeconds(in.BlockTimestamp, in.IngestedAt)
+		if age >= 0 && age < int64(m.runtime.Thresholds.MinTokenAgeSeconds) {
+			rejectReasons = append(rejectReasons, "token_too_young")
+		}
+	}
 
 	// ── Detector toggles + weights ──────────────────────────────────────
 	rugEnabled := true
@@ -154,6 +166,7 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	taxEnabled := true
 	honeypotEnabled := true
 	fakeLiqEnabled := true
+	devReputationEnabled := true
 	if m.runtime != nil {
 		rugEnabled = m.runtime.Detectors.RugAuthority || m.runtime.Detectors.LpLock
 		washEnabled = m.runtime.Detectors.WashTrading
@@ -162,6 +175,7 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 		// FakeLiquidity has no dedicated YAML toggle yet; tie to LpLock so
 		// operators can disable both signals together.
 		fakeLiqEnabled = m.runtime.Detectors.LpLock
+		devReputationEnabled = m.runtime.Detectors.DevReputation
 	}
 
 	weights := defaultRiskWeights
@@ -172,6 +186,10 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	if fakeLiqWeight <= 0 {
 		fakeLiqWeight = 0.20 // legacy structural contribution
 	}
+	devReputationWeight := weights.DevReputation
+	if devReputationWeight <= 0 {
+		devReputationWeight = 0.25 // default: meaningful but below honeypot/rug
+	}
 
 	// ── Detector thresholds ─────────────────────────────────────────────
 	maxBuyTaxBps := m.cfg.MaxBuyTaxBps
@@ -180,6 +198,8 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	holderConcentrationCap := 0.40
 	minLiquidityUsd := 5000.0
 	minUniqueWallets := int32(5)
+	maxCreatorPrevTokens := int32(5)
+	noSocialLinksRisk := 0.40
 	if m.runtime != nil {
 		if m.runtime.Thresholds.MinLiquidityUsd > 0 {
 			minLiquidityUsd = m.runtime.Thresholds.MinLiquidityUsd
@@ -191,15 +211,22 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 			maxSellTaxBps = m.runtime.Thresholds.TaxSellMaxBps
 		}
 		totalTaxCapBps = m.runtime.Thresholds.TaxTotalMaxBps
+		if m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 {
+			maxCreatorPrevTokens = m.runtime.Thresholds.MaxCreatorPrevTokenCount
+		}
+		if m.runtime.Thresholds.NoSocialLinksRiskScore > 0 {
+			noSocialLinksRisk = m.runtime.Thresholds.NoSocialLinksRiskScore
+		}
 	}
 
 	// ── Run detectors ───────────────────────────────────────────────────
 	var (
-		honeypot HoneypotResult
-		rug      RugResult
-		wash     WashTradingResult
-		fakeLiq  FakeLiquidityResult
-		tax      TaxResult
+		honeypot      HoneypotResult
+		rug           RugResult
+		wash          WashTradingResult
+		fakeLiq       FakeLiquidityResult
+		tax           TaxResult
+		devReputation DevReputationResult
 	)
 	if honeypotEnabled {
 		honeypot = DetectHoneypot(in)
@@ -216,6 +243,9 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	if taxEnabled {
 		tax = DetectTaxManipulation(in, maxBuyTaxBps, maxSellTaxBps, totalTaxCapBps)
 	}
+	if devReputationEnabled {
+		devReputation = DetectDevReputation(in, maxCreatorPrevTokens, noSocialLinksRisk)
+	}
 
 	// ── Aggregate ──────────────────────────────────────────────────────
 	hardReject := honeypot.HardReject
@@ -226,6 +256,7 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	riskScore += weightedDetector(wash.Score, weights.WashTrading, wash.Unknown, profile.UnknownFactor)
 	riskScore += weightedDetector(fakeLiq.Score, fakeLiqWeight, fakeLiq.Unknown, profile.UnknownFactor)
 	riskScore += weightedDetector(tax.Score, weights.TaxAnomaly, tax.Unknown, profile.UnknownFactor)
+	riskScore += weightedDetector(devReputation.Score, devReputationWeight, devReputation.Unknown, profile.UnknownFactor)
 
 	// Structural-failure base contribution mirrors the legacy aggregator
 	// (missing_reserves / reorged / missing_token / insufficient_liquidity
@@ -249,6 +280,7 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	flags = append(flags, wash.Flags...)
 	flags = append(flags, fakeLiq.Flags...)
 	flags = append(flags, tax.Flags...)
+	flags = append(flags, devReputation.Flags...)
 	if honeypot.Unknown {
 		flags = append(flags, honeypot.UnknownFlag)
 	}
@@ -263,6 +295,9 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 	}
 	if tax.Unknown {
 		flags = append(flags, tax.UnknownFlag)
+	}
+	if devReputation.Unknown {
+		flags = append(flags, devReputation.UnknownFlag)
 	}
 
 	// MaxIndeterminateCount: if too many detectors are Unknown, reject
@@ -282,6 +317,9 @@ func (m *Module) ProcessForMode(_ context.Context, in contracts.MarketDataDTO, m
 			unknownCount++
 		}
 		if tax.Unknown {
+			unknownCount++
+		}
+		if devReputation.Unknown {
 			unknownCount++
 		}
 		if unknownCount >= m.runtime.FailurePolicy.MaxIndeterminateCount && profileName == "STRICT" {
@@ -383,4 +421,35 @@ func clampFloat(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+// tokenAgeSeconds computes the token's age in seconds relative to time.Now().
+// It uses BlockTimestamp as the canonical reference (on-chain creation time),
+// falling back to IngestedAt when BlockTimestamp is empty (log-only pump.fun
+// path where BlockTimestamp is not populated until a full tx fetch occurs).
+// Returns -1 when neither field can be parsed — the caller treats -1 as
+// "unknown age; skip the check" rather than as a reject.
+func tokenAgeSeconds(blockTimestamp, ingestedAt string) int64 {
+	ref := blockTimestamp
+	if ref == "" {
+		ref = ingestedAt
+	}
+	if ref == "" {
+		return -1
+	}
+	t, err := time.Parse(time.RFC3339Nano, ref)
+	if err != nil {
+		t2, err2 := time.Parse(time.RFC3339, ref)
+		if err2 != nil {
+			return -1
+		}
+		t = t2
+	}
+	age := int64(time.Since(t).Seconds())
+	if age < 0 {
+		// Clock skew guard: block timestamp slightly in the future is treated
+		// as age=0 (brand new) rather than -1 (unknown).
+		return 0
+	}
+	return age
 }

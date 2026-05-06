@@ -283,6 +283,20 @@ func (c *Config) validateRanges(logger *slog.Logger) error {
 		)
 	}
 
+	// ── probes.solana_metadata ─────────────────────────────────────────
+	if v := c.Probes.SolanaMetadata.TimeoutMs; v != 0 && (v < 100 || v > 30000) {
+		return fmt.Errorf(
+			"config: probes.solana_metadata.timeout_ms=%d must be in [100, 30000] (or 0 for default)",
+			v,
+		)
+	}
+	if v := c.Probes.SolanaMetadata.MaxBodyBytes; v != 0 && (v < 1024 || v > 1024*1024) {
+		return fmt.Errorf(
+			"config: probes.solana_metadata.max_body_bytes=%d must be in [1024, 1048576] (or 0 for default 65536)",
+			v,
+		)
+	}
+
 	// ── Phase 10: rescan structural invariants ─────────────────────
 	if c.Rescan.Enabled {
 		if err := validateRescanConfig(c.Rescan); err != nil {

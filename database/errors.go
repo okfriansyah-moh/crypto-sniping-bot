@@ -49,6 +49,12 @@ var ErrEnvelopeBreach = errors.New("database: exposure envelope breach")
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("database: record not found")
 
+// ErrLifecycleAlreadyAdvanced is returned by doMandatoryTransition when the
+// lifecycle's current state does not match the expected from-state, indicating
+// the lifecycle was already advanced past this stage (typically by a prior
+// session). Callers should treat this as an idempotent skip.
+var ErrLifecycleAlreadyAdvanced = errors.New("database: lifecycle already advanced past expected state")
+
 // ErrNonceGap is returned when the on-chain nonce is ahead of the local
 // nonce manager, indicating a transaction was submitted outside the system.
 var ErrNonceGap = errors.New("database: nonce gap detected")

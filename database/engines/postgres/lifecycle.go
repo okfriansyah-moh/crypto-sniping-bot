@@ -219,65 +219,100 @@ func isTerminalState(state string) bool {
 	return false
 }
 
-// GetPipelineStats returns funnel counts per lifecycle state and the 10 most
-// recently detected tokens (with their ticker if available) for the given
-// window. A single GROUP BY query drives the funnel; a second JOIN query
-// fetches the recent-token list.
+// GetPipelineStats returns cumulative funnel counts and the 10 most recently
+// detected tokens for the given window.
+//
+// Counts are CUMULATIVE: each value represents "tokens that reached AT LEAST
+// this stage". DETECTED = total tokens in window. REJECTED and FAILED are
+// raw terminal counts. A single single-row aggregate query replaces the
+// former GROUP BY approach which returned point-in-time snapshot counts,
+// making the denominator (Detected) nearly always zero for fast-moving tokens.
 func (d *DB) GetPipelineStats(ctx context.Context, windowHours int) (*database.PipelineStats, error) {
 	stats := &database.PipelineStats{WindowHours: windowHours}
 
-	// ── Funnel counts ─────────────────────────────────────────────────────────
+	// ── Cumulative funnel counts ──────────────────────────────────────────────
+	// Uses a CTE to look up the "failed-from" state for each FAILED token via
+	// token_state_transitions. This lets us accurately place FAILED tokens in
+	// the funnel:
+	//   SELECTED→FAILED  = failed during execution attempt (never executed)
+	//   EXECUTED→FAILED  = failed during position-open (never opened)
+	//   POSITION_OPEN→FAILED = failed during position-close
+	// Without this, all FAILED tokens would inflate EXECUTED and POSITION_OPEN
+	// counts even when no trade was ever submitted.
 	const countQ = `
-SELECT current_state, COUNT(*)
-FROM token_lifecycle
-WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
-GROUP BY current_state`
+WITH failed_from AS (
+    -- For each FAILED token find the predecessor state.
+    -- FAILED is terminal so there is exactly one X→FAILED row per lifecycle;
+    -- DISTINCT ON + ORDER BY is a safety guard against duplicate rows.
+    SELECT DISTINCT ON (t.lifecycle_id)
+           t.lifecycle_id,
+           t.from_state
+    FROM   token_state_transitions t
+    WHERE  t.to_state = 'FAILED'
+    ORDER  BY t.lifecycle_id, t.transitioned_at DESC
+)
+SELECT
+    COUNT(*)                                                                   AS detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN ('DETECTED','REJECTED'))    AS dq_passed,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED'))                                    AS feature_ready,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY'))                    AS edge_detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED'))    AS validated,
+    -- selected: reached SELECTED or any later state (including FAILED from SELECTED+)
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+        'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED')) AS selected,
+    -- executed: actually submitted a transaction (reached EXECUTED) or failed
+    --           AFTER execution completed (EXECUTED→FAILED or POSITION_OPEN→FAILED)
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state IN ('EXECUTED','POSITION_OPEN')))                AS executed,
+    -- position_open: an on-chain position was actually opened (reached POSITION_OPEN)
+    --                or failed while managing a live position (POSITION_OPEN→FAILED)
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state = 'POSITION_OPEN'))                              AS position_open,
+    COUNT(*) FILTER (WHERE tl.current_state IN ('POSITION_CLOSED','EVALUATED'))AS position_closed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'EVALUATED')                     AS evaluated,
+    COUNT(*) FILTER (WHERE tl.current_state = 'REJECTED')                      AS rejected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED')                        AS failed,
+    -- Failure stage breakdown (sums to failed)
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'SELECTED')                                        AS failed_at_selected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'EXECUTED')                                        AS failed_at_executed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'POSITION_OPEN')                                   AS failed_at_position_open
+FROM token_lifecycle tl
+LEFT JOIN failed_from ff ON ff.lifecycle_id = tl.token_lifecycle_id
+WHERE tl.created_at >= NOW() - ($1 * INTERVAL '1 hour')`
 
-	rows, err := d.pool.QueryContext(ctx, countQ, windowHours)
-	if err != nil {
+	row := d.pool.QueryRowContext(ctx, countQ, windowHours)
+	if err := row.Scan(
+		&stats.Detected,
+		&stats.DQPassed,
+		&stats.FeatureReady,
+		&stats.EdgeDetected,
+		&stats.Validated,
+		&stats.Selected,
+		&stats.Executed,
+		&stats.PositionOpen,
+		&stats.PositionClosed,
+		&stats.Evaluated,
+		&stats.Rejected,
+		&stats.Failed,
+		&stats.FailedAtSelected,
+		&stats.FailedAtExecuted,
+		&stats.FailedAtPositionOpen,
+	); err != nil {
 		return nil, fmt.Errorf("get pipeline stats counts: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var state string
-		var cnt int64
-		if err := rows.Scan(&state, &cnt); err != nil {
-			return nil, fmt.Errorf("get pipeline stats scan: %w", err)
-		}
-		switch state {
-		case "DETECTED":
-			stats.Detected = cnt
-		case "DQ_PASSED":
-			stats.DQPassed = cnt
-		case "FEATURE_READY":
-			stats.FeatureReady = cnt
-		case "EDGE_DETECTED":
-			stats.EdgeDetected = cnt
-		case "VALIDATED":
-			stats.Validated = cnt
-		case "SELECTED":
-			stats.Selected = cnt
-		case "EXECUTED":
-			stats.Executed = cnt
-		case "POSITION_OPEN":
-			stats.PositionOpen = cnt
-		case "POSITION_CLOSED":
-			stats.PositionClosed = cnt
-		case "REJECTED":
-			stats.Rejected = cnt
-		case "FAILED":
-			stats.Failed = cnt
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("get pipeline stats rows: %w", err)
-	}
-
-	// ── Recent tokens (last 10 that passed DQ, newest first) ─────────────────
+	// ── Recent tokens (last 10, newest first) ─────────────────────────────────
 	// LEFT JOIN market_data to pick up symbol/name/chain when persisted (Solana tokens).
-	// DISTINCT ON token_address avoids duplicates when multiple market_data rows
-	// exist for the same token (e.g. multiple swap events after pool creation).
 	const recentQ = `
 SELECT tl.token_address,
        COALESCE(md.symbol, '') AS symbol,
@@ -317,5 +352,48 @@ LIMIT 10`
 		return nil, fmt.Errorf("get pipeline stats recent rows: %w", err)
 	}
 
+	return stats, nil
+}
+
+// GetRescanStats returns emission counts for the rescan worker over the given
+// window, grouped by band name (extracted from the transport column prefix
+// "rescan_<band_name>"). This is a concrete method on *DB — it is NOT part
+// of the database.Adapter interface so callers use a local type assertion.
+func (d *DB) GetRescanStats(ctx context.Context, windowHours int) (*database.RescanStats, error) {
+	const q = `
+SELECT transport, COUNT(*) AS cnt
+FROM market_data
+WHERE transport LIKE 'rescan_%'
+  AND ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+GROUP BY transport
+ORDER BY cnt DESC`
+
+	rows, err := d.pool.QueryContext(ctx, q, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get rescan stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &database.RescanStats{
+		WindowHours: windowHours,
+		ByBand:      make(map[string]int64),
+	}
+	for rows.Next() {
+		var transport string
+		var cnt int64
+		if err := rows.Scan(&transport, &cnt); err != nil {
+			return nil, fmt.Errorf("get rescan stats scan: %w", err)
+		}
+		// strip "rescan_" prefix to get band name
+		band := transport
+		if len(transport) > 7 {
+			band = transport[7:] // "rescan_15m" → "15m"
+		}
+		stats.ByBand[band] = cnt
+		stats.TotalEmitted += cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get rescan stats rows: %w", err)
+	}
 	return stats, nil
 }

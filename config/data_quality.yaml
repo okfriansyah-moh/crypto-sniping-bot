@@ -20,6 +20,11 @@ data_quality:
     wash_trading: true # unique-sender ratio over recent Swaps
     rug_authority: true # ABI selectors (EVM) / mint authority (Solana)
     contract_verified: true # Etherscan / BscScan v2 source-code lookup
+    # dev_reputation: serial-launcher + no-social-links filter.
+    # Requires solana_creator_reputation probe to populate
+    # CreatorPrevTokenCount / SocialLinksKnown on MarketDataDTO.
+    # Enabled in all modes; degrades to Unknown when probe not yet run.
+    dev_reputation: true
 
   # ── Detector thresholds ───────────────────────────────────────
   thresholds:
@@ -59,6 +64,32 @@ data_quality:
     # 0 disables the check entirely.
     max_total_supply: 1000000000 # 1 billion
 
+    # Dev reputation thresholds (requires dev_reputation detector).
+    #
+    # max_creator_prev_token_count: reject contribution rises when the creator
+    # wallet has launched this many prior tokens. The $RIBBIT pattern
+    # (29 launches, 0 migrations) gives full serial-launcher risk.
+    # 0 disables; canonical default: 5.
+    max_creator_prev_token_count: 5
+
+    # no_social_links_risk_score: fixed risk contribution [0,1] when
+    # SocialLinksKnown=true and HasSocialLinks=false. Set to 0 to disable.
+    # Combined with serial-launcher signal this will push most pump-and-dump
+    # tokens over the REJECT threshold. Alone it is a soft signal only.
+    no_social_links_risk_score: 0.40
+
+    # min_token_age_seconds: hard-reject tokens younger than this threshold.
+    # Tokens under this age have incomplete data — holder distribution is not
+    # settled, wash patterns are not yet visible, and metadata probes may not
+    # have propagated. The rescan pipeline re-evaluates the token once it is
+    # old enough. Age measured from BlockTimestamp (on-chain creation time),
+    # falling back to IngestedAt. 0 disables.
+    # Reference token: $LOL (34q2Km…sWYb) — created Mar 2026, migrated to
+    # CEX within hours. Quality profile: social links present, dev 1/1 tokens,
+    # LP burned, contract renounced. 15 minutes gives enough time for holder
+    # distribution and wash patterns to become observable.
+    min_token_age_seconds: 900 # 15 minutes
+
     # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
     rug_dangerous_selectors:
       - "mint"
@@ -90,6 +121,10 @@ data_quality:
     lp_lock_missing: 0.15
     wash_trading: 0.10
     contract_unverified: 0.05
+    # dev_reputation: serial-launcher + no-social-links combined weight.
+    # 0.25 is meaningful (higher than wash_trading) — a dev who has launched
+    # 5+ tokens with 0 migrations is a strong negative signal.
+    dev_reputation: 0.25
 
   # ── Failure handling ──────────────────────────────────────────
   failure_policy:
@@ -116,7 +151,7 @@ data_quality:
     balanced:
       reject_above: 0.50
       risky_pass_above: 0.25
-      unknown_factor: 0.0
+      unknown_factor: 0.35 # was 0.0 — unknown detectors now contribute risk (profit-first)
     exploration:
       reject_above: 0.65
       risky_pass_above: 0.35

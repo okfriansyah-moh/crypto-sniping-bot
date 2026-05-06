@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"runtime/debug"
@@ -144,6 +145,20 @@ func RunWorker(
 
 		output, stageErr := safeProcess(procCtx, handler, evt, evtLog)
 		if stageErr != nil {
+			if errors.Is(stageErr, database.ErrLifecycleAlreadyAdvanced) {
+				// Idempotent skip: stale event from a prior session — lifecycle already
+				// advanced past the expected from-state. Mark it processed to drain
+				// the queue cleanly; do not retry or DLQ.
+				if markErr := adapter.MarkEventProcessed(ctx, evt.EventID); markErr != nil {
+					evtLog.Error("mark_processed_failed", "error", markErr)
+					continue
+				}
+				evtLog.Info("stage_skipped_lifecycle_advanced",
+					"lifecycle_error", stageErr.Error(),
+					"event_id", evt.EventID,
+				)
+				continue
+			}
 			handleStageFailure(ctx, adapter, group, retryCap, evt, stageErr, evtLog)
 			continue
 		}

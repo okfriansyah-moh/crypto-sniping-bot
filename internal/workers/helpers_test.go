@@ -499,8 +499,8 @@ func TestDoMandatoryTransition_GetLifecycleError_Propagates(t *testing.T) {
 }
 
 func TestDoMandatoryTransition_TransitionError_Propagates(t *testing.T) {
-	// Arrange
-	lc := &database.Lifecycle{TokenLifecycleID: "lc-4", StateVersion: 2}
+	// Arrange: lifecycle is at the expected from-state; CAS itself fails.
+	lc := &database.Lifecycle{TokenLifecycleID: "lc-4", CurrentState: "from", StateVersion: 2}
 	transErr := database.ErrInvalidTransition
 	adapter := &stubAdapter{lifecycleResult: lc, transitionErr: transErr}
 
@@ -510,6 +510,33 @@ func TestDoMandatoryTransition_TransitionError_Propagates(t *testing.T) {
 	// Assert
 	if !errors.Is(err, transErr) {
 		t.Errorf("expected ErrInvalidTransition, got: %v", err)
+	}
+}
+
+func TestDoMandatoryTransition_LifecycleAlreadyAdvanced_ReturnsSentinel(t *testing.T) {
+	// Arrange: lifecycle is at FEATURE_READY — already past DQ_PASSED.
+	// This simulates a stale market_data_enriched event from a prior session
+	// being re-consumed by the DQ worker.
+	lc := &database.Lifecycle{
+		TokenLifecycleID: "lc-stale",
+		CurrentState:     "FEATURE_READY",
+		StateVersion:     3,
+	}
+	adapter := &stubAdapter{lifecycleResult: lc}
+
+	// Act: DQ worker tries DETECTED → DQ_PASSED but lifecycle is already further.
+	err := doMandatoryTransition(context.Background(), adapter, "lc-stale", "DETECTED", "DQ_PASSED", "PASS", "dq_worker")
+
+	// Assert: must return ErrLifecycleAlreadyAdvanced (not ErrInvalidTransition).
+	if err == nil {
+		t.Fatal("expected error for already-advanced lifecycle, got nil")
+	}
+	if !errors.Is(err, database.ErrLifecycleAlreadyAdvanced) {
+		t.Errorf("expected ErrLifecycleAlreadyAdvanced, got: %v", err)
+	}
+	// TransitionState must NOT be called when the state check short-circuits.
+	if adapter.transitionErr != nil {
+		t.Error("expected TransitionState not called for already-advanced lifecycle")
 	}
 }
 
@@ -754,6 +781,9 @@ func (s *stubAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.
 }
 func (s *stubAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
+}
+func (s *stubAdapter) CountTokensByCreator(_ context.Context, _ string, _ string) (int32, error) {
+	return 0, nil
 }
 func (s *stubAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
 	return 0, 0, nil

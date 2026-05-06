@@ -64,6 +64,20 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		sysMode = state.Mode
 	}
 
+	// Enrich DTO with creator token count before the pure module call.
+	// The DQ module is a pure function — DB lookups happen here in the worker.
+	if dto.CreatorAddress != "" {
+		count, countErr := w.adapter.CountTokensByCreator(ctx, dto.CreatorAddress, dto.TokenAddress)
+		if countErr != nil {
+			w.logger.Warn("dq_worker_creator_count_failed",
+				"creator", dto.CreatorAddress, "error", countErr)
+			// Leave CreatorPrevTokenCountKnown=false; DQ degrades per profile.
+		} else {
+			dto.CreatorPrevTokenCount = count
+			dto.CreatorPrevTokenCountKnown = true
+		}
+	}
+
 	dqDTO, err := w.mod.ProcessForMode(ctx, dto, sysMode)
 	if err != nil {
 		return nil, fmt.Errorf("dq_worker: module: %w", err)

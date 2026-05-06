@@ -1,4 +1,4 @@
-// Package telegram — operator command handlers for /status /pnl /positions /kill /resume /version /mode /help.
+// Package telegram — operator command handlers for /status /pnl /positions /kill /resume /version /mode /pipeline /rescan /dq /dlq /help.
 // All destructive commands (/kill, /resume, /mode) are logged with timestamp and require
 // AllowedUserIDs to be configured before execution.
 // No remote code execution is permitted via these commands — ever.
@@ -28,13 +28,17 @@ const (
 	CmdVersion       CommandType = "/version"
 	CmdMode          CommandType = "/mode"
 	CmdPipeline      CommandType = "/pipeline"
+	CmdRescan        CommandType = "/rescan"
+	CmdRescanStatus  CommandType = "/rescan_status"
+	CmdDq            CommandType = "/dq"
+	CmdDlq           CommandType = "/dlq"
 	CmdHelp          CommandType = "/help"
 )
 
 // isDestructive returns true for commands that modify system state.
 func (c CommandType) isDestructive() bool {
 	return c == CmdKill || c == CmdResume || c == CmdMode ||
-		c == CmdForceClose || c == CmdEnableTrading
+		c == CmdForceClose || c == CmdEnableTrading || c == CmdRescan
 }
 
 // CommandRequest carries the parsed operator command.
@@ -63,7 +67,8 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	switch cmd {
 	case CmdStatus, CmdPnl, CmdPositions, CmdPosition, CmdHealth,
 		CmdForceClose, CmdEnableTrading,
-		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdHelp:
+		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline,
+		CmdRescan, CmdRescanStatus, CmdDq, CmdDlq, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
 			Args:     parts[1:],
@@ -90,6 +95,10 @@ type Handler struct {
 	versionFn       func(ctx context.Context) (string, error)
 	modeFn          func(ctx context.Context, mode string) (string, error)
 	pipelineFn      func(ctx context.Context) (string, error)
+	rescanFn        func(ctx context.Context) (string, error)
+	rescanStatusFn  func(ctx context.Context) (string, error)
+	dqFn            func(ctx context.Context, hours int) (string, error)
+	dlqFn           func(ctx context.Context) (string, error)
 	allowedUserIDs  map[string]struct{} // nil means unconfigured
 	logger          *slog.Logger
 }
@@ -108,6 +117,10 @@ type HandlerOptions struct {
 	VersionFn       func(ctx context.Context) (string, error)
 	ModeFn          func(ctx context.Context, mode string) (string, error)
 	PipelineFn      func(ctx context.Context) (string, error)
+	RescanFn        func(ctx context.Context) (string, error)
+	RescanStatusFn  func(ctx context.Context) (string, error)
+	DqFn            func(ctx context.Context, hours int) (string, error)
+	DlqFn           func(ctx context.Context) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -139,6 +152,10 @@ func NewHandler(opts HandlerOptions) *Handler {
 		versionFn:       opts.VersionFn,
 		modeFn:          opts.ModeFn,
 		pipelineFn:      opts.PipelineFn,
+		rescanFn:        opts.RescanFn,
+		rescanStatusFn:  opts.RescanStatusFn,
+		dqFn:            opts.DqFn,
+		dlqFn:           opts.DlqFn,
 		allowedUserIDs:  allowedSet(opts.AllowedUserIDs),
 		logger:          logger,
 	}
@@ -342,6 +359,52 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 		}
 		return &CommandResult{Text: text}, nil
 
+	case CmdRescan:
+		if h.rescanFn == nil {
+			return &CommandResult{Text: "rescan: not configured", Destructive: true}, nil
+		}
+		text, err := h.rescanFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: rescan: %w", err)
+		}
+		return &CommandResult{Text: text, Destructive: true}, nil
+
+	case CmdRescanStatus:
+		if h.rescanStatusFn == nil {
+			return &CommandResult{Text: "rescan_status: not configured"}, nil
+		}
+		text, err := h.rescanStatusFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: rescan_status: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
+	case CmdDq:
+		if h.dqFn == nil {
+			return &CommandResult{Text: "dq: not configured"}, nil
+		}
+		hours := 24
+		if len(req.Args) > 0 {
+			if n, err := fmt.Sscanf(req.Args[0], "%d", &hours); n != 1 || err != nil || hours < 1 || hours > 168 {
+				return &CommandResult{Text: "Usage: /dq [hours]  (1–168; default 24)"}, nil
+			}
+		}
+		text, err := h.dqFn(ctx, hours)
+		if err != nil {
+			return nil, fmt.Errorf("commands: dq: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
+	case CmdDlq:
+		if h.dlqFn == nil {
+			return &CommandResult{Text: "dlq: not configured"}, nil
+		}
+		text, err := h.dlqFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: dlq: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
 	case CmdHelp:
 		return &CommandResult{Text: helpText()}, nil
 	}
@@ -358,7 +421,10 @@ func helpText() string {
 		"/positions — All open positions: full address, age, entry/current/PnL%\n" +
 		"/position &lt;prefix&gt; — Detail view for one position by id or token prefix\n" +
 		"/health — Worker heartbeats, kill switch, halt reason\n" +
-		"/pipeline — Token validation funnel stats and recent tickers\n" +
+		"/pipeline — Token validation funnel stats (cumulative) and recent tickers\n" +
+		"/rescan_status — Rescan worker config, band eligibility, last 24h emission counts\n" +
+		"/dq [hours] — Data quality decision stats: total, rug rate, pass rate\n" +
+		"/dlq — Dead-letter queue: failed events, reason breakdown\n" +
 		"/version — Active strategy version ID and status\n\n" +
 		"<b>⚙️ Operational</b>\n" +
 		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +
@@ -368,6 +434,7 @@ func helpText() string {
 		"<b>🔴 Destructive</b>\n" +
 		"/kill — Activate kill switch (halts all trading immediately)\n" +
 		"/resume — Clear kill switch (resumes trading)\n" +
+		"/rescan — Force an immediate rescan tick (logged; use /rescan_status to check results)\n" +
 		"/force_close &lt;token_address prefix&gt; — Force-exit all open positions for a token (logged, gated)\n\n" +
 		"<b>ℹ️ Help</b>\n" +
 		"/help — Show this message\n\n" +

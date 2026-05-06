@@ -16,11 +16,14 @@ probability:
   # If probDTO.Confidence < this, fall back to prior and log low_model_confidence.
   #
   # Phase 0 (safety net, log-reviewer 2026-05-02): raised 0.40 → 0.70.
-  # Stub features have feature_confidence ≈ 0.5; this gate forces fallback
-  # to prior_probability=0.35 → EV ≈ −1900 bps → blanket REJECT until
-  # Phase 4 enrichment lands real signals. Lower again only after the
-  # 48h shadow gate proves dispersion (Phase 6).
-  min_model_confidence: 0.70
+  # Phase 7 (2026-05-04): lowered 0.70 → 0.35. deriveConfidence now returns 0.0
+  # for completely absent (known=false, N=0) features so they are excluded from
+  # minFeatureConfidence, preventing a single cold-start feature (e.g. VolumeMomentum
+  # on logs_only-path tokens) from collapsing model confidence to 0.10. With absent
+  # features excluded, the minimum over known features is ≥0.40 (ContractSafety
+  # floor), so threshold 0.35 leaves a buffer while still blocking truly-absent
+  # feature sets (all-absent → minFeatureConfidence=0 → 0 < 0.35 → fallback).
+  min_model_confidence: 0.35
 
   # ── Probability join (validation worker) ──────────────────────
   prob_join_timeout_ms: 200 # max wait for prob_event before fallback

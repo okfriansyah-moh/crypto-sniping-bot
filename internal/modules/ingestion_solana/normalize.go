@@ -285,6 +285,15 @@ func NormalizePumpFunCreateFromLogs(
 		Priority:          0,
 		Symbol:            event.Symbol,
 		Name:              event.Name,
+		// CreatorAddress is the pump.fun `user` field — the wallet that
+		// initiated the create transaction. Populated here at Layer 0 so
+		// the solana_creator_reputation probe can query DB history without
+		// making any extra RPC calls inside the DQ module.
+		CreatorAddress: event.User,
+		// MetadataURI is the on-chain URI from the CreateEvent (IPFS/Arweave).
+		// Forwarded here so the solana_metadata probe can fetch it without
+		// any additional RPC call.
+		MetadataURI: event.URI,
 	}
 }
 

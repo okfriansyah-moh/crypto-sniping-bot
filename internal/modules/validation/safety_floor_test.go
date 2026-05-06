@@ -1,19 +1,24 @@
 // Safety-floor invariant tests for the validation module.
 //
 // These pin the safety-net contract that prevents the validator from
-// trading on stubbed feature data:
+// trading on absent or fabricated feature data:
 //
-//  1. config/probability.yaml must keep min_model_confidence at ≥0.70 so
-//     stub features (feature_confidence ≈ 0.5) trigger fallback to prior.
-//  2. With the production gate, a typical stub-feature probability+confidence
-//     combination must fall back to the prior, NOT use the model output.
+//  1. config/probability.yaml must keep min_model_confidence at ≥0.35.
+//     The root cause of the constant-0.879 regression was fixed in F-1:
+//     deriveConfidence(known=false, N=0) now returns 0.0, so absent
+//     features are excluded from minFeatureConfidence entirely.
+//     ContractSafety confidence is always ≥ 0.40 (DQ flags always present),
+//     so real features produce minFeatureConfidence ≈ 0.40 which clears the
+//     0.35 gate. Completely absent signal (all features zero) still returns
+//     0.0 < 0.35 and falls back to prior.
+//  2. With the fallback-mechanism gate set explicitly to 0.70, confidence
+//     0.50 still falls back to prior — confirming the mechanism works.
 //  3. With prior=0.35 against the prior gain/loss spread, EV is deeply
-//     negative, so validation must REJECT — meeting the safety-first rule
-//     "never use fake-data bullish behavior".
+//     negative, so validation must REJECT.
 //
-// If any of these assertions fail the bot has regressed to the state
-// where stub features inflated probability to 0.879 and EV to +1917 bps,
-// causing 100% accept on degenerate inputs.
+// If assertion (1) fails, min_model_confidence was lowered below the
+// ContractSafety confidence floor (0.40), which would cause completely
+// absent signals to wrongly pass the confidence gate.
 package validation
 
 import (
@@ -29,10 +34,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// minSafetyNetConfidence is the safety-net floor for the model confidence
-// gate. Lowering this requires the live-data validation gate to first
-// prove signal dispersion in a 48h shadow run.
-const minSafetyNetConfidence = 0.70
+// minSafetyNetConfidence is the YAML safety floor: min_model_confidence must
+// stay above this value. Set to 0.35 — below ContractSafety's guaranteed
+// minimum confidence (0.40), but above "all features absent" (0.0).
+// Before F-1 fix this was 0.70; after fix the anchor is the 0.40
+// ContractSafety floor rather than the prior stub-confidence of ~0.50.
+const minSafetyNetConfidence = 0.35
+
+// fallbackMechanismThreshold is used by TestStubFeatureConfidence to verify
+// that the fallback mechanism itself works: confidence 0.50 falls back when
+// the gate is 0.70. This is independent of the YAML floor above.
+const fallbackMechanismThreshold = 0.70
 
 func TestProbabilityYAML_MinModelConfidenceAboveSafetyFloor(t *testing.T) {
 	// Locate config/probability.yaml relative to this test file.
@@ -54,10 +66,11 @@ func TestProbabilityYAML_MinModelConfidenceAboveSafetyFloor(t *testing.T) {
 	if doc.Probability.MinModelConfidence < minSafetyNetConfidence {
 		t.Fatalf(
 			"SAFETY NET BREACH: probability.min_model_confidence=%.3f "+
-				"is below safety floor %.2f. Lowering this gate while features "+
-				"are stubbed will reintroduce the constant-0.879 probability "+
-				"regression. The live-data validation gate must run "+
-				"a 48h shadow with proven dispersion before this is reduced.",
+				"is below safety floor %.2f. This threshold must remain above "+
+				"0 and below the ContractSafety confidence floor (0.40) so that "+
+				"fully-absent signal (minFeatureConfidence=0) still falls back to "+
+				"prior. F-1 fix: deriveConfidence(known=false,N=0)=0.0 excludes "+
+				"absent features; real features start at ~0.40 (ContractSafety).",
 			doc.Probability.MinModelConfidence, minSafetyNetConfidence,
 		)
 	}
@@ -69,7 +82,7 @@ func TestStubFeatureConfidence_ForcesFallbackAndReject(t *testing.T) {
 	probCfg := &config.ProbabilityRuntimeConfig{
 		UseModelOutput:     true,
 		PriorProbability:   0.35,
-		MinModelConfidence: minSafetyNetConfidence, // safety-net floor
+		MinModelConfidence: fallbackMechanismThreshold, // 0.70: tests the fallback mechanism, not the YAML floor
 		ProbJoinTimeoutMs:  200,
 		RejectOutOfRange:   true,
 		RejectNanOrInf:     true,

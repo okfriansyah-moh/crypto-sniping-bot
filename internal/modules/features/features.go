@@ -310,7 +310,12 @@ func (m *Module) RawSignalsForBaseline(dq contracts.DataQualityDTO, snap MarketS
 // confidence is materially reduced.
 
 func rawLiquiditySize(s MarketSnapshot) (float64, bool) {
-	if !s.LpStatsKnown || s.LiquidityUsd <= 0 {
+	// Use any positive LiquidityUsd regardless of LpStatsKnown.
+	// LpStatsKnown=false only means the Pyth SOL/USD feed was unavailable;
+	// the on-chain SOL reserve was still read. Blocking on LpStatsKnown
+	// causes sigmoid(0)=0.5 < MinLiquidityScore=0.55 → edge_strength=0
+	// for every token when the Pyth cache expires after 60 s.
+	if s.LiquidityUsd <= 0 {
 		return 0, false
 	}
 	return math.Log1p(s.LiquidityUsd), true
@@ -409,7 +414,16 @@ func scoreTokenAge(age int, cfg ageConfig) float64 {
 //   - sigmoid hygiene = 0.1 if not clamped/floored else 0.06
 //
 // Output is in [0, 1] and continuously varies with each input change.
+//
+// Special case: when known=false AND ns.N==0, the feature was completely
+// absent (not computable) for this token. Return 0.0 so that minFeatureConfidence
+// treats it as "not provided" and excludes it from the minimum — preventing a
+// single cold-start feature from collapsing the model confidence to 0.10.
 func deriveConfidence(known bool, ns NormalizedSignal) float64 {
+	// Cold-start absent feature: no data at all — treat as missing, not low-confidence.
+	if !known && ns.N == 0 {
+		return 0.0
+	}
 	base := 0.0
 	if known {
 		base = 0.4

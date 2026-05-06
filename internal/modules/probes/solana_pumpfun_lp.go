@@ -157,11 +157,37 @@ func (p *SolanaPumpfunLpProbe) Probe(ctx context.Context, in contracts.MarketDat
 	// LiquidityUsd requires a SOL/USD quote. Without one, leave LpStatsKnown
 	// false so DQ degrades on missing liquidity rather than seeing a
 	// fabricated zero/negative figure.
+	//
+	// Use the parent context (ctx), not the bonding-curve RPC deadline
+	// context (cctx). The SolUsdProvider is a TTL-cached oracle: when warm
+	// it returns in microseconds regardless of context, so it must not be
+	// subject to the bonding-curve fetch deadline. Sharing cctx caused the
+	// price lookup to time out whenever the RPC fetch consumed most of the
+	// 300 ms budget, keeping the cache perpetually cold and leaving
+	// LiquidityUsd=0 for every token.
 	if p.solUsd != nil {
-		if px, ok := p.solUsd.SolUsd(cctx); ok && px > 0 {
+		if px, ok := p.solUsd.SolUsd(ctx); ok && px > 0 {
 			solFloat, _ := strconv.ParseFloat(solReserves.String(), 64)
-			out.LiquidityUsd = (solFloat / lamportsPerSol) * px
-			out.LpStatsKnown = true
+			if solFloat > 0 {
+				// Normal path: on-chain reserve is non-zero, use it.
+				out.LiquidityUsd = (solFloat / lamportsPerSol) * px
+				out.LpStatsKnown = true
+			} else {
+				// solReserves = 0 means the bonding curve account was
+				// queried before it was fully initialised (race between the
+				// CREATE transaction confirmation and this RPC call). Do NOT
+				// overwrite the ingestion fallback (LiquidityUsd = virtual *
+				// sol_estimated_price_usd). That estimate is correct at
+				// launch; overwriting it with 0 causes liquidity_score = 0.5
+				// which is below MinLiquidityScore and silently rejects every
+				// brand-new token. Leave LiquidityUsd and LpStatsKnown as
+				// inherited from in (the ingestion estimate).
+				p.logger.Warn("pumpfun_lp_zero_reserves",
+					"pool", pool,
+					"virtual_sol_reserves", state.VirtualSolReserves,
+					"real_sol_reserves", state.RealSolReserves,
+				)
+			}
 		}
 	}
 

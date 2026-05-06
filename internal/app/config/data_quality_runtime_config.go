@@ -47,6 +47,10 @@ type DataQualityDetectorFlags struct {
 	WashTrading        bool `yaml:"wash_trading"`
 	RugAuthority       bool `yaml:"rug_authority"`
 	ContractVerified   bool `yaml:"contract_verified"`
+	// DevReputation enables the serial-launcher + no-social-links detector.
+	// Requires the solana_creator_reputation probe to populate
+	// CreatorPrevTokenCount / SocialLinksKnown on the MarketDataDTO.
+	DevReputation bool `yaml:"dev_reputation"`
 }
 
 // DataQualityDetectorThresholds gates per-detector verdict math.
@@ -84,6 +88,26 @@ type DataQualityDetectorThresholds struct {
 	// likely to be micro-cap rugs with no real value. 0 disables the check.
 	// Recommended: 1_000_000_000 (1B).
 	MaxTotalSupply float64 `yaml:"max_total_supply"`
+
+	// Dev reputation thresholds (requires dev_reputation detector enabled).
+	//
+	// MaxCreatorPrevTokenCount — reject when the creator wallet has launched
+	// this many or more tokens previously. 0 disables. Canonical default: 5.
+	// The $RIBBIT pattern (29 launches, 0 migrations) exceeds this by 5×.
+	//
+	// NoSocialLinksRiskScore — fixed risk contribution [0,1] applied when
+	// SocialLinksKnown=true and HasSocialLinks=false. 0 disables.
+	// Canonical default: 0.40 (meaningful contribution without hard-reject).
+	MaxCreatorPrevTokenCount int32   `yaml:"max_creator_prev_token_count"`
+	NoSocialLinksRiskScore   float64 `yaml:"no_social_links_risk_score"`
+
+	// MinTokenAgeSeconds — hard-reject tokens younger than this threshold.
+	// Tokens under this age have incomplete data: holder distribution is not
+	// settled, wash patterns are not yet visible, and metadata probes may not
+	// have propagated. The rescan pipeline re-evaluates the token once it is
+	// old enough. Age is measured from BlockTimestamp (on-chain creation),
+	// falling back to IngestedAt. 0 disables. Canonical default: 900 (15 min).
+	MinTokenAgeSeconds int32 `yaml:"min_token_age_seconds"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.
@@ -108,6 +132,8 @@ type DataQualityRiskWeights struct {
 	// FakeLiquidity weight (Layer 1 fix). Optional in YAML; when 0 the
 	// default 0.20 contribution from defaultRiskWeights is used.
 	FakeLiquidity float64 `yaml:"fake_liquidity"`
+	// DevReputation weight. When 0 defaults to 0.25 inside the aggregator.
+	DevReputation float64 `yaml:"dev_reputation"`
 }
 
 // DataQualityFailurePolicyConfig governs RPC-failure handling.

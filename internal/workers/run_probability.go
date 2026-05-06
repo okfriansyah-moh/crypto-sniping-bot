@@ -50,6 +50,7 @@ func (w *ProbabilityWorker) Process(ctx context.Context, evt *database.Event) (*
 	w.logger.Info("probability_scored",
 		"event_id", prob.EventID,
 		"probability", prob.Probability,
+		"confidence", prob.Confidence,
 		"trace_id", prob.TraceID,
 		"version_id", prob.VersionID,
 	)

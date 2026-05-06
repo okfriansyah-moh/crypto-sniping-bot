@@ -148,7 +148,11 @@ func makeSolanaAllocationEvent(lifecycleID string) *database.Event {
 // pipeline at max_open_positions (log-reviewer F-1, 2026-05-02).
 func TestExecutionWorker_SolanaChain_NilExecutor_Rejected(t *testing.T) {
 	lcID := "lc-sol-sim-1"
-	adapter := &stubAdapter{lifecycleResult: defaultLC(lcID)}
+	// Execution worker transitions from "SELECTED"; provide that state so
+	// doMandatoryTransition does not detect a stale-event mismatch.
+	adapter := &stubAdapter{lifecycleResult: &database.Lifecycle{
+		TokenLifecycleID: lcID, CurrentState: "SELECTED", StateVersion: 1,
+	}}
 
 	worker := NewExecutionWorker(
 		adapter,
@@ -196,7 +200,11 @@ func TestExecutionWorker_SolanaChain_NilExecutor_Rejected(t *testing.T) {
 // allocation with a wired executor delegates to the executor, not simulation.
 func TestExecutionWorker_SolanaChain_ExecutorCalled(t *testing.T) {
 	lcID := "lc-sol-exec-1"
-	adapter := &stubAdapter{lifecycleResult: defaultLC(lcID)}
+	// Execution worker transitions from "SELECTED"; provide that state so
+	// doMandatoryTransition does not detect a stale-event mismatch.
+	adapter := &stubAdapter{lifecycleResult: &database.Lifecycle{
+		TokenLifecycleID: lcID, CurrentState: "SELECTED", StateVersion: 1,
+	}}
 
 	stub := &stubSolanaExecutor{}
 	worker := NewExecutionWorker(

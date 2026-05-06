@@ -161,7 +161,7 @@ func TestRescanWorker_DisabledExitsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	err := RunRescan(ctx, adapter, cfg, nil)
+	err := RunRescan(ctx, adapter, cfg, nil, nil)
 	if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
 		t.Fatalf("expected nil or ctx error, got: %v", err)
 	}
