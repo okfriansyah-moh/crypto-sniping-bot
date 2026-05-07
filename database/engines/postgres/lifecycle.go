@@ -420,7 +420,7 @@ WITH rescan_tokens AS (
     SELECT DISTINCT token_address
     FROM market_data
     WHERE transport LIKE 'rescan_%'
-      AND ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+      AND ingested_at >= NOW() - ($1::int * INTERVAL '1 hour')
 ),
 failed_from AS (
     SELECT DISTINCT ON (t.lifecycle_id)
@@ -492,7 +492,7 @@ LEFT JOIN  failed_from   ff ON ff.lifecycle_id  = tl.token_lifecycle_id`
 SELECT transport, COUNT(DISTINCT token_address) AS cnt
 FROM market_data
 WHERE transport LIKE 'rescan_%'
-  AND ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+  AND ingested_at >= NOW() - ($1::int * INTERVAL '1 hour')
 GROUP BY transport
 ORDER BY transport`
 
@@ -532,7 +532,7 @@ FROM (
            token_address, symbol, name, chain, ingested_at
     FROM   market_data
     WHERE  transport LIKE 'rescan_%'
-      AND  ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+      AND  ingested_at >= NOW() - ($1::int * INTERVAL '1 hour')
     ORDER  BY token_address, ingested_at DESC
 ) sub
 LEFT JOIN token_lifecycle tl ON tl.token_address = sub.token_address
