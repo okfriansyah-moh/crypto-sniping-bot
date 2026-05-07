@@ -440,3 +440,6 @@ func (s *dispatcherStubAdapter) LoadBaselines(_ context.Context, _ string) (map[
 func (s *dispatcherStubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
 }
+func (s *dispatcherStubAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
+	return 0, nil
+}

@@ -82,6 +82,9 @@ func (w *workerAdapter) MoveToDLQ(_ context.Context, e database.DLQEntry) error 
 	w.dlqEntries = append(w.dlqEntries, e)
 	return nil
 }
+func (w *workerAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
+	return 0, nil
+}
 
 // ── handler stubs ────────────────────────────────────────────────────────────
 
