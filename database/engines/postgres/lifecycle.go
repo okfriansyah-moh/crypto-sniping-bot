@@ -397,3 +397,167 @@ ORDER BY cnt DESC`
 	}
 	return stats, nil
 }
+
+// GetRescanPipelineStats returns a pipeline funnel snapshot for tokens that
+// were re-emitted via the rescan worker (market_data.transport LIKE 'rescan_%')
+// within the given window. Funnel semantics match GetPipelineStats: counts are
+// cumulative relative to the DETECTED base.
+//
+// This is a concrete method on *DB — it is NOT part of the database.Adapter
+// interface. Callers type-assert to rescanPipelineQueryer (defined in cmd/).
+func (d *DB) GetRescanPipelineStats(ctx context.Context, windowHours int) (*database.RescanPipelineStats, error) {
+	stats := &database.RescanPipelineStats{
+		WindowHours: windowHours,
+		ByBand:      make(map[string]int64),
+	}
+
+	// ── Funnel counts ──────────────────────────────────────────────────────────
+	// Anchored on market_data.ingested_at (rescan emission time).
+	// We JOIN token_lifecycle on token_address so we see the current pipeline
+	// state of each rescanned token regardless of when first detection happened.
+	const countQ = `
+WITH rescan_tokens AS (
+    SELECT DISTINCT token_address
+    FROM market_data
+    WHERE transport LIKE 'rescan_%'
+      AND ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+),
+failed_from AS (
+    SELECT DISTINCT ON (t.lifecycle_id)
+           t.lifecycle_id,
+           t.from_state
+    FROM   token_state_transitions t
+    WHERE  t.to_state = 'FAILED'
+    ORDER  BY t.lifecycle_id, t.transitioned_at DESC
+)
+SELECT
+    COUNT(*)                                                                    AS detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN ('DETECTED','REJECTED'))     AS dq_passed,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED'))                                     AS feature_ready,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY'))                     AS edge_detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED'))     AS validated,
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+        'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED'))
+                                                                                AS selected,
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state IN ('EXECUTED','POSITION_OPEN')))                 AS executed,
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state = 'POSITION_OPEN'))                               AS position_open,
+    COUNT(*) FILTER (WHERE tl.current_state IN ('POSITION_CLOSED','EVALUATED')) AS position_closed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'EVALUATED')                      AS evaluated,
+    COUNT(*) FILTER (WHERE tl.current_state = 'REJECTED')                       AS rejected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED')                         AS failed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'SELECTED')                                         AS failed_at_selected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'EXECUTED')                                         AS failed_at_executed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'POSITION_OPEN')                                    AS failed_at_position_open
+FROM token_lifecycle tl
+INNER JOIN rescan_tokens rt ON rt.token_address = tl.token_address
+LEFT JOIN  failed_from   ff ON ff.lifecycle_id  = tl.token_lifecycle_id`
+
+	row := d.pool.QueryRowContext(ctx, countQ, windowHours)
+	if err := row.Scan(
+		&stats.Detected,
+		&stats.DQPassed,
+		&stats.FeatureReady,
+		&stats.EdgeDetected,
+		&stats.Validated,
+		&stats.Selected,
+		&stats.Executed,
+		&stats.PositionOpen,
+		&stats.PositionClosed,
+		&stats.Evaluated,
+		&stats.Rejected,
+		&stats.Failed,
+		&stats.FailedAtSelected,
+		&stats.FailedAtExecuted,
+		&stats.FailedAtPositionOpen,
+	); err != nil {
+		return nil, fmt.Errorf("get rescan pipeline stats counts: %w", err)
+	}
+
+	// ── Per-band emission counts ───────────────────────────────────────────────
+	// Count distinct tokens per band (not raw emission rows) so the numbers
+	// are comparable with the funnel counts above.
+	const bandQ = `
+SELECT transport, COUNT(DISTINCT token_address) AS cnt
+FROM market_data
+WHERE transport LIKE 'rescan_%'
+  AND ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+GROUP BY transport
+ORDER BY transport`
+
+	brows, err := d.pool.QueryContext(ctx, bandQ, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get rescan pipeline band counts: %w", err)
+	}
+	defer brows.Close()
+
+	for brows.Next() {
+		var transport string
+		var cnt int64
+		if err := brows.Scan(&transport, &cnt); err != nil {
+			return nil, fmt.Errorf("get rescan pipeline band scan: %w", err)
+		}
+		band := transport
+		if len(transport) > 7 {
+			band = transport[7:] // "rescan_15m" → "15m"
+		}
+		stats.ByBand[band] = cnt
+		stats.TotalEmitted += cnt
+	}
+	if err := brows.Err(); err != nil {
+		return nil, fmt.Errorf("get rescan pipeline band rows: %w", err)
+	}
+
+	// ── Recent rescanned tokens (last 10, newest rescan emission first) ────────
+	const recentQ = `
+SELECT sub.token_address,
+       COALESCE(sub.symbol, '')           AS symbol,
+       COALESCE(sub.name,   '')           AS name,
+       COALESCE(tl.current_state, '')     AS current_state,
+       COALESCE(sub.chain,  '')           AS chain,
+       sub.ingested_at
+FROM (
+    SELECT DISTINCT ON (token_address)
+           token_address, symbol, name, chain, ingested_at
+    FROM   market_data
+    WHERE  transport LIKE 'rescan_%'
+      AND  ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+    ORDER  BY token_address, ingested_at DESC
+) sub
+LEFT JOIN token_lifecycle tl ON tl.token_address = sub.token_address
+ORDER BY sub.ingested_at DESC
+LIMIT 10`
+
+	rrows, err := d.pool.QueryContext(ctx, recentQ, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get rescan pipeline recent: %w", err)
+	}
+	defer rrows.Close()
+
+	for rrows.Next() {
+		var rt database.RecentToken
+		if err := rrows.Scan(
+			&rt.TokenAddress, &rt.Symbol, &rt.Name,
+			&rt.State, &rt.Chain, &rt.DetectedAt,
+		); err != nil {
+			return nil, fmt.Errorf("get rescan pipeline recent scan: %w", err)
+		}
+		stats.Recent = append(stats.Recent, rt)
+	}
+	if err := rrows.Err(); err != nil {
+		return nil, fmt.Errorf("get rescan pipeline recent rows: %w", err)
+	}
+
+	return stats, nil
+}

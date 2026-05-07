@@ -16,23 +16,24 @@ import (
 type CommandType string
 
 const (
-	CmdStatus        CommandType = "/status"
-	CmdPnl           CommandType = "/pnl"
-	CmdPositions     CommandType = "/positions"
-	CmdPosition      CommandType = "/position"
-	CmdHealth        CommandType = "/health"
-	CmdForceClose    CommandType = "/force_close"
-	CmdEnableTrading CommandType = "/enable_trading"
-	CmdKill          CommandType = "/kill"
-	CmdResume        CommandType = "/resume"
-	CmdVersion       CommandType = "/version"
-	CmdMode          CommandType = "/mode"
-	CmdPipeline      CommandType = "/pipeline"
-	CmdRescan        CommandType = "/rescan"
-	CmdRescanStatus  CommandType = "/rescan_status"
-	CmdDq            CommandType = "/dq"
-	CmdDlq           CommandType = "/dlq"
-	CmdHelp          CommandType = "/help"
+	CmdStatus         CommandType = "/status"
+	CmdPnl            CommandType = "/pnl"
+	CmdPositions      CommandType = "/positions"
+	CmdPosition       CommandType = "/position"
+	CmdHealth         CommandType = "/health"
+	CmdForceClose     CommandType = "/force_close"
+	CmdEnableTrading  CommandType = "/enable_trading"
+	CmdKill           CommandType = "/kill"
+	CmdResume         CommandType = "/resume"
+	CmdVersion        CommandType = "/version"
+	CmdMode           CommandType = "/mode"
+	CmdPipeline       CommandType = "/pipeline"
+	CmdRescanPipeline CommandType = "/rescan_pipeline"
+	CmdRescan         CommandType = "/rescan"
+	CmdRescanStatus   CommandType = "/rescan_status"
+	CmdDq             CommandType = "/dq"
+	CmdDlq            CommandType = "/dlq"
+	CmdHelp           CommandType = "/help"
 )
 
 // isDestructive returns true for commands that modify system state.
@@ -67,7 +68,7 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	switch cmd {
 	case CmdStatus, CmdPnl, CmdPositions, CmdPosition, CmdHealth,
 		CmdForceClose, CmdEnableTrading,
-		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline,
+		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdRescanPipeline,
 		CmdRescan, CmdRescanStatus, CmdDq, CmdDlq, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
@@ -83,44 +84,46 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 // It is intentionally interface-driven so the orchestrator or app layer
 // can inject real implementations without coupling to this package's internals.
 type Handler struct {
-	statusFn        func(ctx context.Context) (string, error)
-	pnlFn           func(ctx context.Context) (string, error)
-	positionsFn     func(ctx context.Context) (string, error)
-	positionFn      func(ctx context.Context, idOrAddr string) (string, error)
-	healthFn        func(ctx context.Context) (string, error)
-	forceCloseFn    func(ctx context.Context, idOrAddr, issuer string) (string, error)
-	enableTradingFn func(ctx context.Context, issuer string) (string, error)
-	killFn          func(ctx context.Context) error
-	resumeFn        func(ctx context.Context) error
-	versionFn       func(ctx context.Context) (string, error)
-	modeFn          func(ctx context.Context, mode string) (string, error)
-	pipelineFn      func(ctx context.Context) (string, error)
-	rescanFn        func(ctx context.Context) (string, error)
-	rescanStatusFn  func(ctx context.Context) (string, error)
-	dqFn            func(ctx context.Context, hours int) (string, error)
-	dlqFn           func(ctx context.Context) (string, error)
-	allowedUserIDs  map[string]struct{} // nil means unconfigured
-	logger          *slog.Logger
+	statusFn         func(ctx context.Context) (string, error)
+	pnlFn            func(ctx context.Context) (string, error)
+	positionsFn      func(ctx context.Context) (string, error)
+	positionFn       func(ctx context.Context, idOrAddr string) (string, error)
+	healthFn         func(ctx context.Context) (string, error)
+	forceCloseFn     func(ctx context.Context, idOrAddr, issuer string) (string, error)
+	enableTradingFn  func(ctx context.Context, issuer string) (string, error)
+	killFn           func(ctx context.Context) error
+	resumeFn         func(ctx context.Context) error
+	versionFn        func(ctx context.Context) (string, error)
+	modeFn           func(ctx context.Context, mode string) (string, error)
+	pipelineFn       func(ctx context.Context) (string, error)
+	rescanPipelineFn func(ctx context.Context) (string, error)
+	rescanFn         func(ctx context.Context) (string, error)
+	rescanStatusFn   func(ctx context.Context) (string, error)
+	dqFn             func(ctx context.Context, hours int) (string, error)
+	dlqFn            func(ctx context.Context) (string, error)
+	allowedUserIDs   map[string]struct{} // nil means unconfigured
+	logger           *slog.Logger
 }
 
 // HandlerOptions carries the injectable functions for the command handler.
 type HandlerOptions struct {
-	StatusFn        func(ctx context.Context) (string, error)
-	PnlFn           func(ctx context.Context) (string, error)
-	PositionsFn     func(ctx context.Context) (string, error)
-	PositionFn      func(ctx context.Context, idOrAddr string) (string, error)
-	HealthFn        func(ctx context.Context) (string, error)
-	ForceCloseFn    func(ctx context.Context, idOrAddr, issuer string) (string, error)
-	EnableTradingFn func(ctx context.Context, issuer string) (string, error)
-	KillFn          func(ctx context.Context) error
-	ResumeFn        func(ctx context.Context) error
-	VersionFn       func(ctx context.Context) (string, error)
-	ModeFn          func(ctx context.Context, mode string) (string, error)
-	PipelineFn      func(ctx context.Context) (string, error)
-	RescanFn        func(ctx context.Context) (string, error)
-	RescanStatusFn  func(ctx context.Context) (string, error)
-	DqFn            func(ctx context.Context, hours int) (string, error)
-	DlqFn           func(ctx context.Context) (string, error)
+	StatusFn         func(ctx context.Context) (string, error)
+	PnlFn            func(ctx context.Context) (string, error)
+	PositionsFn      func(ctx context.Context) (string, error)
+	PositionFn       func(ctx context.Context, idOrAddr string) (string, error)
+	HealthFn         func(ctx context.Context) (string, error)
+	ForceCloseFn     func(ctx context.Context, idOrAddr, issuer string) (string, error)
+	EnableTradingFn  func(ctx context.Context, issuer string) (string, error)
+	KillFn           func(ctx context.Context) error
+	ResumeFn         func(ctx context.Context) error
+	VersionFn        func(ctx context.Context) (string, error)
+	ModeFn           func(ctx context.Context, mode string) (string, error)
+	PipelineFn       func(ctx context.Context) (string, error)
+	RescanPipelineFn func(ctx context.Context) (string, error)
+	RescanFn         func(ctx context.Context) (string, error)
+	RescanStatusFn   func(ctx context.Context) (string, error)
+	DqFn             func(ctx context.Context, hours int) (string, error)
+	DlqFn            func(ctx context.Context) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -140,24 +143,25 @@ func NewHandler(opts HandlerOptions) *Handler {
 		logger = slog.Default()
 	}
 	return &Handler{
-		statusFn:        opts.StatusFn,
-		pnlFn:           opts.PnlFn,
-		positionsFn:     opts.PositionsFn,
-		positionFn:      opts.PositionFn,
-		healthFn:        opts.HealthFn,
-		forceCloseFn:    opts.ForceCloseFn,
-		enableTradingFn: opts.EnableTradingFn,
-		killFn:          opts.KillFn,
-		resumeFn:        opts.ResumeFn,
-		versionFn:       opts.VersionFn,
-		modeFn:          opts.ModeFn,
-		pipelineFn:      opts.PipelineFn,
-		rescanFn:        opts.RescanFn,
-		rescanStatusFn:  opts.RescanStatusFn,
-		dqFn:            opts.DqFn,
-		dlqFn:           opts.DlqFn,
-		allowedUserIDs:  allowedSet(opts.AllowedUserIDs),
-		logger:          logger,
+		statusFn:         opts.StatusFn,
+		pnlFn:            opts.PnlFn,
+		positionsFn:      opts.PositionsFn,
+		positionFn:       opts.PositionFn,
+		healthFn:         opts.HealthFn,
+		forceCloseFn:     opts.ForceCloseFn,
+		enableTradingFn:  opts.EnableTradingFn,
+		killFn:           opts.KillFn,
+		resumeFn:         opts.ResumeFn,
+		versionFn:        opts.VersionFn,
+		modeFn:           opts.ModeFn,
+		pipelineFn:       opts.PipelineFn,
+		rescanPipelineFn: opts.RescanPipelineFn,
+		rescanFn:         opts.RescanFn,
+		rescanStatusFn:   opts.RescanStatusFn,
+		dqFn:             opts.DqFn,
+		dlqFn:            opts.DlqFn,
+		allowedUserIDs:   allowedSet(opts.AllowedUserIDs),
+		logger:           logger,
 	}
 }
 
@@ -359,6 +363,16 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 		}
 		return &CommandResult{Text: text}, nil
 
+	case CmdRescanPipeline:
+		if h.rescanPipelineFn == nil {
+			return &CommandResult{Text: "rescan_pipeline: not configured"}, nil
+		}
+		text, err := h.rescanPipelineFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: rescan_pipeline: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
 	case CmdRescan:
 		if h.rescanFn == nil {
 			return &CommandResult{Text: "rescan: not configured", Destructive: true}, nil
@@ -421,7 +435,8 @@ func helpText() string {
 		"/positions — All open positions: full address, age, entry/current/PnL%\n" +
 		"/position &lt;prefix&gt; — Detail view for one position by id or token prefix\n" +
 		"/health — Worker heartbeats, kill switch, halt reason\n" +
-		"/pipeline — Token validation funnel stats (cumulative) and recent tickers\n" +
+		"/pipeline — Token validation funnel (first-scan only) and recent tickers\n" +
+		"/rescan_pipeline — Token validation funnel for rescan-originated tokens and per-band breakdown\n" +
 		"/rescan_status — Rescan worker config, band eligibility, last 24h emission counts\n" +
 		"/dq [hours] — Data quality decision stats: total, rug rate, pass rate\n" +
 		"/dlq — Dead-letter queue: failed events, reason breakdown\n" +

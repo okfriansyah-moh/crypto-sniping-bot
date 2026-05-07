@@ -60,24 +60,25 @@ func buildTelegramComponents(
 	client := telegram.NewClient(token, chatID)
 
 	handler := telegram.NewHandler(telegram.HandlerOptions{
-		StatusFn:        buildStatusFn(db, startTime),
-		PnlFn:           buildPnlFn(db),
-		PositionsFn:     buildPositionsFn(db),
-		PositionFn:      buildPositionFn(db),
-		HealthFn:        buildHealthFn(db),
-		ForceCloseFn:    buildForceCloseFn(db, logger),
-		EnableTradingFn: buildEnableTradingFn(db, logger),
-		KillFn:          buildKillFn(db, logger),
-		ResumeFn:        buildResumeFn(db, logger),
-		VersionFn:       buildVersionFn(db),
-		ModeFn:          buildModeFn(db, logger),
-		PipelineFn:      buildPipelineFn(db),
-		RescanFn:        buildRescanFn(rescanTrigger),
-		RescanStatusFn:  buildRescanStatusFn(db, cfg),
-		DqFn:            buildDqFn(db),
-		DlqFn:           buildDlqFn(db),
-		AllowedUserIDs:  allowedIDs,
-		Logger:          logger,
+		StatusFn:         buildStatusFn(db, startTime),
+		PnlFn:            buildPnlFn(db),
+		PositionsFn:      buildPositionsFn(db),
+		PositionFn:       buildPositionFn(db),
+		HealthFn:         buildHealthFn(db),
+		ForceCloseFn:     buildForceCloseFn(db, logger),
+		EnableTradingFn:  buildEnableTradingFn(db, logger),
+		KillFn:           buildKillFn(db, logger),
+		ResumeFn:         buildResumeFn(db, logger),
+		VersionFn:        buildVersionFn(db),
+		ModeFn:           buildModeFn(db, logger),
+		PipelineFn:       buildPipelineFn(db),
+		RescanPipelineFn: buildRescanPipelineFn(db),
+		RescanFn:         buildRescanFn(rescanTrigger),
+		RescanStatusFn:   buildRescanStatusFn(db, cfg),
+		DqFn:             buildDqFn(db),
+		DlqFn:            buildDlqFn(db),
+		AllowedUserIDs:   allowedIDs,
+		Logger:           logger,
 	})
 
 	dispatcher := telegram.NewDispatcher(db, client, logger)
@@ -700,6 +701,12 @@ type rescanQueryer interface {
 	GetRescanStats(ctx context.Context, windowHours int) (*database.RescanStats, error)
 }
 
+// rescanPipelineQueryer is a local interface for the optional GetRescanPipelineStats
+// method.  The postgres *DB implements this concretely; stubs do not.
+type rescanPipelineQueryer interface {
+	GetRescanPipelineStats(ctx context.Context, windowHours int) (*database.RescanPipelineStats, error)
+}
+
 // buildRescanFn returns a function that sends a force-trigger to the rescan worker.
 // triggerCh is a buffered channel (cap=1) created in server.go and shared with
 // RunRescan.  The send is non-blocking: if a trigger is already queued the
@@ -720,6 +727,97 @@ func buildRescanFn(triggerCh chan struct{}) func(ctx context.Context) (string, e
 
 // buildRescanStatusFn returns a function that shows the rescan worker
 // configuration and last-24h per-band emission counts.
+
+// buildRescanPipelineFn returns a function that shows the pipeline funnel for
+// tokens re-emitted via the rescan worker (transport LIKE 'rescan_%').
+// Uses a type assertion to the concrete postgres method — adapters that don't
+// implement it return a graceful "not supported" message.
+func buildRescanPipelineFn(db database.Adapter) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		rq, ok := db.(rescanPipelineQueryer)
+		if !ok {
+			return "⚠️ /rescan_pipeline is not supported by the current database adapter.", nil
+		}
+		rs, err := rq.GetRescanPipelineStats(ctx, 24)
+		if err != nil {
+			return "", fmt.Errorf("get rescan pipeline stats: %w", err)
+		}
+
+		var sb strings.Builder
+		sb.WriteString("<b>Rescan Pipeline Funnel (last 24h — rescan tokens only)</b>\n\n")
+
+		if rs.Detected == 0 {
+			sb.WriteString("No tokens were rescanned in the last 24h.")
+			return sb.String(), nil
+		}
+
+		total := rs.Detected
+		pct := func(n int64) string {
+			if total == 0 {
+				return "0.0%"
+			}
+			return fmt.Sprintf("%.1f%%", float64(n)/float64(total)*100)
+		}
+
+		sb.WriteString(fmt.Sprintf("DETECTED     <code>%6d</code>  (100%%)\n", rs.Detected))
+		sb.WriteString(fmt.Sprintf("DQ_PASSED    <code>%6d</code>  (%s)\n", rs.DQPassed, pct(rs.DQPassed)))
+		sb.WriteString(fmt.Sprintf("FEATURE      <code>%6d</code>  (%s)\n", rs.FeatureReady, pct(rs.FeatureReady)))
+		sb.WriteString(fmt.Sprintf("EDGE         <code>%6d</code>  (%s)\n", rs.EdgeDetected, pct(rs.EdgeDetected)))
+		sb.WriteString(fmt.Sprintf("VALIDATED    <code>%6d</code>  (%s)\n", rs.Validated, pct(rs.Validated)))
+		sb.WriteString(fmt.Sprintf("SELECTED     <code>%6d</code>  (%s)\n", rs.Selected, pct(rs.Selected)))
+		sb.WriteString(fmt.Sprintf("EXECUTED     <code>%6d</code>  (%s)\n", rs.Executed, pct(rs.Executed)))
+		sb.WriteString(fmt.Sprintf("POS OPEN     <code>%6d</code>  (%s)\n", rs.PositionOpen, pct(rs.PositionOpen)))
+		sb.WriteString(fmt.Sprintf("POS CLOSED   <code>%6d</code>  (%s)\n", rs.PositionClosed, pct(rs.PositionClosed)))
+		sb.WriteString(fmt.Sprintf("EVALUATED    <code>%6d</code>  (%s)\n", rs.Evaluated, pct(rs.Evaluated)))
+		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("REJECTED     <code>%6d</code>\n", rs.Rejected))
+		sb.WriteString(fmt.Sprintf("FAILED       <code>%6d</code>\n", rs.Failed))
+		if rs.Failed > 0 {
+			sb.WriteString(fmt.Sprintf("  ↳ exec fail  <code>%6d</code>  (SELECTED→FAILED)\n", rs.FailedAtSelected))
+			sb.WriteString(fmt.Sprintf("  ↳ pos-open   <code>%6d</code>  (EXECUTED→FAILED)\n", rs.FailedAtExecuted))
+			sb.WriteString(fmt.Sprintf("  ↳ pos-close  <code>%6d</code>  (POSITION_OPEN→FAILED)\n", rs.FailedAtPositionOpen))
+		}
+
+		// Per-band breakdown
+		if len(rs.ByBand) > 0 {
+			sb.WriteString(fmt.Sprintf("\n<b>Emissions by band (24h):  %d total</b>\n", rs.TotalEmitted))
+			bandNames := make([]string, 0, len(rs.ByBand))
+			for b := range rs.ByBand {
+				bandNames = append(bandNames, b)
+			}
+			sort.Strings(bandNames)
+			for _, b := range bandNames {
+				sb.WriteString(fmt.Sprintf("  <code>%-6s</code>  %d\n", b, rs.ByBand[b]))
+			}
+		}
+
+		// Recent rescanned tokens
+		if len(rs.Recent) > 0 {
+			sb.WriteString("\n<b>Recent rescanned tokens:</b>\n")
+			for _, rt := range rs.Recent {
+				addr := rt.TokenAddress
+				if len(addr) > 12 {
+					addr = addr[:6] + "…" + addr[len(addr)-4:]
+				}
+				ticker := rt.Symbol
+				if ticker == "" {
+					ticker = "—"
+				}
+				chain := rt.Chain
+				if chain == "" {
+					chain = "?"
+				}
+				sb.WriteString(fmt.Sprintf(
+					"<code>%s</code> [%s] %s · %s\n",
+					addr, ticker, rt.State, chain,
+				))
+			}
+		}
+
+		return sb.String(), nil
+	}
+}
+
 func buildRescanStatusFn(db database.Adapter, cfg *config.Config) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		rc := cfg.Rescan

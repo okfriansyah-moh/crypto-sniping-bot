@@ -619,6 +619,46 @@ type RescanStats struct {
 	WindowHours  int
 }
 
+// RescanPipelineStats is a pipeline funnel snapshot scoped exclusively to
+// tokens re-emitted via the rescan worker (market_data.transport LIKE 'rescan_%').
+// It mirrors PipelineStats semantics but the time window is anchored on
+// market_data.ingested_at (rescan emission time) rather than
+// token_lifecycle.created_at (first-detection time).
+//
+// Returned by GetRescanPipelineStats (concrete method on the postgres engine,
+// not part of the Adapter interface — callers type-assert to rescanPipelineQueryer).
+type RescanPipelineStats struct {
+	// Funnel counts (cumulative — same semantics as PipelineStats).
+	Detected       int64
+	DQPassed       int64
+	FeatureReady   int64
+	EdgeDetected   int64
+	Validated      int64
+	Selected       int64
+	Executed       int64
+	PositionOpen   int64
+	PositionClosed int64
+	Evaluated      int64
+
+	// Terminal counts (non-cumulative).
+	Rejected int64
+	Failed   int64
+
+	// Failure breakdown by stage.
+	FailedAtSelected     int64
+	FailedAtExecuted     int64
+	FailedAtPositionOpen int64
+
+	// Per-band emission counts (band name → distinct tokens emitted in window).
+	ByBand       map[string]int64
+	TotalEmitted int64 // total distinct tokens rescanned in window (any band)
+
+	// Recent is the last 10 rescanned tokens (by emission time), newest first.
+	Recent []RecentToken
+
+	WindowHours int
+}
+
 // RecentToken is one row in PipelineStats.Recent.
 type RecentToken struct {
 	TokenAddress string
