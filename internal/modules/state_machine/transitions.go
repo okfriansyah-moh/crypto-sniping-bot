@@ -7,6 +7,7 @@ package state_machine
 // This is a forward-only DAG — no cycles, no backward moves.
 var AllowedTransitions = map[string][]string{
 	"DETECTED":        {"DQ_PASSED", "REJECTED"},
+	"REJECTED":        {"DQ_PASSED"}, // rescan recovery: re-evaluated token now passes DQ
 	"DQ_PASSED":       {"FEATURE_READY", "REJECTED"},
 	"FEATURE_READY":   {"EDGE_DETECTED", "REJECTED"},
 	"EDGE_DETECTED":   {"VALIDATED", "REJECTED"},
@@ -16,13 +17,13 @@ var AllowedTransitions = map[string][]string{
 	"POSITION_OPEN":   {"POSITION_CLOSED", "FAILED"},
 	"POSITION_CLOSED": {"EVALUATED"},
 	"EVALUATED":       {},
-	"REJECTED":        {},
 	"FAILED":          {},
 }
 
 // TerminalStates are states from which no further transition is permitted.
+// REJECTED is intentionally excluded: rescan re-evaluation allows REJECTED→DQ_PASSED
+// recovery when a token passes DQ criteria on a subsequent scan.
 var TerminalStates = map[string]bool{
 	"EVALUATED": true,
-	"REJECTED":  true,
 	"FAILED":    true,
 }

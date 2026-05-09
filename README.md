@@ -50,6 +50,15 @@ All common operations are wrapped in `make` targets. Run `make <target>`.
 | `make clean`        | Remove `bin/`, `coverage.out`, `coverage.html`     |
 | `make quality`      | Runs `vet` + `lint` + `test` (full gate)           |
 
+| `make log-collect` | Collect logs + write log-reviewer summary (default 60 min) |
+| `make log-latest` | Print the most recent log-reviewer summary to stdout |
+| `make log-list` | List all log-reviewer session summaries |
+| `make log-analyze` | Re-analyse an existing raw log file (`LOG=path`) |
+| `make gate-collect` | Collect logs + write production-gate-reviewer brief |
+| `make gate-latest` | Print the most recent gate-review brief to stdout |
+| `make gate-list` | List all gate-review sessions |
+| `make gate-analyze` | Re-analyse an existing gate raw log (`LOG=path`) |
+
 ### Docker
 
 | Target              | Description                                          |
@@ -83,6 +92,46 @@ make log-list                 # list all collected session summaries
 4. Copilot runs a full log-reviewer analysis (Verdict + Findings + Plan + Confirmation Gate).
 
 The script detects: pipeline stage completeness (L0–L10), stubbed numeric fields, R4 invariants (join_timeout, duplicate event IDs, missing trace_id), PANIC/FATAL lines, and reject-rate spikes. `output/logs/` is gitignored.
+
+---
+
+### Production Gate Review
+
+Collect live bot logs unattended, compute production-gate-reviewer evidence, and write a structured gate-review brief ready to paste into a Copilot session using the `production-gate-reviewer` skill.
+
+```bash
+make gate-collect              # collect for 60 min (default), then write brief
+make gate-collect MINS=5       # quick smoke test — 5 min window
+make gate-collect MINS=10 SVC=bot
+make gate-collect MINS=10 MODE=PIPELINE_PROOF   # force review mode
+make gate-latest               # print the most recent gate brief to stdout
+make gate-list                 # list all gate review sessions
+make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log   # re-analyse existing log
+```
+
+**Workflow:**
+
+1. Run `make gate-collect` in any terminal — it runs completely unattended.
+2. After the window elapses (or you press Ctrl-C), it writes three files to `output/logs/`:
+   - `gate_brief_<TIMESTAMP>.txt` — structured gate-review brief (MODE, BLOCKERS, OPERATIONAL EVIDENCE, PRODUCTION DECISION)
+   - `gate_evidence_<TIMESTAMP>.json` — machine-readable evidence snapshot
+   - `gate_raw_<TIMESTAMP>.log` — full raw log for deep analysis
+3. Open a new Copilot chat and paste:
+   > _"Review this using the production-gate-reviewer skill:"_ followed by the brief content.
+4. Copilot confirms or overrides the auto-detected MODE, BLOCKER list, and PRODUCTION DECISION.
+
+**What the script computes automatically:**
+
+| Item                        | How it works                                                                                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mode auto-detection         | `PIPELINE_PROOF` (0 completed traces) → `SHADOW_TRADING` (<500 closed) → `MICRO_CAPITAL` (≥500) → `LIVE_MONITORING` (kill-switch/over-exposure detected) |
+| BLOCKER detection           | Dead pipeline stages, duplicate `event_id`s, PANIC/FATAL, kill switch, over-exposure — max 3 per review                                                  |
+| SAFE_TO_IGNORE              | WARN counts, cold-start learning, transient RPC errors — auto-classified non-blockers                                                                    |
+| Operational Evidence        | `traces_completed`, `executions`, `positions_closed`, `learning_records`, `avg_latency`, `avg_slippage`                                                  |
+| Production Confidence Model | 5 dimensions scored 0–100: `pipeline_stability`, `execution_reliability`, `determinism_integrity`, `capital_safety`, `operational_consistency`           |
+| Production Decision         | `NOT_READY` → `PIPELINE_PROOF_READY` → `SHADOW_READY` → `MICRO_CAPITAL_READY` → `LIMITED_PRODUCTION_READY`                                               |
+
+> **Difference from `make log-collect`:** `log-collect` uses the `log-reviewer` skill (health scoring, PRS dimensions, stub detection). `gate-collect` uses the `production-gate-reviewer` skill (operational progression, capital safety gate, BLOCKER/SAFE_TO_IGNORE classification, and production decision).
 
 ---
 

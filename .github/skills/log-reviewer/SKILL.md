@@ -13,6 +13,16 @@ description: >
 
 # Log Reviewer Skill
 
+> **Skill section order and priority:**
+>
+> 1. **Rules** (R1–R9) — mandatory constraints; apply all
+> 2. **Inputs** — parse and validate log stream first
+> 3. **Outputs** — emit Verdict → Findings → Plan → Confirmation Gate in order
+> 4. **Production Readiness Score** — compute after findings are complete
+>
+> When rules appear to conflict, R9 (Confirmation Gate) takes highest precedence
+> over all others because it protects against unintended code mutation.
+
 ## Purpose
 
 Turn a stream of structured logs (`{"time":..,"level":..,"msg":..,...}`) and
@@ -38,10 +48,17 @@ verdict and a delegation manifest.
 ### R1 — Only structured logs are reviewable
 
 Per `observability` skill: every reviewable line MUST be valid JSON with at
-minimum `time`, `level`, `msg`. Any unstructured line (e.g. `panic:`,
-`runtime error`, raw `fmt.Println`) is by itself a finding (`code-quality`
+minimum `time`, `level`, `msg`. Apply the following rules to non-conforming lines:
 
-- `observability` violation) — flag and route to `refactor` agent.
+- **Fully unstructured** (e.g. `panic:`, `runtime error`, raw `fmt.Println`): flag as
+  `code-quality` / `observability` violation and route to `refactor` agent.
+- **Partially valid JSON** (parseable object but missing required fields, or a line
+  where only a prefix is valid JSON): attempt to extract any parseable fields
+  (`time`, `level`, `msg`, `trace_id`) and treat the remainder as an opaque string.
+  Flag the line as `NOISE` and note which fields were unrecoverable. Route to
+  `refactor` agent for structured-logging remediation.
+- **Fully malformed JSON** (parse error on the entire line): treat as unstructured;
+  include the raw line as `example_line` in the finding.
 
 ### R2 — Trace-id is the unit of analysis
 
@@ -211,6 +228,12 @@ Required behavior:
 4. The skill MUST NOT auto-execute, auto-delegate to subagents, or modify any
    file until the `vscode_askQuestions` call returns `yes` (or the user types
    an equivalent affirmative such as `proceed`, `go`, `execute`, `approved`).
+   **The one permitted exception is pre-authorization:** if the operator has
+   explicitly set `log_reviewer.auto_execute: true` in config (default `false`),
+   the Confirmation Gate is still shown and `vscode_askQuestions` is still
+   called — the operator retains the ability to cancel. Auto-execute means the
+   plan proceeds automatically _only if the operator does not cancel_ within the
+   configured timeout. It does NOT mean the gate is skipped.
 5. If the user selects `modify`, the skill MUST re-emit the Confirmation Gate
    (another `vscode_askQuestions` call) with the revised plan and wait for
    `yes` again.

@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"crypto-sniping-bot/contracts"
@@ -126,6 +127,76 @@ func TestDataQualityWorker_Process_EmptyTokenAddress_ReturnsError(t *testing.T) 
 	_, err := w.Process(context.Background(), evt)
 	if err == nil {
 		t.Fatal("expected error for empty token address")
+	}
+}
+
+func TestDataQualityWorker_Process_GetLifecycleError_Propagates(t *testing.T) {
+	// GetLifecycle failing after StartLifecycle must return a non-nil error.
+	adapter := &stubAdapter{
+		lifecycleResult: nil,
+		lifecycleErr:    errors.New("db read error"),
+	}
+	w := NewDataQualityWorker(adapter, minConfig(), nil)
+
+	dto := contracts.MarketDataDTO{
+		TokenAddress:  "0xERR1",
+		Chain:         "eth",
+		TraceID:       "trace-err",
+		CorrelationID: "corr-err",
+		VersionID:     "v1",
+	}
+	_, err := w.Process(context.Background(), makeDQEvent(dto))
+	if err == nil {
+		t.Fatal("expected error when GetLifecycle fails, got nil")
+	}
+}
+
+func TestDataQualityWorker_Process_LifecycleAlreadyPastDQ_DrainedIdempotently(t *testing.T) {
+	// Lifecycle already advanced to FEATURE_READY — DQ must not re-score it.
+	// The worker must drain by returning ErrLifecycleAlreadyAdvanced.
+	lc := &database.Lifecycle{
+		TokenLifecycleID: "lc-past",
+		CurrentState:     "FEATURE_READY",
+		StateVersion:     3,
+	}
+	adapter := &stubAdapter{lifecycleResult: lc}
+	w := NewDataQualityWorker(adapter, minConfig(), nil)
+
+	dto := contracts.MarketDataDTO{
+		TokenAddress:  "0xPAST1",
+		Chain:         "eth",
+		TraceID:       "trace-past",
+		CorrelationID: "corr-past",
+		VersionID:     "v1",
+	}
+	_, err := w.Process(context.Background(), makeDQEvent(dto))
+	if !errors.Is(err, database.ErrLifecycleAlreadyAdvanced) {
+		t.Errorf("expected ErrLifecycleAlreadyAdvanced for already-advanced lifecycle, got: %v", err)
+	}
+}
+
+func TestDataQualityWorker_Process_RescanRejectedLifecycle_NoError(t *testing.T) {
+	// Lifecycle is REJECTED from a prior DQ run. On rescan re-evaluation
+	// the worker must not return an error — it either recovers the token
+	// (REJECTED→DQ_PASSED) or drains idempotently (REJECTED→REJECTED no-op).
+	lc := &database.Lifecycle{
+		TokenLifecycleID: "lc-rejected",
+		CurrentState:     "REJECTED",
+		StateVersion:     1,
+	}
+	adapter := &stubAdapter{lifecycleResult: lc}
+	w := NewDataQualityWorker(adapter, minConfig(), nil)
+
+	dto := contracts.MarketDataDTO{
+		TokenAddress:  "0xRESCAN1",
+		Chain:         "eth",
+		TraceID:       "trace-rescan",
+		CorrelationID: "corr-rescan",
+		VersionID:     "v1",
+	}
+	_, err := w.Process(context.Background(), makeDQEvent(dto))
+	if err != nil {
+		t.Errorf("unexpected error for rescan of REJECTED lifecycle: %v", err)
 	}
 }
 

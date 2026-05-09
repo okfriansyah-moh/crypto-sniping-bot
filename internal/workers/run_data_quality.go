@@ -98,16 +98,43 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		w.logger.Warn("dq_worker_persist_failed", "event_id", dqDTO.EventID, "error", err)
 	}
 
-	// Lifecycle transition: DETECTED → DQ_PASSED or REJECTED (mandatory Phase 3 CAS).
+	// Determine the actual current lifecycle state.
+	// StartLifecycle is idempotent (ON CONFLICT DO NOTHING): a rescan
+	// re-evaluation returns the existing lifecycle ID whose state may
+	// already be REJECTED. We must use the real from-state so that the
+	// CAS guard in doMandatoryTransition receives the correct origin.
+	lc, err := w.adapter.GetLifecycle(ctx, lifecycleID)
+	if err != nil {
+		return nil, fmt.Errorf("dq_worker: get_lifecycle: %w", err)
+	}
+	fromState := lc.CurrentState
+
+	// Guard: only DETECTED and REJECTED are DQ-eligible entry states.
+	// Tokens that already advanced past DQ (FEATURE_READY and beyond)
+	// are drained idempotently — no re-scoring of already-accepted tokens.
+	if fromState != "DETECTED" && fromState != "REJECTED" {
+		return nil, fmt.Errorf("dq_worker: lifecycle %s already past DQ (state=%s): %w",
+			lifecycleID, fromState, database.ErrLifecycleAlreadyAdvanced)
+	}
+
+	// Lifecycle transition: fromState → DQ_PASSED or REJECTED.
 	nextState := "DQ_PASSED"
 	if dqDTO.Decision == "REJECT" {
 		nextState = "REJECTED"
 	}
-	if err := doMandatoryTransition(ctx, w.adapter, lifecycleID, "DETECTED", nextState, dqDTO.Decision, "dq_worker"); err != nil {
+
+	// Rescan re-rejection: token still fails DQ — no state change needed,
+	// no downstream event. Drain idempotently without an error.
+	if fromState == "REJECTED" && nextState == "REJECTED" {
+		orchestrator.RecordDecision(ctx, orchestrator.StageStatusRejected, dqRejectReason(dqDTO))
+		return nil, nil
+	}
+
+	if err := doMandatoryTransition(ctx, w.adapter, lifecycleID, fromState, nextState, dqDTO.Decision, "dq_worker"); err != nil {
 		return nil, fmt.Errorf("dq_worker: transition: %w", err)
 	}
 
-	// Do not emit downstream event for rejections.
+	// Do not emit downstream event for first-time rejections.
 	if dqDTO.Decision == "REJECT" {
 		orchestrator.RecordDecision(ctx, orchestrator.StageStatusRejected, dqRejectReason(dqDTO))
 		return nil, nil

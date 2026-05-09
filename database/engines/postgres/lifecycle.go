@@ -46,15 +46,19 @@ func (d *DB) TransitionState(ctx context.Context, req database.TransitionRequest
 	}
 
 	var terminalReason *string
-	if req.Reason != "" && isTerminalState(req.NewState) {
+	if isTerminalState(req.NewState) && req.Reason != "" {
 		terminalReason = &req.Reason
 	}
+	// When transitioning OUT of a terminal state (e.g. REJECTED→DQ_PASSED rescan
+	// recovery), terminalReason stays nil which explicitly clears the stale reason.
+	// Using $2 directly (no COALESCE) ensures the column is always consistent with
+	// the current state rather than preserving a stale value from a prior rejection.
 
 	const q = `
 UPDATE token_lifecycle
 SET current_state   = $1,
     state_version   = state_version + 1,
-    terminal_reason = COALESCE($2, terminal_reason),
+    terminal_reason = $2,
     updated_at      = $3
 WHERE token_lifecycle_id = $4
   AND current_state      = $5
@@ -187,9 +191,14 @@ func (d *DB) scanLifecycle(row *sql.Row) (*database.Lifecycle, error) {
 
 // isValidTransition checks whether a state machine forward transition is permitted.
 // Phase 2 best-effort: any forward transition is allowed; CAS guards reject concurrent races.
+//
+// REJECTED→DQ_PASSED: rescan re-evaluation path — the rescan worker re-emits
+// market_data_event for tokens that were previously rejected (e.g. token_too_young).
+// When the token now passes DQ the lifecycle must recover forward rather than stall.
 func isValidTransition(from, to string) bool {
 	allowed := map[string][]string{
 		"DETECTED":      {"DQ_PASSED", "REJECTED"},
+		"REJECTED":      {"DQ_PASSED"}, // rescan recovery: re-evaluated token now passes
 		"DQ_PASSED":     {"FEATURE_READY", "REJECTED"},
 		"FEATURE_READY": {"EDGE_DETECTED", "REJECTED"},
 		"EDGE_DETECTED": {"VALIDATED", "REJECTED"},
@@ -420,7 +429,7 @@ WITH rescan_tokens AS (
     SELECT DISTINCT token_address
     FROM market_data
     WHERE transport LIKE 'rescan_%'
-      AND ingested_at >= NOW() - ($1::int * INTERVAL '1 hour')
+      AND NULLIF(ingested_at, '')::timestamptz >= NOW() - ($1::int * INTERVAL '1 hour')
 ),
 failed_from AS (
     SELECT DISTINCT ON (t.lifecycle_id)
@@ -492,7 +501,7 @@ LEFT JOIN  failed_from   ff ON ff.lifecycle_id  = tl.token_lifecycle_id`
 SELECT transport, COUNT(DISTINCT token_address) AS cnt
 FROM market_data
 WHERE transport LIKE 'rescan_%'
-  AND ingested_at >= NOW() - ($1::int * INTERVAL '1 hour')
+  AND NULLIF(ingested_at, '')::timestamptz >= NOW() - ($1::int * INTERVAL '1 hour')
 GROUP BY transport
 ORDER BY transport`
 
@@ -532,7 +541,7 @@ FROM (
            token_address, symbol, name, chain, ingested_at
     FROM   market_data
     WHERE  transport LIKE 'rescan_%'
-      AND  ingested_at >= NOW() - ($1::int * INTERVAL '1 hour')
+      AND  NULLIF(ingested_at, '')::timestamptz >= NOW() - ($1::int * INTERVAL '1 hour')
     ORDER  BY token_address, ingested_at DESC
 ) sub
 LEFT JOIN token_lifecycle tl ON tl.token_address = sub.token_address
