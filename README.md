@@ -34,30 +34,29 @@ go run ./cmd migrate up
 
 All common operations are wrapped in `make` targets. Run `make <target>`.
 
-### Build & Quality
+### Build, Quality, and Analysis
 
-| Target              | Description                                        |
-| ------------------- | -------------------------------------------------- |
-| `make build`        | Compile to `bin/crypto-sniping-bot`                |
-| `make run`          | `go run ./cmd serve`                               |
-| `make test`         | Run all tests with race detector                   |
-| `make test-cover`   | Tests + HTML coverage report                       |
-| `make vet`          | `go vet ./...`                                     |
-| `make lint`         | `golangci-lint run ./...` (requires golangci-lint) |
-| `make tidy`         | `go mod tidy`                                      |
-| `make migrate-up`   | Apply all pending migrations                       |
-| `make migrate-down` | Roll back last migration                           |
-| `make clean`        | Remove `bin/`, `coverage.out`, `coverage.html`     |
-| `make quality`      | Runs `vet` + `lint` + `test` (full gate)           |
-
-| `make log-collect` | Collect logs + write log-reviewer summary (default 60 min) |
-| `make log-latest` | Print the most recent log-reviewer summary to stdout |
-| `make log-list` | List all log-reviewer session summaries |
-| `make log-analyze` | Re-analyse an existing raw log file (`LOG=path`) |
-| `make gate-collect` | Collect logs + write production-gate-reviewer brief |
-| `make gate-latest` | Print the most recent gate-review brief to stdout |
-| `make gate-list` | List all gate-review sessions |
-| `make gate-analyze` | Re-analyse an existing gate raw log (`LOG=path`) |
+| Target              | Description                                                |
+| ------------------- | ---------------------------------------------------------- |
+| `make build`        | Compile to `bin/crypto-sniping-bot`                        |
+| `make run`          | `go run ./cmd serve`                                       |
+| `make test`         | Run all tests with race detector                           |
+| `make test-cover`   | Tests + HTML coverage report                               |
+| `make vet`          | `go vet ./...`                                             |
+| `make lint`         | `golangci-lint run ./...` (requires golangci-lint)         |
+| `make tidy`         | `go mod tidy`                                              |
+| `make migrate-up`   | Apply all pending migrations                               |
+| `make migrate-down` | Roll back last migration                                   |
+| `make clean`        | Remove `bin/`, `coverage.out`, `coverage.html`             |
+| `make quality`      | Runs `vet` + `lint` + `test` (full gate)                   |
+| `make log-collect`  | Collect logs + write log-reviewer summary (default 60 min) |
+| `make log-latest`   | Print the most recent log-reviewer summary to stdout       |
+| `make log-list`     | List all log-reviewer session summaries                    |
+| `make log-analyze`  | Re-analyse an existing raw log file (`LOG=path`)           |
+| `make gate-collect` | Collect logs + write production-gate-reviewer brief        |
+| `make gate-latest`  | Print the most recent gate-review brief to stdout          |
+| `make gate-list`    | List all gate-review sessions                              |
+| `make gate-analyze` | Re-analyse an existing gate raw log (`LOG=path`)           |
 
 ### Docker
 
@@ -178,29 +177,31 @@ Any of the following auto-sets PRS tier to **BLOCKED**:
 
 ## Pipeline
 
-The system runs a 11-layer sequential pipeline per market instance (e.g. `eth-uniswap-v2`):
+The system runs a **10-layer sequential pipeline** per market instance (e.g. `eth-uniswap-v2`).
+
+Layer 0.5 (Rescan Worker) is an **optional/auxiliary stage** for time-banded re-emission of missed tokens and is disabled by default (see `config/pipeline.yaml`).
 
 ```
-[INGEST] → [DQ FILTER] → [FEATURES] → [EDGE] → [P/S/L MODELS] → [VALIDATE] → [SELECT] → [CAPITAL] → [EXECUTE] → [POSITION] → [LEARN]
-    ↓            ↓            ↓           ↓            ↓               ↓           ↓           ↓            ↓            ↓          ↓
-MarketData  DataQuality  FeatureDTO   EdgeDTO    Prob/Slip/Lat   ValidatedEdge Selection Allocation  Execution  PositionState Learning
-   DTO         DTO                                  DTOs             DTO         DTO        DTO       ResultDTO     DTO        Record
+DETECT → FILTER → SCORE → SELECT → EXECUTE → EXIT → EVALUATE → ADJUST
+   ↓        ↓        ↓       ↓        ↓        ↓        ↓        ↓
+MarketData  DataQuality  FeatureDTO  EdgeDTO  Prob/Slip/Lat  ValidatedEdge  Selection  Allocation  Execution  PositionState  Learning
+   DTO         DTO         DTO         DTO         DTOs         DTO             DTO        DTO      ResultDTO     DTO         Record
 ```
 
-| Layer | Name                             | Responsibility                                                                                 |
-| ----- | -------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 0     | Detection & Ingestion            | Subscribe to DEX events, emit `MarketDataDTO`                                                  |
-| 0.5   | Rescan Worker                    | Re-emit temporally-missed tokens by age band; disabled by default (see `config/pipeline.yaml`) |
-| 1     | Data Quality Engine              | Reject rugs, honeypots, wash trades, fake liquidity                                            |
-| 2     | Feature Extraction               | Normalize to `FeatureDTO` + `FeatureConfidence`                                                |
-| 3     | Signal & Edge Discovery          | `NEW_LAUNCH_EDGE` detection, adaptive momentum threshold                                       |
-| 4     | Probability / Slippage / Latency | P(success), slippage impact, latency decay models                                              |
-| 5     | Edge Validation                  | EV gate, adaptive thresholds, mode-gated filters                                               |
-| 6     | Selection Engine                 | Top-K greedy + diversity + exploration band                                                    |
-| 7     | Capital Engine                   | Size ∝ Score × P × Confidence, cohort multipliers                                              |
-| 8     | Execution Engine                 | Wallet sharding, prebuilt calldata, bounded parallelism                                        |
-| 9     | Position Engine                  | TP1/TP2/SL/TIME exits, adaptive per cohort                                                     |
-| 10    | Learning Engine                  | FP/FN analysis, cohort updates, bounded adaptive learning                                      |
+| Layer | Name                             | Responsibility                                                    |
+| ----- | -------------------------------- | ----------------------------------------------------------------- |
+| 0     | Detection & Ingestion            | Subscribe to DEX events, emit `MarketDataDTO`                     |
+| 0.5   | Rescan Worker (optional)         | Re-emit temporally-missed tokens by age band; disabled by default |
+| 1     | Data Quality Engine              | Reject rugs, honeypots, wash trades, fake liquidity               |
+| 2     | Feature Extraction               | Normalize to `FeatureDTO` + `FeatureConfidence`                   |
+| 3     | Signal & Edge Discovery          | `NEW_LAUNCH_EDGE` detection, adaptive momentum threshold          |
+| 4     | Probability / Slippage / Latency | P(success), slippage impact, latency decay models                 |
+| 5     | Edge Validation                  | EV gate, adaptive thresholds, mode-gated filters                  |
+| 6     | Selection Engine                 | Top-K greedy + diversity + exploration band                       |
+| 7     | Capital Engine                   | Size ∝ Score × P × Confidence, cohort multipliers                 |
+| 8     | Execution Engine                 | Wallet sharding, prebuilt calldata, bounded parallelism           |
+| 9     | Position Engine                  | TP1/TP2/SL/TIME exits, adaptive per cohort                        |
+| 10    | Learning Engine                  | FP/FN analysis, cohort updates, bounded adaptive learning         |
 
 ### Pipeline Stage Log Keys
 
