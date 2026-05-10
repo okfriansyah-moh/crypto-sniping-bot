@@ -861,3 +861,15 @@ func (m *memAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[
 func (m *memAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
 }
+
+// ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
+
+func (m *memAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.HistoricalMarketProfileDTO) error {
+	return nil
+}
+func (m *memAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
+	return nil, database.ErrNotFound
+}
+func (m *memAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
+	return nil, nil
+}

@@ -27,11 +27,12 @@ const systemVersionID = "2e5d7a3f9c1b4e8a" // SHA256("system_version")[:8] in he
 // DEGRADED and HALTED are owned by the safety-mode (drawdown) controller and
 // are intentionally NOT in this set.
 const (
-	modeBalanced    = "BALANCED"
-	modeStrict      = "STRICT"
-	modeExploration = "EXPLORATION"
-	modeDegraded    = "DEGRADED"
-	modeHalted      = "HALTED"
+	modeBalanced        = "BALANCED"
+	modeStrict          = "STRICT"
+	modeExploration     = "EXPLORATION"
+	modeVeryExploration = "VERY_EXPLORATION"
+	modeDegraded        = "DEGRADED"
+	modeHalted          = "HALTED"
 )
 
 // reasonManualTelegram fingerprints state rows that were last updated by an
@@ -101,9 +102,9 @@ func RunRiskController(ctx context.Context, adapter database.Adapter, cfg *confi
 			}
 
 			// Adaptive risk-appetite pass — runs only when the system is in
-			// one of the adaptive-eligible modes (STRICT/BALANCED/EXPLORATION
-			// and never on the cold-start tick where the safety pass already
-			// upserted the default).
+			// one of the adaptive-eligible modes (STRICT/BALANCED/EXPLORATION/
+			// VERY_EXPLORATION) and never on the cold-start tick where the
+			// safety pass already upserted the default.
 			adaptiveVersion, err := runAdaptiveRiskAppetiteTick(
 				ctx, adapter, cfg, logger, stateVersion, &adaptiveLast, time.Now().UTC(),
 			)
@@ -419,10 +420,10 @@ func runAdaptiveRiskAppetite(
 	}
 	toMode, ok := nextUpgrade(state.Mode)
 	if !ok {
-		// Already EXPLORATION — emit critical alert, no transition.
+		// Already VERY_EXPLORATION — emit critical alert, no transition.
 		emitAdaptiveCriticalAlert(ctx, adapter, logger,
 			"starvation_critical",
-			"already in EXPLORATION with no opportunities — market conditions suspect",
+			"already in VERY_EXPLORATION with no opportunities — market conditions suspect",
 		)
 		return 0, nil
 	}
@@ -434,21 +435,25 @@ func runAdaptiveRiskAppetite(
 }
 
 // nextUpgrade returns the more-permissive neighbour of mode. Direction:
-// STRICT → BALANCED → EXPLORATION.
+// STRICT → BALANCED → EXPLORATION → VERY_EXPLORATION.
 func nextUpgrade(mode string) (string, bool) {
 	switch mode {
 	case modeStrict:
 		return modeBalanced, true
 	case modeBalanced:
 		return modeExploration, true
+	case modeExploration:
+		return modeVeryExploration, true
 	}
 	return "", false
 }
 
 // nextDowngrade returns the more-conservative neighbour of mode. Direction:
-// EXPLORATION → BALANCED → STRICT.
+// VERY_EXPLORATION → EXPLORATION → BALANCED → STRICT.
 func nextDowngrade(mode string) (string, bool) {
 	switch mode {
+	case modeVeryExploration:
+		return modeExploration, true
 	case modeExploration:
 		return modeBalanced, true
 	case modeBalanced:

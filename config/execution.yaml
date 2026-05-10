@@ -52,3 +52,17 @@ execution:
     priority_fee_lamports: 5000
     wallet_key_paths:
       - "${SOLANA_WALLET_KEY_1}"
+
+  # P5: Jito bundle submission — route Solana transactions through the Jito
+  # block-engine for MEV protection and priority inclusion.
+  # enabled: false — shadow mode only; no real bundles submitted until manually enabled.
+  # shadow_mode: true — emit Telegram alerts for every bundle attempt without submitting.
+  # Bundle endpoint and tip account are read from env vars at runtime:
+  #   JITO_BUNDLE_URL (e.g. https://mainnet.block-engine.jito.labs.io/api/v1/bundles)
+  #   JITO_TIP_ACCOUNT (one of the Jito tip accounts for the chosen region)
+  jito:
+    enabled: false
+    shadow_mode: true
+    tip_lamports: 1000
+    max_bundle_size: 5
+    submit_timeout_ms: 2000

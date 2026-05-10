@@ -799,3 +799,15 @@ func (s *stubAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map
 func (s *stubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
 }
+
+// ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
+
+func (s *stubAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.HistoricalMarketProfileDTO) error {
+	return nil
+}
+func (s *stubAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
+	return nil, database.ErrNotFound
+}
+func (s *stubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
+	return nil, nil
+}

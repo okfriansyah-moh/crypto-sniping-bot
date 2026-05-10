@@ -156,10 +156,10 @@ func validateRescanConfig(r RescanConfig) error {
 		return fmt.Errorf("rescan.eligibility.max_buy_tax_bps must be in [0, 10000], got %d",
 			*r.Eligibility.MaxBuyTaxBps)
 	}
-	validModes := map[string]bool{"STRICT": true, "BALANCED": true, "EXPLORATION": true}
+	validModes := map[string]bool{"STRICT": true, "BALANCED": true, "EXPLORATION": true, "VERY_EXPLORATION": true}
 	for k := range r.ModeOverrides {
 		if !validModes[k] {
-			return fmt.Errorf("rescan.mode_overrides key %q is not valid (allowed: STRICT, BALANCED, EXPLORATION)", k)
+			return fmt.Errorf("rescan.mode_overrides key %q is not valid (allowed: STRICT, BALANCED, EXPLORATION, VERY_EXPLORATION)", k)
 		}
 	}
 	return nil

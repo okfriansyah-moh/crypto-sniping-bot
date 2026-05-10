@@ -10,6 +10,7 @@ import (
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/data_quality"
+	dqproviders "crypto-sniping-bot/internal/modules/data_quality/providers"
 	"crypto-sniping-bot/internal/orchestrator"
 )
 
@@ -26,9 +27,71 @@ func NewDataQualityWorker(adapter database.Adapter, cfg *config.Config, logger *
 	if logger == nil {
 		logger = slog.Default()
 	}
+	mod := data_quality.New(data_quality.DefaultConfig(cfg), logger).
+		WithRuntimeConfig(&cfg.DataQualityRuntime)
+
+	// ── External providers (P1) ─────────────────────────────────────────
+	// Build the optional provider aggregator when providers are enabled.
+	// All providers boot shadow_mode: true — they observe but never affect
+	// the pipeline decision until shadow validation is complete.
+	if cfg.DataQualityRuntime.Providers.Enabled {
+		pcfg := cfg.DataQualityRuntime.Providers
+		entries := make([]dqproviders.ProviderEntry, 0, 1)
+
+		if pcfg.RugCheck.Enabled {
+			shadowMode := pcfg.ShadowMode || pcfg.RugCheck.ShadowMode
+			entries = append(entries, dqproviders.ProviderEntry{
+				Provider:   dqproviders.NewRugCheckProvider(logger),
+				Weight:     pcfg.RugCheck.Weight,
+				Enabled:    true,
+				ShadowMode: shadowMode,
+			})
+		}
+
+		if pcfg.SocialGate.Enabled {
+			shadowMode := pcfg.ShadowMode || pcfg.SocialGate.ShadowMode
+			entries = append(entries, dqproviders.ProviderEntry{
+				Provider:   dqproviders.NewSocialGateProvider(logger),
+				Weight:     pcfg.SocialGate.Weight,
+				Enabled:    true,
+				ShadowMode: shadowMode,
+			})
+		}
+
+		if pcfg.BirdEye.Enabled {
+			shadowMode := pcfg.ShadowMode || pcfg.BirdEye.ShadowMode
+			entries = append(entries, dqproviders.ProviderEntry{
+				Provider:   dqproviders.NewBirdEyeProvider(logger),
+				Weight:     pcfg.BirdEye.Weight,
+				Enabled:    true,
+				ShadowMode: shadowMode,
+			})
+		}
+
+		if pcfg.CopyTrade.Enabled {
+			shadowMode := pcfg.ShadowMode || pcfg.CopyTrade.ShadowMode
+			entries = append(entries, dqproviders.ProviderEntry{
+				Provider:   dqproviders.NewCopyTradeProvider(logger),
+				Weight:     pcfg.CopyTrade.Weight,
+				Enabled:    true,
+				ShadowMode: shadowMode,
+			})
+		}
+
+		if len(entries) > 0 {
+			agg := dqproviders.NewAggregator(entries, pcfg.BudgetMs, logger)
+			mod = mod.WithProviders(agg)
+			logger.Info("dq_providers_wired",
+				"count", len(entries),
+				"shadow_mode", pcfg.ShadowMode,
+				"budget_ms", pcfg.BudgetMs,
+			)
+		}
+	}
+
 	return &DataQualityWorker{
 		adapter: adapter,
-		mod:     data_quality.New(data_quality.DefaultConfig(cfg), logger).WithRuntimeConfig(&cfg.DataQualityRuntime),
+		mod:     mod,
 		logger:  logger,
 	}
 }
@@ -56,7 +119,7 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 
 	// Run data quality module (pure function).
 	// Read active operational mode from SystemState — STRICT/BALANCED/
-	// EXPLORATION select the per-mode threshold profile inside the module.
+	// VERY_EXPLORATION select the per-mode threshold profile inside the module.
 	// On error or absent state, the module collapses unknown values onto
 	// STRICT (conservative).
 	sysMode := "BALANCED"

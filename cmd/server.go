@@ -163,8 +163,12 @@ func runServer() {
 	orch.RegisterStage("evaluation_worker", workers.NewEvaluationWorker(db, cfg, logger), "position_state_event")
 
 	// Position poll runs as a separate goroutine (timer-driven, not event-driven).
+	// GAP-02 fix: wire a real price client so TP/SL/trailing stops can fetch
+	// live token prices. DEXScreenerPriceClient uses the free public API and
+	// returns priceNative (price in chain-native token) — same unit as EntryPrice.
+	priceClient := rpc.NewDEXScreenerPriceClient(logger)
 	go func() {
-		if err := workers.RunPositionPoll(ctx, db, cfg, nil, logger); err != nil && err != ctx.Err() {
+		if err := workers.RunPositionPoll(ctx, db, cfg, priceClient, logger); err != nil && err != ctx.Err() {
 			logger.Error("position_poll_failed", "error", err)
 		}
 	}()

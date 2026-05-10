@@ -227,6 +227,96 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and invar
 
 ---
 
+## Solana Launchpad Coverage (P4)
+
+Four launchpad DEXes are tracked on Solana via on-chain instruction decoding (layer 0):
+
+| Launchpad      | Program ID (prefix) | Discriminator (first 8 bytes)                                     | Pool accounts layout                                   |
+| -------------- | ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------ |
+| PumpFun AMM    | `pAMMBay6…`         | `[233,146,209,142,207,104,64,188]` (SHA256 `global:create_pool`)  | Pool=0, Creator=2, BaseMint=3, QuoteMint=4             |
+| Raydium CLMM   | `CAMMCzo5…`         | `[233,146,209,142,207,104,64,188]` (same; dispatch by programID)  | PoolCreator=0, PoolState=2, TokenMint0=3, TokenMint1=4 |
+| Orca Whirlpool | `whirLbMiic…`       | `[95,180,10,172,84,174,232,40]` (SHA256 `global:initialize_pool`) | TokenMintA=1, TokenMintB=2, Funder=3, Pool=4           |
+| Meteora DLMM   | `LBUZKhRx…`         | `[110,106,20,253,63,145,232,63]`                                  | LbPair=0, MintX=1, MintY=3, Funder=2                   |
+
+All new launchpad families emit `MarketDataDTO` (same contract as Raydium V4/PumpFun BC) and are routed through the same 10-layer pipeline with no code changes downstream.
+
+Config: `config/chains.yaml` → `solana.programs[]` (4 new entries). All families are active when Solana is enabled; no per-family flag needed.
+
+---
+
+## Private Mempool & Bundle Submission (P5)
+
+Three components provide sub-100ms execution on Solana (all boot `shadow_mode: true`):
+
+### Yellowstone gRPC Transport
+
+- Real-time block stream vs. ~200ms WebSocket+RPC latency.
+- Modes: `rpc` (default), `grpc`, `hybrid` (gRPC primary, RPC fallback).
+- Config: `config/chains.yaml` → `solana.transport`.
+- Auth token: `SOLANA_GRPC_TOKEN` env var **only** — never stored in YAML.
+- Endpoint: `SOLANA_GRPC_ENDPOINT` env var (e.g. `my-node.quiknode.pro:10000`).
+
+### ZeroSlot Priority RPC
+
+- Routes transaction submissions through ZeroSlot's private mempool (pre-landed).
+- Activation: set `SOLANA_ZEROSLOT_HTTP` env var to your ZeroSlot endpoint.
+- Config: `config/chains.yaml` → `solana.rpc.zeroslot`.
+
+### Jito Bundle Submission
+
+- Submits atomic bundles via Jito's Block Engine (MEV-friendly, bribe-based inclusion).
+- Config: `config/execution.yaml` → `solana.jito`.
+- Env vars: `JITO_BUNDLE_URL` (must be HTTPS in production), `JITO_TIP_ACCOUNT`.
+- Security: plain HTTP URLs are rejected unless the host is `localhost`/`127.x` (test only).
+- Shadow mode: `shadow_mode: true` (default) — logs bundle content without submitting.
+
+---
+
+## Data Quality Providers (P8 + earlier)
+
+The Data Quality Engine (Layer 1) aggregates signals from multiple providers. Every provider failure degrades gracefully (`Degraded: true`) without blocking the pipeline.
+
+| Provider      | Phase | Signal                                          | Env Vars Required                      | Shadow Default   |
+| ------------- | ----- | ----------------------------------------------- | -------------------------------------- | ---------------- |
+| RugCheck      | P9    | On-chain rug score (bonding curve, freeze auth) | —                                      | `enabled: false` |
+| Social Gate   | P2    | Twitter/X follower legitimacy gate              | `TWITTER_BEARER_TOKEN`                 | `enabled: false` |
+| BirdEye Intel | P3    | Price velocity, holder count, creator history   | `BIRDEYE_API_KEY`                      | `enabled: false` |
+| Copy Trade    | P8    | Alpha wallet activity match on DEXScreener API  | `COPY_TRADE_WALLETS` (comma-separated) | `enabled: false` |
+
+### Copy Trade Provider (P8)
+
+Detects when known "alpha wallets" are active in the token being evaluated — a strong execution timing signal.
+
+- `COPY_TRADE_WALLETS`: comma-separated Solana/EVM wallet addresses to watch.
+- Chain allowlist: `ethereum`/`eth`, `bsc`/`bnb`, `solana`/`sol`, `base` (unknown chains → `Degraded: true`).
+- Score: `0.0` (strong positive) on alpha match, `0.5` (neutral) otherwise.
+- Response body capped at 128 KiB; timeout 280ms; no real traffic in shadow mode.
+
+---
+
+## Environment Variables
+
+| Variable                        | Required When                      | Purpose                                             |
+| ------------------------------- | ---------------------------------- | --------------------------------------------------- |
+| `DATABASE_URL`                  | Always                             | PostgreSQL connection string                        |
+| `SNIPER_TELEGRAM_BOT_TOKEN`     | Telegram enabled                   | Telegram bot token for operator notifications       |
+| `SNIPER_TELEGRAM_CHAT_ID`       | Telegram enabled                   | Chat ID to send messages to                         |
+| `SNIPER_TELEGRAM_ALLOWED_USERS` | Destructive Telegram commands      | Comma-separated allowed Telegram user IDs           |
+| `SOLANA_RPC_HTTP`               | Solana markets active              | Solana RPC HTTP endpoint                            |
+| `SOLANA_RPC_WSS`                | Solana markets active              | Solana RPC WebSocket endpoint                       |
+| `SOLANA_GRPC_ENDPOINT`          | `transport.mode: grpc` or `hybrid` | Yellowstone gRPC endpoint (`host:port`)             |
+| `SOLANA_GRPC_TOKEN`             | `transport.mode: grpc` or `hybrid` | gRPC auth token — **never put in YAML**             |
+| `SOLANA_ZEROSLOT_HTTP`          | ZeroSlot private mempool           | ZeroSlot HTTP endpoint for pre-landed submissions   |
+| `JITO_BUNDLE_URL`               | `jito.enabled: true`               | Jito Block Engine URL (must be HTTPS in production) |
+| `JITO_TIP_ACCOUNT`              | `jito.enabled: true`               | Jito tip account public key                         |
+| `COPY_TRADE_WALLETS`            | Copy trade provider active         | Comma-separated alpha wallet addresses              |
+| `BIRDEYE_API_KEY`               | BirdEye provider active            | BirdEye API key for price/holder data               |
+| `TWITTER_BEARER_TOKEN`          | Social gate provider active        | Twitter/X Bearer Token for social gate              |
+
+All API keys and secrets are read via `os.Getenv()` at startup only — never stored in YAML, never logged, never passed across module boundaries.
+
+---
+
 ## Telegram Operator Commands
 
 All operator interaction goes through Telegram. The bot connects via `SNIPER_TELEGRAM_BOT_TOKEN` + `SNIPER_TELEGRAM_CHAT_ID`. Destructive commands require `SNIPER_TELEGRAM_ALLOWED_USERS` to be set (comma-separated user IDs).
@@ -357,21 +447,24 @@ crypto-sniping-bot/
 
 ## Implementation Phases
 
-| Phase | Name                      | Group | Description                                                                                                                                     |
-| ----- | ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | core-infrastructure       | A     | DB, event bus, adapter, orchestrator, migrations                                                                                                |
-| 1     | dex-ingestion             | A     | DEX scanner, RPC pool, `MarketDataDTO` → event bus                                                                                              |
-| 2     | first-trade-pipeline      | A     | End-to-end: DQ → Feature → Edge → Capital → Execute → Position                                                                                  |
-| 3     | evaluation-correctness    | B     | Learning records, strategy versioning, replay engine                                                                                            |
-| 4     | signal-quality            | B     | Full probability models, feature stability, anti-manipulation                                                                                   |
-| 5     | learning-engine           | B     | Adaptive learning, strategy decay detection, auto-disable                                                                                       |
-| 6     | production-hardening      | C     | Observability, drawdown protection, wallet sharding, Telegram                                                                                   |
-| 7     | solana-market             | C     | Solana Raydium/PumpFun ingestion + execution, hybrid transport                                                                                  |
-| 8     | production-hardening-r2   | C     | Reconciliation, partition leasing, DLQ, crash recovery, reorg guard                                                                             |
-| 9     | profitability-restoration | D     | Real scam detection, live features, Kelly sizing, price-feed monitor                                                                            |
-| 10    | reference-repo-r1         | D     | Trailing stop, consecutive-pass gate, bonding curve filter; **rescan worker** (Layer 0.5) — time-banded re-emission of temporally-missed tokens |
-| 10.5  | observability-r1          | D     | Cumulative pipeline funnel fix (`/pipeline`), new Telegram commands: `/rescan`, `/dq`, `/dlq`                                                   |
-| 11    | reference-repo-r2         | D     | Creator hygiene, holder concentration, social links, congestion slippage, per-creator dedup, sim-diff                                           |
+| Phase | Name                      | Group | Status  | Description                                                                                                                                     |
+| ----- | ------------------------- | ----- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | core-infrastructure       | A     | ✅ Done | DB, event bus, adapter, orchestrator, migrations                                                                                                |
+| 1     | dex-ingestion             | A     | ✅ Done | DEX scanner, RPC pool, `MarketDataDTO` → event bus                                                                                              |
+| 2     | first-trade-pipeline      | A     | ✅ Done | End-to-end: DQ → Feature → Edge → Capital → Execute → Position                                                                                  |
+| 3     | evaluation-correctness    | B     | ✅ Done | Learning records, strategy versioning, replay engine                                                                                            |
+| 4     | signal-quality            | B     | ✅ Done | Full probability models, feature stability, anti-manipulation                                                                                   |
+| 5     | learning-engine           | B     | ✅ Done | Adaptive learning, strategy decay detection, auto-disable                                                                                       |
+| 6     | production-hardening      | C     | ✅ Done | Observability, drawdown protection, wallet sharding, Telegram                                                                                   |
+| 7     | solana-market             | C     | ✅ Done | Solana Raydium/PumpFun ingestion + execution, hybrid transport                                                                                  |
+| 8     | production-hardening-r2   | C     | ✅ Done | Reconciliation, partition leasing, DLQ, crash recovery, reorg guard                                                                             |
+| 9     | profitability-restoration | D     | ✅ Done | Real scam detection, live features, Kelly sizing, price-feed monitor                                                                            |
+| 10    | reference-repo-r1         | D     | ✅ Done | Trailing stop, consecutive-pass gate, bonding curve filter; **rescan worker** (Layer 0.5) — time-banded re-emission of temporally-missed tokens |
+| 10.5  | observability-r1          | D     | ✅ Done | Cumulative pipeline funnel fix (`/pipeline`), new Telegram commands: `/rescan`, `/dq`, `/dlq`                                                   |
+| 11    | reference-repo-r2         | D     | ✅ Done | Creator hygiene, holder concentration, social links, congestion slippage, per-creator dedup, sim-diff                                           |
+| P4    | multi-launchpad-ingestion | D     | ✅ Done | PumpFun AMM + Raydium CLMM + Orca Whirlpool + Meteora DLMM on-chain decoder (17 tests)                                                          |
+| P5    | yellowstone-jito-zeroslot | D     | ✅ Done | Yellowstone gRPC transport, Jito bundle submission (shadow), ZeroSlot priority RPC (8 tests)                                                    |
+| P8    | copy-trade-amplifier      | D     | ✅ Done | Alpha wallet copy-trade DQ provider via DEXScreener API (8 tests), MED-01/HIGH-01/MED-02 security hardening                                     |
 
 **Group rules:** Groups A → B → C → D are sequential. Phases within the same group may run in parallel.
 
@@ -537,7 +630,7 @@ All values below live in `config/pipeline.yaml` unless noted.
 | `probes.honeypot_sim.enabled`       | `false` | EVM honeypot simulation; requires deployed contract      |
 | `probes.evm_pair_reserves.enabled`  | `false` | Live Uniswap-V2 `getReserves`; requires EVM RPC          |
 
-See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION`).
+See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION` / `VERY_EXPLORATION`).
 
 ---
 

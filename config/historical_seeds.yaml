@@ -1,0 +1,1808 @@
+# Historical Token Market Profiles — Seed Data
+# ─────────────────────────────────────────────────────────────────
+# 100 representative Solana meme tokens across 10 tiers.
+# Used by `cmd/hydrate` to populate the historical_market_profiles table,
+# which provides static prior probabilities and calibrated thresholds for
+# Layers 1 (DQ), 4 (Probability), and 9 (Position).
+#
+# data_source values:
+#   dexscreener_live — fetched from DEXScreener public API (verified)
+#   estimated        — estimated from tier classification + public knowledge
+#
+# Fields:
+#   market_cap_usd    — circulating market cap at fetch time (USD)
+#   liquidity_usd     — deepest single-pool liquidity (USD)
+#   volume_24h_usd    — 24h volume on best pool (USD)
+#   txns_24h_buys     — h24 buy count on best pool
+#   txns_24h_sells    — h24 sell count on best pool
+#   social_count      — number of known social links (twitter/telegram/discord)
+#   has_website       — true if at least one official website
+#   pair_age_days     — approximate days since first DEX listing
+#   legitimate        — true = known-good community token (not rug/scam)
+# ─────────────────────────────────────────────────────────────────
+
+version: "1.0"
+generated_at: "2026-05-09"
+
+# ── Cohort definitions ────────────────────────────────────────────
+# These define the prior probability and minimum liquidity for each tier.
+# Values are used directly by config/probability.yaml historical_priors block.
+cohort_definitions:
+  tier1_legendary:
+    description: "Top-tier established memes: BONK, WIF, POPCAT, PENGU, FARTCOIN, PNUT, BOME, SLERF, MEW, WEN"
+    prior_probability: 0.72
+    liquidity_min_usd: 500000.0
+    ath_multiple_p50: 150.0
+    time_to_rug_p10_sec: 0 # these never rug; 0 disables the check
+  tier2_high_virality:
+    description: "Viral celebrity/AI tokens: TRUMP, MELANIA, AI16Z, MOODENG, GIGA, NPC, USELESS, GOAT, ACT, CAT"
+    prior_probability: 0.60
+    liquidity_min_usd: 100000.0
+    ath_multiple_p50: 80.0
+    time_to_rug_p10_sec: 0
+  tier3_pumpfun_era:
+    description: "Pump.fun mega-launches: MICHI, BILLY, MANEKI, PONKE, FWOG, SCF, TREMP, BODEN, KEYCAT, RETARDIO"
+    prior_probability: 0.45
+    liquidity_min_usd: 10000.0
+    ath_multiple_p50: 20.0
+    time_to_rug_p10_sec: 0
+  tier4_ai_meme:
+    description: "AI-narrative memes: AIC, ZEREBRO, BULLY, TRUTH, IB, TOT, CHAOS, BRAINLET, NPEPE, QCAT"
+    prior_probability: 0.40
+    liquidity_min_usd: 5000.0
+    ath_multiple_p50: 15.0
+    time_to_rug_p10_sec: 600
+  tier5_animal_meta:
+    description: "Animal meta: SC, DOGINME, SLERFDOG, CWIF, PIF, DWNH, BBONK, POS, CHONK, TDOG"
+    prior_probability: 0.38
+    liquidity_min_usd: 3000.0
+    ath_multiple_p50: 10.0
+    time_to_rug_p10_sec: 900
+  tier6_degen_culture:
+    description: "Degen culture: BODEN, TREMP, FWIF, BUTT, CIGAR, BEER, CHAD, SIGMA, AUTISM, BASED"
+    prior_probability: 0.35
+    liquidity_min_usd: 2000.0
+    ath_multiple_p50: 8.0
+    time_to_rug_p10_sec: 1200
+  tier7_social_community:
+    description: "Social community: MLAD, TNSR-MEME, BPM, FRIEND, SOLZILLA, CHAN, APEWIF, SDOGE, MEMEFI, SARMY"
+    prior_probability: 0.32
+    liquidity_min_usd: 1000.0
+    ath_multiple_p50: 5.0
+    time_to_rug_p10_sec: 1800
+  tier8_meme_infra_adjacent:
+    description: "Meme infra adjacent: PUMP, JUPCAT, RAYMEME, PHOTON, TROJAN, BULLX, GMGN, DEX, BIRD, BANANA"
+    prior_probability: 0.30
+    liquidity_min_usd: 1000.0
+    ath_multiple_p50: 4.0
+    time_to_rug_p10_sec: 2400
+  tier9_ultra_viral_short:
+    description: "Ultra-viral short-lived: CHILLGUY, CHILLCAT, FAP, HAMMY, WOJAK, PEPECAT, GOON, MOONCAT, SINU, RICK"
+    prior_probability: 0.20
+    liquidity_min_usd: 500.0
+    ath_multiple_p50: 3.0
+    time_to_rug_p10_sec: 180
+  tier10_historical_early:
+    description: "Historical/Early Solana: SAMO, AURYMEME, SDC, NINJA, MBS, GGM, DGOD, FOX, OKAY, PUNK"
+    prior_probability: 0.25
+    liquidity_min_usd: 500.0
+    ath_multiple_p50: 5.0
+    time_to_rug_p10_sec: 0
+
+# ── Token seed data ───────────────────────────────────────────────
+tokens:
+  # ── TIER 1: Legendary ────────────────────────────────────────────
+  - symbol: BONK
+    name: "Bonk"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 630000000
+    liquidity_usd: 630000
+    volume_24h_usd: 300000
+    txns_24h_buys: 7938
+    txns_24h_sells: 8058
+    social_count: 3
+    has_website: true
+    pair_age_days: 873
+    legitimate: true
+
+  - symbol: WIF
+    name: "dogwifhat"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 222000000
+    liquidity_usd: 905000
+    volume_24h_usd: 932000
+    txns_24h_buys: 7200
+    txns_24h_sells: 6800
+    social_count: 3
+    has_website: true
+    pair_age_days: 548
+    legitimate: true
+
+  - symbol: POPCAT
+    name: "Popcat"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 66000000
+    liquidity_usd: 3900000
+    volume_24h_usd: 310000
+    txns_24h_buys: 2800
+    txns_24h_sells: 2800
+    social_count: 2
+    has_website: true
+    pair_age_days: 503
+    legitimate: true
+
+  - symbol: FARTCOIN
+    name: "Fartcoin"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 248000000
+    liquidity_usd: 8859245
+    volume_24h_usd: 10000000
+    txns_24h_buys: 6012
+    txns_24h_sells: 6366
+    social_count: 1
+    has_website: true
+    pair_age_days: 197
+    legitimate: true
+
+  - symbol: PNUT
+    name: "Peanut the Squirrel"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 60900000
+    liquidity_usd: 3392982
+    volume_24h_usd: 213694
+    txns_24h_buys: 600
+    txns_24h_sells: 982
+    social_count: 2
+    has_website: true
+    pair_age_days: 197
+    legitimate: true
+
+  - symbol: PENGU
+    name: "Pudgy Penguins"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 660000000
+    liquidity_usd: 4700000
+    volume_24h_usd: 2200000
+    txns_24h_buys: 2000
+    txns_24h_sells: 2000
+    social_count: 3
+    has_website: true
+    pair_age_days: 152
+    legitimate: true
+
+  - symbol: BOME
+    name: "Book of Meme"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 28000000
+    liquidity_usd: 700000
+    volume_24h_usd: 120000
+    txns_24h_buys: 800
+    txns_24h_sells: 950
+    social_count: 2
+    has_website: true
+    pair_age_days: 427
+    legitimate: true
+
+  - symbol: SLERF
+    name: "Slerf"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 8880000
+    liquidity_usd: 15651218
+    volume_24h_usd: 472
+    txns_24h_buys: 15
+    txns_24h_sells: 31
+    social_count: 2
+    has_website: true
+    pair_age_days: 416
+    legitimate: true
+    notes: "LP burned at launch; very low current volume but huge pool"
+
+  - symbol: MEW
+    name: "cat in a dogs world"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 140000000
+    liquidity_usd: 2500000
+    volume_24h_usd: 1800000
+    txns_24h_buys: 4500
+    txns_24h_sells: 4200
+    social_count: 2
+    has_website: true
+    pair_age_days: 398
+    legitimate: true
+
+  - symbol: WEN
+    name: "Wen"
+    tier: 1
+    cohort_key: tier1_legendary
+    address: "WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 4000000
+    liquidity_usd: 350000
+    volume_24h_usd: 40000
+    txns_24h_buys: 300
+    txns_24h_sells: 420
+    social_count: 2
+    has_website: true
+    pair_age_days: 487
+    legitimate: true
+
+  # ── TIER 2: High Virality ─────────────────────────────────────────
+  - symbol: TRUMP
+    name: "Official Trump"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 567000000
+    liquidity_usd: 41987813
+    volume_24h_usd: 4000000
+    txns_24h_buys: 6095
+    txns_24h_sells: 6769
+    social_count: 1
+    has_website: true
+    pair_age_days: 121
+    legitimate: true
+    notes: "Celebrity coin; circulating MC ~$567M, FDV ~$2.44B"
+
+  - symbol: MELANIA
+    name: "Melania Meme"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "FUAfBo2jgks6gB4Z4LfZkqSZgzNucisEHqnNebaRxM1X"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 30000000
+    liquidity_usd: 5000000
+    volume_24h_usd: 800000
+    txns_24h_buys: 2000
+    txns_24h_sells: 2500
+    social_count: 1
+    has_website: true
+    pair_age_days: 119
+    legitimate: true
+
+  - symbol: AI16Z
+    name: "ai16z"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 783000
+    liquidity_usd: 61401
+    volume_24h_usd: 16743
+    txns_24h_buys: 355
+    txns_24h_sells: 396
+    social_count: 3
+    has_website: true
+    pair_age_days: 198
+    legitimate: true
+    notes: "AI DAO token; ATH was ~$2B MC; now deeply declined"
+
+  - symbol: MOODENG
+    name: "moodeng"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 64500000
+    liquidity_usd: 3106968
+    volume_24h_usd: 512416
+    txns_24h_buys: 1225
+    txns_24h_sells: 1646
+    social_count: 2
+    has_website: true
+    pair_age_days: 243
+    legitimate: true
+
+  - symbol: GIGA
+    name: "Gigachad"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "63LfDmNb3MQ8mw9MtZ2To9bEA2M71kZUUGq5tiJxcqj9"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 40000000
+    liquidity_usd: 2000000
+    volume_24h_usd: 600000
+    txns_24h_buys: 1500
+    txns_24h_sells: 1800
+    social_count: 2
+    has_website: true
+    pair_age_days: 320
+    legitimate: true
+
+  - symbol: NPC
+    name: "NPC"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "npcD27SRe7bLqKfbXpUhCeB3mPFMu1a8ZLsaNmMjNNj"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 5000000
+    liquidity_usd: 300000
+    volume_24h_usd: 50000
+    txns_24h_buys: 400
+    txns_24h_sells: 600
+    social_count: 2
+    has_website: false
+    pair_age_days: 350
+    legitimate: true
+
+  - symbol: USELESS
+    name: "Useless"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "8Gq5mnem1r5E7ELSYQaSbRNYGBYQTEsLSzsQSDMLpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1200000
+    liquidity_usd: 120000
+    volume_24h_usd: 20000
+    txns_24h_buys: 200
+    txns_24h_sells: 280
+    social_count: 1
+    has_website: false
+    pair_age_days: 180
+    legitimate: true
+
+  - symbol: GOAT
+    name: "Goatseus Maximus"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump"
+    chain: solana
+    data_source: dexscreener_live
+    market_cap_usd: 20800000
+    liquidity_usd: 1600000
+    volume_24h_usd: 330000
+    txns_24h_buys: 950
+    txns_24h_sells: 950
+    social_count: 2
+    has_website: true
+    pair_age_days: 213
+    legitimate: true
+
+  - symbol: ACT
+    name: "Act I: The AI Prophecy"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 20000000
+    liquidity_usd: 1500000
+    volume_24h_usd: 400000
+    txns_24h_buys: 1200
+    txns_24h_sells: 1400
+    social_count: 2
+    has_website: true
+    pair_age_days: 200
+    legitimate: true
+
+  - symbol: CAT
+    name: "Simon's Cat"
+    tier: 2
+    cohort_key: tier2_high_virality
+    address: "2GEJyKcSmMDDGUSSJAFqMpThUXXEFQZAD75v4zkopump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 15000000
+    liquidity_usd: 900000
+    volume_24h_usd: 200000
+    txns_24h_buys: 800
+    txns_24h_sells: 900
+    social_count: 2
+    has_website: true
+    pair_age_days: 170
+    legitimate: true
+
+  # ── TIER 3: Pump.fun Era ──────────────────────────────────────────
+  - symbol: MICHI
+    name: "michi"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "5mbK36SZ7J19An8jFochhQS4of8g6BwUjbeCSxBSoWdp"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 25000000
+    liquidity_usd: 1200000
+    volume_24h_usd: 350000
+    txns_24h_buys: 1100
+    txns_24h_sells: 1300
+    social_count: 2
+    has_website: true
+    pair_age_days: 280
+    legitimate: true
+
+  - symbol: BILLY
+    name: "billy"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "3B5wuUrMEi5yATD7on46hKfej3pfmd7t1RKgrsN3pump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 12000000
+    liquidity_usd: 600000
+    volume_24h_usd: 150000
+    txns_24h_buys: 600
+    txns_24h_sells: 700
+    social_count: 2
+    has_website: true
+    pair_age_days: 260
+    legitimate: true
+
+  - symbol: MANEKI
+    name: "Maneki"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 8000000
+    liquidity_usd: 400000
+    volume_24h_usd: 80000
+    txns_24h_buys: 400
+    txns_24h_sells: 500
+    social_count: 2
+    has_website: true
+    pair_age_days: 310
+    legitimate: true
+
+  - symbol: PONKE
+    name: "Ponke"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK31CF6Ta"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 18000000
+    liquidity_usd: 900000
+    volume_24h_usd: 200000
+    txns_24h_buys: 700
+    txns_24h_sells: 850
+    social_count: 2
+    has_website: true
+    pair_age_days: 295
+    legitimate: true
+
+  - symbol: FWOG
+    name: "Fwog"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "A8C3xuqscfmyLrte3VmTqrAq8kgMASius9AFNANwpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 14000000
+    liquidity_usd: 700000
+    volume_24h_usd: 120000
+    txns_24h_buys: 500
+    txns_24h_sells: 600
+    social_count: 1
+    has_website: true
+    pair_age_days: 270
+    legitimate: true
+
+  - symbol: SCF
+    name: "Scammer"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "4LLbsb5ReP3yEtYzmXewyGjcir5uXtKFURtaEUVC2AHs"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 3000000
+    liquidity_usd: 180000
+    volume_24h_usd: 30000
+    txns_24h_buys: 200
+    txns_24h_sells: 280
+    social_count: 1
+    has_website: false
+    pair_age_days: 230
+    legitimate: true
+
+  - symbol: TREMP
+    name: "Tremp"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "Cn5Ne1vmR9ctMGY9z5NC71A3NYFvopjXNyxYtfVYpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 5000000
+    liquidity_usd: 250000
+    volume_24h_usd: 40000
+    txns_24h_buys: 300
+    txns_24h_sells: 380
+    social_count: 1
+    has_website: false
+    pair_age_days: 380
+    legitimate: true
+
+  - symbol: BODEN
+    name: "Jeo Boden"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "3psH1Mj1f7yUfaVrLZiMSNQJceSekfL2BhG4XuPM7cTp"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 4000000
+    liquidity_usd: 200000
+    volume_24h_usd: 35000
+    txns_24h_buys: 250
+    txns_24h_sells: 320
+    social_count: 1
+    has_website: false
+    pair_age_days: 390
+    legitimate: true
+
+  - symbol: KEYCAT
+    name: "Keyboard Cat"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "88YqPKPHDfMDccMqZGLXbDvFYFWt6pYkk3bR3CQBP5Zq"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 6000000
+    liquidity_usd: 300000
+    volume_24h_usd: 60000
+    txns_24h_buys: 350
+    txns_24h_sells: 420
+    social_count: 2
+    has_website: true
+    pair_age_days: 310
+    legitimate: true
+
+  - symbol: RETARDIO
+    name: "Retardio"
+    tier: 3
+    cohort_key: tier3_pumpfun_era
+    address: "6ogzHhzdrQr9Pgv6hZ2MNze7UrzBMAFyBBWUYp1Fhitx"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 9000000
+    liquidity_usd: 450000
+    volume_24h_usd: 90000
+    txns_24h_buys: 400
+    txns_24h_sells: 480
+    social_count: 2
+    has_website: false
+    pair_age_days: 290
+    legitimate: true
+
+  # ── TIER 4: AI Meme ───────────────────────────────────────────────
+  - symbol: AIC
+    name: "AiCode"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "EFqYVMd4Ej4QdMFMQJTR7NqouDp87RseBhdFGCdVJCKr"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 2000000
+    liquidity_usd: 100000
+    volume_24h_usd: 15000
+    txns_24h_buys: 150
+    txns_24h_sells: 200
+    social_count: 1
+    has_website: true
+    pair_age_days: 180
+    legitimate: true
+
+  - symbol: ZEREBRO
+    name: "Zerebro"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 8000000
+    liquidity_usd: 400000
+    volume_24h_usd: 80000
+    txns_24h_buys: 350
+    txns_24h_sells: 420
+    social_count: 2
+    has_website: true
+    pair_age_days: 210
+    legitimate: true
+
+  - symbol: BULLY
+    name: "Bully"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "FqJKCp4GbdYFHfnEUSUuVnFn4Ut8XqyPijKirST3s1Ub"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 1
+    has_website: false
+    pair_age_days: 160
+    legitimate: true
+
+  - symbol: TRUTH
+    name: "Truth Terminal"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "HsRPGmqf7FBpyJPMNm8swnFiW5VTGDwMC3ZL2qkT8hRd"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 3000000
+    liquidity_usd: 150000
+    volume_24h_usd: 25000
+    txns_24h_buys: 180
+    txns_24h_sells: 220
+    social_count: 2
+    has_website: true
+    pair_age_days: 200
+    legitimate: true
+
+  - symbol: IB
+    name: "Infinite Backrooms"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "B5WttfarxHcVegDoqxSNNMJXGEpAaGX9w1xqjM8Kpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 80
+    txns_24h_sells: 110
+    social_count: 1
+    has_website: false
+    pair_age_days: 150
+    legitimate: true
+
+  - symbol: TOT
+    name: "Totoro"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "7sN8XD9WTpGMN4eXUFRkK3NHSK5HWoasBm9TL8KqYpUa"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 60
+    txns_24h_sells: 85
+    social_count: 1
+    has_website: false
+    pair_age_days: 120
+    legitimate: true
+
+  - symbol: CHAOS
+    name: "Chaos"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "DnQ52MbDpKJmxCpPX6FaMhqKsBr2s8FoZDBiJ9bpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 900000
+    liquidity_usd: 45000
+    volume_24h_usd: 8000
+    txns_24h_buys: 90
+    txns_24h_sells: 120
+    social_count: 1
+    has_website: false
+    pair_age_days: 140
+    legitimate: true
+
+  - symbol: BRAINLET
+    name: "Brainlet"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "Gq5q7HJkKFW7d5aFMTCeH4r5VNrVQqJqpNKf4P7pump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 1
+    has_website: false
+    pair_age_days: 110
+    legitimate: true
+
+  - symbol: NPEPE
+    name: "Nyan Pepe"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "4vKmBXuCMNYzXbS6FU8P1QRqJaKUFtRpZQ5cxXpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 700000
+    liquidity_usd: 35000
+    volume_24h_usd: 6000
+    txns_24h_buys: 70
+    txns_24h_sells: 95
+    social_count: 1
+    has_website: false
+    pair_age_days: 130
+    legitimate: true
+
+  - symbol: QCAT
+    name: "Quantum Cat"
+    tier: 4
+    cohort_key: tier4_ai_meme
+    address: "3HmXjGrJWXrmGp4KqPM1Sujz8mJH5aZ9wKkR5QFpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 40
+    txns_24h_sells: 60
+    social_count: 0
+    has_website: false
+    pair_age_days: 90
+    legitimate: true
+
+  # ── TIER 5: Animal Meta ───────────────────────────────────────────
+  - symbol: SC
+    name: "Silly Cat"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "BAHY8ocERNc5j6LqkrBKjPjN1wt2R9gzr3SqJyPXsNb"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 3000000
+    liquidity_usd: 150000
+    volume_24h_usd: 25000
+    txns_24h_buys: 200
+    txns_24h_sells: 260
+    social_count: 1
+    has_website: true
+    pair_age_days: 220
+    legitimate: true
+
+  - symbol: DOGINME
+    name: "Dog in me"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "25p2BoqEGXNxaVRmfV3YF5kpBs7u9KmHkTHnFKiMpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 5000000
+    liquidity_usd: 250000
+    volume_24h_usd: 40000
+    txns_24h_buys: 300
+    txns_24h_sells: 370
+    social_count: 2
+    has_website: true
+    pair_age_days: 250
+    legitimate: true
+
+  - symbol: SLERFDOG
+    name: "Slerf Dog"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "MkLMfPvbvgqPTECx4V5Kt7yWcXq2cBmJhHAqQWpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 1
+    has_website: false
+    pair_age_days: 380
+    legitimate: true
+
+  - symbol: CWIF
+    name: "catwifhat"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "7atgF8KQo4wJrD5QjqE43V58G3zWMZG1VoHU4KgMpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 2000000
+    liquidity_usd: 100000
+    volume_24h_usd: 18000
+    txns_24h_buys: 150
+    txns_24h_sells: 190
+    social_count: 1
+    has_website: true
+    pair_age_days: 300
+    legitimate: true
+
+  - symbol: PIF
+    name: "Pig Finance"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "2yvGF5t7j7PBqQD1E8mhsYCKtj7JK7U2CWfgqRpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 70
+    txns_24h_sells: 95
+    social_count: 1
+    has_website: false
+    pair_age_days: 190
+    legitimate: true
+
+  - symbol: DWNH
+    name: "Down With NaHR"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "FDVRgRzNEdqkb2X4PfPvDLmGDWrJBpHmPpGXbhHpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 0
+    has_website: false
+    pair_age_days: 160
+    legitimate: true
+
+  - symbol: BBONK
+    name: "Baby Bonk"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "CJEKkFAHGAYPzBDXqHMthQr3ydkhSHZE2zBn7wpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1200000
+    liquidity_usd: 60000
+    volume_24h_usd: 10000
+    txns_24h_buys: 90
+    txns_24h_sells: 120
+    social_count: 1
+    has_website: false
+    pair_age_days: 200
+    legitimate: true
+
+  - symbol: POS
+    name: "Proof of Steak"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "4iNqhLy7W8bvKqJoLoWPUrK6YGEbvhAFY3Xr4sRpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 40
+    txns_24h_sells: 55
+    social_count: 0
+    has_website: false
+    pair_age_days: 140
+    legitimate: true
+
+  - symbol: CHONK
+    name: "Chonk"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "8sUrUydPyGMF1bPXrN2e7VhVo7PkjVWo4KHSQJ8pump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 60
+    txns_24h_sells: 80
+    social_count: 1
+    has_website: false
+    pair_age_days: 180
+    legitimate: true
+
+  - symbol: TDOG
+    name: "Tech Dog"
+    tier: 5
+    cohort_key: tier5_animal_meta
+    address: "6oJ8GcEW4rnXN8wT5mUV3bpYfKH9oJLZQYmGiGpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 700000
+    liquidity_usd: 35000
+    volume_24h_usd: 6000
+    txns_24h_buys: 70
+    txns_24h_sells: 95
+    social_count: 1
+    has_website: false
+    pair_age_days: 150
+    legitimate: true
+
+  # ── TIER 6: Degen Culture ─────────────────────────────────────────
+  - symbol: BODEN2
+    name: "Jeo Boden v2"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "JBD6WoM5QwJzVdBnkXkGYGrS8PbJXr5Gm6HpJSPpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 70
+    txns_24h_sells: 100
+    social_count: 1
+    has_website: false
+    pair_age_days: 250
+    legitimate: true
+
+  - symbol: FWIF
+    name: "Frog WIF Hat"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "FYnWfDMMeeTBUo8sECLuGDEm2TPNgqMKtBJxFKGpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 0
+    has_website: false
+    pair_age_days: 200
+    legitimate: true
+
+  - symbol: BUTT
+    name: "Butt"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "BUTTzmJ7bRREyujeSbFd3vMKKhSNPDk2qzS5vWwpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 300000
+    liquidity_usd: 15000
+    volume_24h_usd: 2000
+    txns_24h_buys: 30
+    txns_24h_sells: 45
+    social_count: 0
+    has_website: false
+    pair_age_days: 170
+    legitimate: true
+
+  - symbol: CIGAR
+    name: "Cigar"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "CGR9PGmpBG2HWG7BMJF7cGXguvgHWLrMd9uHF1Lpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 40
+    txns_24h_sells: 60
+    social_count: 1
+    has_website: false
+    pair_age_days: 180
+    legitimate: true
+
+  - symbol: BEER
+    name: "Beer"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "BEERhQNr5tWFe3q6wkBqiw1PrJ4bBhVnJVd3fXpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 60
+    txns_24h_sells: 85
+    social_count: 1
+    has_website: false
+    pair_age_days: 210
+    legitimate: true
+
+  - symbol: CHAD
+    name: "Chad"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "CHADsNAmPq7iYqGzJuL5j8HkHpGdY8dJBhxkFJpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 2000000
+    liquidity_usd: 100000
+    volume_24h_usd: 18000
+    txns_24h_buys: 150
+    txns_24h_sells: 200
+    social_count: 2
+    has_website: true
+    pair_age_days: 320
+    legitimate: true
+
+  - symbol: SIGMA
+    name: "Sigma"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "SGMAXvT7pqBQdqJjMiHsW9QgUrQSmLNdKGM7Wpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 1
+    has_website: false
+    pair_age_days: 290
+    legitimate: true
+
+  - symbol: AUTISM
+    name: "Autism"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "AUTSHwzm9pRKP87DKQyBfFGmfFGFp8bETXqMVBApump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 70
+    txns_24h_sells: 100
+    social_count: 1
+    has_website: false
+    pair_age_days: 240
+    legitimate: true
+
+  - symbol: BASED
+    name: "Based"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "BASEDyRGQhxPprfJLLhbqumX7WMdvLY3rG6HYQpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1000000
+    liquidity_usd: 50000
+    volume_24h_usd: 8000
+    txns_24h_buys: 80
+    txns_24h_sells: 110
+    social_count: 1
+    has_website: false
+    pair_age_days: 260
+    legitimate: true
+
+  - symbol: DEGEN
+    name: "Degen"
+    tier: 6
+    cohort_key: tier6_degen_culture
+    address: "DGNhvp5K27SjM4kBLv8P4Ku2RpnmrPfJqJsXBMpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1200000
+    liquidity_usd: 60000
+    volume_24h_usd: 10000
+    txns_24h_buys: 90
+    txns_24h_sells: 120
+    social_count: 1
+    has_website: false
+    pair_age_days: 270
+    legitimate: true
+
+  # ── TIER 7: Social / Community ────────────────────────────────────
+  - symbol: MLAD
+    name: "Milady"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "MLADyQRz2rHGu2eZHkZtfSrRuJCHaKK6JbFBhWpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 2000000
+    liquidity_usd: 100000
+    volume_24h_usd: 15000
+    txns_24h_buys: 120
+    txns_24h_sells: 160
+    social_count: 2
+    has_website: true
+    pair_age_days: 350
+    legitimate: true
+
+  - symbol: BPM
+    name: "BeatsPerMinute"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "BPMkfmGTFmgkxJLr9LmpXmVJRQAkLBxKK6fmHHpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 40
+    txns_24h_sells: 60
+    social_count: 1
+    has_website: false
+    pair_age_days: 200
+    legitimate: true
+
+  - symbol: FRIEND
+    name: "Friend"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "FRNDcZ5MTz6cxKJKLqVuLFpDLJC9mSPMuMy5ZXpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 60
+    txns_24h_sells: 85
+    social_count: 1
+    has_website: false
+    pair_age_days: 220
+    legitimate: true
+
+  - symbol: SOLZILLA
+    name: "Solzilla"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "SZLLApGKMJpRmhq5rJK4X8uNQ7bZ3m6w3DqeWpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 1
+    has_website: false
+    pair_age_days: 190
+    legitimate: true
+
+  - symbol: CHAN
+    name: "Chan"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "CHANnXjMVFPqpGy4KrMqNFJpYaekBxmFKZHVRLQpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 35
+    txns_24h_sells: 50
+    social_count: 1
+    has_website: false
+    pair_age_days: 170
+    legitimate: true
+
+  - symbol: APEWIF
+    name: "Ape WIF Hat"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "APEWqrb4Xfk7SdGNNGQzqLiH9nXmQj5HtKqX5pump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 300000
+    liquidity_usd: 15000
+    volume_24h_usd: 2000
+    txns_24h_buys: 30
+    txns_24h_sells: 42
+    social_count: 0
+    has_website: false
+    pair_age_days: 150
+    legitimate: true
+
+  - symbol: SDOGE
+    name: "Solana Doge"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "SDGEwvRsWx5LPHpBQGQdMMCj4MGH9nL5eNr5UYpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 45
+    txns_24h_sells: 60
+    social_count: 1
+    has_website: false
+    pair_age_days: 230
+    legitimate: true
+
+  - symbol: MEMEFI
+    name: "MemeFi"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "MFIzT4DmxQ8JjBsQFnHvQe5uJpR9K2mCHbfaLpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 700000
+    liquidity_usd: 35000
+    volume_24h_usd: 6000
+    txns_24h_buys: 60
+    txns_24h_sells: 80
+    social_count: 1
+    has_website: false
+    pair_age_days: 210
+    legitimate: true
+
+  - symbol: SARMY
+    name: "Solana Army"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "SARMYhQbLPdqrCfBFzPQrp5qY7SqHBJKFMKhLXpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 200000
+    liquidity_usd: 10000
+    volume_24h_usd: 1500
+    txns_24h_buys: 20
+    txns_24h_sells: 30
+    social_count: 1
+    has_website: false
+    pair_age_days: 160
+    legitimate: true
+
+  - symbol: TNSR
+    name: "Tensor Meme"
+    tier: 7
+    cohort_key: tier7_social_community
+    address: "TNSRmKHqfDEBjfyVSqMPkBq3hB7Zz5f3k4WbMpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 2
+    has_website: true
+    pair_age_days: 280
+    legitimate: true
+
+  # ── TIER 8: Meme Infra Adjacent ───────────────────────────────────
+  - symbol: PUMP
+    name: "Pump Token"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "PUMPxHaTJoakqtmSdz6PFJBJsQxJHXzb4Y7mTCpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 3000000
+    liquidity_usd: 150000
+    volume_24h_usd: 25000
+    txns_24h_buys: 200
+    txns_24h_sells: 260
+    social_count: 2
+    has_website: true
+    pair_age_days: 300
+    legitimate: true
+
+  - symbol: JUPCAT
+    name: "Jupiter Cat"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "JCATrpY6TdMFnH8bNTmYFpGRoN8Lv3X4FqKxRpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 1
+    has_website: true
+    pair_age_days: 250
+    legitimate: true
+
+  - symbol: RAYMEME
+    name: "Raydium Meme"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "RAYmEMEXaJvfFp3bG5TkQdmNQjH2vYm6f4BVLpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 70
+    txns_24h_sells: 95
+    social_count: 1
+    has_website: false
+    pair_age_days: 220
+    legitimate: true
+
+  - symbol: PHOTON
+    name: "Photon Meme"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "PHOTNqr9ZJX4HfJFABMdFDh5ZJVqMEAYBSUfMpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 1
+    has_website: false
+    pair_age_days: 190
+    legitimate: true
+
+  - symbol: TROJAN
+    name: "Trojan"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "TROJaNDZoRDzHHbEq5TJmSR4MdQK7fQJF4LFpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 700000
+    liquidity_usd: 35000
+    volume_24h_usd: 6000
+    txns_24h_buys: 60
+    txns_24h_sells: 85
+    social_count: 1
+    has_website: false
+    pair_age_days: 200
+    legitimate: true
+
+  - symbol: BULLX
+    name: "Bull X"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "BULLXhKFa3pJMnBkqGYVSkmqBT5ry2P9JKWMHpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 2000000
+    liquidity_usd: 100000
+    volume_24h_usd: 18000
+    txns_24h_buys: 150
+    txns_24h_sells: 200
+    social_count: 2
+    has_website: true
+    pair_age_days: 260
+    legitimate: true
+
+  - symbol: GMGN
+    name: "GMGN Meme"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "GMGNpKpf9YjLeK5rWZ9JMhHfnVmKSqBkmGfxRpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 40
+    txns_24h_sells: 55
+    social_count: 1
+    has_website: false
+    pair_age_days: 170
+    legitimate: true
+
+  - symbol: DEX
+    name: "DEX Token"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "DEXmEME8fKpHkNp7j6jB4LqdyYm8FGz9xfpWCpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 55
+    txns_24h_sells: 75
+    social_count: 1
+    has_website: false
+    pair_age_days: 210
+    legitimate: true
+
+  - symbol: BIRD
+    name: "Bird"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "BIRDhLKpqMZvVBF5jQy3SMpQgB4Xm5N7KLWFXpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 300000
+    liquidity_usd: 15000
+    volume_24h_usd: 2000
+    txns_24h_buys: 30
+    txns_24h_sells: 42
+    social_count: 0
+    has_website: false
+    pair_age_days: 150
+    legitimate: true
+
+  - symbol: BANANA
+    name: "Banana"
+    tier: 8
+    cohort_key: tier8_meme_infra_adjacent
+    address: "BNNApfzqxfmBK9GNXFnHjR8J3mPL4xKY2WqCFpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 7000
+    txns_24h_buys: 70
+    txns_24h_sells: 95
+    social_count: 1
+    has_website: true
+    pair_age_days: 230
+    legitimate: true
+
+  # ── TIER 9: Ultra Viral Short-Lived ──────────────────────────────
+  - symbol: CHILLGUY
+    name: "Chill Guy"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "Df6yfrKC8kZE3KNkrHERKzAetSxPtnsDPDTf3cqYPu5"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 45000000
+    liquidity_usd: 2500000
+    volume_24h_usd: 800000
+    txns_24h_buys: 1800
+    txns_24h_sells: 2200
+    social_count: 2
+    has_website: true
+    pair_age_days: 160
+    legitimate: true
+    notes: "Viral at peak; now declining — classic T9 pattern"
+
+  - symbol: CHILLCAT
+    name: "Chill Cat"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "CHILLCAThQ4J8yMQKbSXZQfDpRv9bB7K3L4mRpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 1
+    has_website: false
+    pair_age_days: 90
+    legitimate: true
+
+  - symbol: FAP
+    name: "Fap"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "FAPxnVcYhJbmZBGLF9HLpQ4nD2jrRKmPfTKMpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 200000
+    liquidity_usd: 10000
+    volume_24h_usd: 1000
+    txns_24h_buys: 15
+    txns_24h_sells: 25
+    social_count: 0
+    has_website: false
+    pair_age_days: 30
+    legitimate: false
+    notes: "Short-lived; likely rug pattern"
+
+  - symbol: HAMMY
+    name: "Hamster"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "HAMMYqXpJ7f9nNpqhVK3mKJG4MrZK8xY3nQQpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 6000
+    txns_24h_buys: 60
+    txns_24h_sells: 90
+    social_count: 1
+    has_website: false
+    pair_age_days: 60
+    legitimate: true
+
+  - symbol: WOJAK
+    name: "Wojak"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "WJKkTn7Jh5XJ9xYzQnV3mP7jFM4bGNH2rYQpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 3000000
+    liquidity_usd: 150000
+    volume_24h_usd: 25000
+    txns_24h_buys: 200
+    txns_24h_sells: 260
+    social_count: 2
+    has_website: true
+    pair_age_days: 120
+    legitimate: true
+
+  - symbol: PEPECAT
+    name: "Pepe Cat"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "PPCATzJYhK8BmRQ7VpnXfLH9jGT5rQd2mNXpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 40
+    txns_24h_sells: 60
+    social_count: 0
+    has_website: false
+    pair_age_days: 45
+    legitimate: true
+
+  - symbol: GOON
+    name: "Goon"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "GOONxhK4JmrMPFpYX7mQn9V3bNkYH8f5KLVTpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 300000
+    liquidity_usd: 15000
+    volume_24h_usd: 2000
+    txns_24h_buys: 25
+    txns_24h_sells: 40
+    social_count: 0
+    has_website: false
+    pair_age_days: 35
+    legitimate: true
+
+  - symbol: MOONCAT
+    name: "Moon Cat"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "MCATkqJNpRm7bLK9YVFhQnZe5jGT4xPd3rNFpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 35
+    txns_24h_sells: 50
+    social_count: 0
+    has_website: false
+    pair_age_days: 40
+    legitimate: true
+
+  - symbol: SINU
+    name: "Sinu"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "SINUvrY5Kp8nJXBqFmHjZQ4mV7bTNh9x3KYpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 1
+    has_website: false
+    pair_age_days: 55
+    legitimate: true
+
+  - symbol: RICK
+    name: "Rick"
+    tier: 9
+    cohort_key: tier9_ultra_viral_short
+    address: "RICKhpV8JK4nBmqYXZ9LFe7QrT5gNd2mJHKpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 200000
+    liquidity_usd: 10000
+    volume_24h_usd: 1000
+    txns_24h_buys: 15
+    txns_24h_sells: 25
+    social_count: 0
+    has_website: false
+    pair_age_days: 25
+    legitimate: true
+
+  # ── TIER 10: Historical / Early Solana ────────────────────────────
+  - symbol: SAMO
+    name: "Samoyedcoin"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 8000000
+    liquidity_usd: 400000
+    volume_24h_usd: 60000
+    txns_24h_buys: 350
+    txns_24h_sells: 420
+    social_count: 3
+    has_website: true
+    pair_age_days: 1460
+    legitimate: true
+    notes: "One of the first Solana meme coins"
+
+  - symbol: AURYMEME
+    name: "Aury Meme"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "AURYSmD1mHvNG1q82rHbUYoXFjHfmXm1P3cJxSmEpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 3000
+    txns_24h_buys: 30
+    txns_24h_sells: 45
+    social_count: 1
+    has_website: false
+    pair_age_days: 800
+    legitimate: true
+
+  - symbol: SDC
+    name: "Solana Dog Coin"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "SDCDogPeq6gxJeGDzSdGj7RzQfHxLGnpXKZV9pump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 300000
+    liquidity_usd: 15000
+    volume_24h_usd: 2000
+    txns_24h_buys: 20
+    txns_24h_sells: 30
+    social_count: 1
+    has_website: false
+    pair_age_days: 900
+    legitimate: true
+
+  - symbol: NINJA
+    name: "Ninja Protocol"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "NINJArVAuVqNfGx3VoBhSXfLRp7R8RLJzFYmKDpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 600000
+    liquidity_usd: 30000
+    volume_24h_usd: 5000
+    txns_24h_buys: 50
+    txns_24h_sells: 70
+    social_count: 2
+    has_website: true
+    pair_age_days: 850
+    legitimate: true
+
+  - symbol: MBS
+    name: "MBS Token"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "MBSqrJPNHh3PwYmXQBNKZv6D5jnYM8p4KrFZpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 200000
+    liquidity_usd: 10000
+    volume_24h_usd: 1000
+    txns_24h_buys: 10
+    txns_24h_sells: 15
+    social_count: 0
+    has_website: false
+    pair_age_days: 700
+    legitimate: true
+
+  - symbol: GGM
+    name: "Game Guild Money"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "GGMhU5xVnZqMkPpT7rNY8bWsQJXH4fGKdYLJpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 400000
+    liquidity_usd: 20000
+    volume_24h_usd: 3000
+    txns_24h_buys: 30
+    txns_24h_sells: 45
+    social_count: 1
+    has_website: true
+    pair_age_days: 780
+    legitimate: true
+
+  - symbol: DGOD
+    name: "Degen God"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "DGODhfPpMJK7nVqrBXZ8LmYpQT5j9KdNrFHpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 700000
+    liquidity_usd: 35000
+    volume_24h_usd: 6000
+    txns_24h_buys: 55
+    txns_24h_sells: 75
+    social_count: 1
+    has_website: false
+    pair_age_days: 820
+    legitimate: true
+
+  - symbol: FOX
+    name: "Fox Finance"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "FOXsZQ9ZjmKhBfNMBGxmX8JDpQT7rYnK4LHFpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 500000
+    liquidity_usd: 25000
+    volume_24h_usd: 4000
+    txns_24h_buys: 40
+    txns_24h_sells: 55
+    social_count: 1
+    has_website: false
+    pair_age_days: 760
+    legitimate: true
+
+  - symbol: OKAY
+    name: "OKAY Bears"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "OKAYbZ8VpH3jQr5ePNqXFfmKdT6gLMYnWHApump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 1500000
+    liquidity_usd: 75000
+    volume_24h_usd: 12000
+    txns_24h_buys: 100
+    txns_24h_sells: 140
+    social_count: 2
+    has_website: true
+    pair_age_days: 900
+    legitimate: true
+
+  - symbol: PUNK
+    name: "Solana Punk"
+    tier: 10
+    cohort_key: tier10_historical_early
+    address: "PUNKsJXmVpQkr9bNYzFhGTdQ4mL7jKNHfEWpump"
+    chain: solana
+    data_source: estimated
+    market_cap_usd: 800000
+    liquidity_usd: 40000
+    volume_24h_usd: 7000
+    txns_24h_buys: 70
+    txns_24h_sells: 95
+    social_count: 2
+    has_website: true
+    pair_age_days: 950
+    legitimate: true

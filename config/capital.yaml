@@ -32,6 +32,7 @@ capital:
     STRICT: 0.5
     BALANCED: 1.0
     EXPLORATION: 1.3
+    VERY_EXPLORATION: 1.5
 
   # ── Mode lookup freshness ─────────────────────────────────────
   mode_freshness_sec: 30 # if SystemStateDTO.Mode older → default to BALANCED

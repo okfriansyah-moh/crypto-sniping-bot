@@ -68,6 +68,16 @@ edge:
   baseline_flush_max_writes: 100 # >= 1 (validator); excess deferred to next cycle
   model_version: edge-v1 # stamped onto EdgeDTO.EdgeModelVersionID
 
+  # P7 — 20-slot time-series bottom detection.
+  # Scores the likelihood that the current price is recovering from a
+  # local V-shape bottom.  Boots in shadow_mode=true — flip to false
+  # after validating score distribution against live trades.
+  bottom_detection:
+    enabled: false
+    shadow_mode: true
+    max_slots: 20
+    min_score: 0.60 # gate threshold when NOT in shadow mode (0 = disabled)
+
 validation:
   prior_probability: 0.35 # fixed prior P(success) — Phase 2 simplification
   prior_gain_bps: 3000 # expected gain on win (30%)
@@ -120,6 +130,23 @@ position:
   sl_bps: 500 # stop-loss at -5% (was 15% — tighter for micro-cap memes)
   max_hold_seconds: 300 # 5 min max hold — meme tokens pump or dump fast
   poll_interval_seconds: 5 # poll every 5s (was 15s — tighter for fast-moving tokens)
+
+  # P6 — Dynamic trailing stop tiers.
+  # Tightens the trailing floor as unrealized profit grows.
+  # All tiers boot in shadow_mode: true — flip to false after shadow validation.
+  dynamic_trailing:
+    enabled: false
+    shadow_mode: true
+    # Tiers evaluated descending — first match wins.
+    # trigger_bps: minimum unrealized gain (e.g. 10000 = 100% = 2x).
+    # trail_bps:   trailing floor width (e.g. 2000 = 20% below peak).
+    tiers:
+      - trigger_bps: 40000 # 5x: trail within 10%
+        trail_bps: 1000
+      - trigger_bps: 20000 # 3x: trail within 15%
+        trail_bps: 1500
+      - trigger_bps: 10000 # 2x: trail within 20%
+        trail_bps: 2000
 
 # Phase 4 — Probability / Slippage / Latency models
 models:
@@ -246,7 +273,7 @@ learning:
     min_rugs_for_blacklist: 2
 
 # ── Adaptive Risk-Appetite Controller (operational-modes skill) ───────────────
-# Drives auto-transitions between STRICT / BALANCED / EXPLORATION based on
+# Drives auto-transitions between STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION based on
 # starvation and rug/FP-rate signals. Orthogonal to the drawdown safety
 # controller (config: risk.*) — the adaptive controller skips when the
 # system is DEGRADED or HALTED.
@@ -380,4 +407,9 @@ rescan:
       max_honeypot_score: 0.60
       max_rug_score: 0.75
       max_buy_tax_bps: 4500
+      include_passed: true
+    VERY_EXPLORATION:
+      max_honeypot_score: 0.75
+      max_rug_score: 0.85
+      max_buy_tax_bps: 6000
       include_passed: true

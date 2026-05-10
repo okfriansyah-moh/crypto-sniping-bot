@@ -193,7 +193,9 @@ func TestAdaptive_StarvationFromBalanced_UpgradesToExploration(t *testing.T) {
 }
 
 func TestAdaptive_StarvationInExploration_EmitsCriticalAlert(t *testing.T) {
-	adapter := newAdaptiveAdapter(contracts.SystemStateDTO{Mode: "EXPLORATION"})
+	// VERY_EXPLORATION is the highest mode — no further upgrade possible,
+	// so starvation while already at max emits a critical alert.
+	adapter := newAdaptiveAdapter(contracts.SystemStateDTO{Mode: "VERY_EXPLORATION"})
 	cfg := adaptiveCfg()
 	last := &adaptiveTransition{}
 	now := fixedNow()

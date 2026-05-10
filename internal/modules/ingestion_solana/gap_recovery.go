@@ -100,6 +100,31 @@ func RecoverGap(
 					d.IngestedAt = ingestedAt
 					emitErr = emit(ctx, *d)
 				}
+			// P4: new Solana programs — gap recovery uses same normalizers.
+			case "pumpfun-amm":
+				d, _ := NormalizePumpFunAMMCreatePool(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			case "raydium-clmm":
+				d, _ := NormalizeRaydiumCLMMCreatePool(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			case "orca-whirlpool":
+				d, _ := NormalizeOrcaWhirlpoolInitPool(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			case "meteora-dlmm":
+				d, _ := NormalizeMeteoraDLMMInitLbPair(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
 			}
 			if emitErr != nil {
 				logger.Warn("solana_gap_recovery_emit_error",

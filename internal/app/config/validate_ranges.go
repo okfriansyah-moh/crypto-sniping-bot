@@ -161,11 +161,11 @@ func (c *Config) validateRanges(logger *slog.Logger) error {
 			)
 		}
 		switch ma.DefaultStartupMode {
-		case "BALANCED", "STRICT", "EXPLORATION":
+		case "BALANCED", "STRICT", "EXPLORATION", "VERY_EXPLORATION":
 			// ok
 		default:
 			return fmt.Errorf(
-				"config: mode_adaptive.default_startup_mode=%q must be one of {BALANCED, STRICT, EXPLORATION}",
+				"config: mode_adaptive.default_startup_mode=%q must be one of {BALANCED, STRICT, EXPLORATION, VERY_EXPLORATION}",
 				ma.DefaultStartupMode,
 			)
 		}

@@ -325,12 +325,12 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 	case CmdMode:
 		if len(req.Args) == 0 {
 			return &CommandResult{
-				Text:        "Usage: /mode <strict|balanced|explore>",
+				Text:        "Usage: /mode <strict|balanced|explore|very_explore>",
 				Destructive: true,
 			}, nil
 		}
 		modeArg := strings.ToLower(req.Args[0])
-		// Normalize alias: "explore" → "EXPLORATION"
+		// Normalize alias: "explore" → "EXPLORATION", "very_explore" → "VERY_EXPLORATION"
 		switch modeArg {
 		case "strict":
 			modeArg = "STRICT"
@@ -338,9 +338,11 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 			modeArg = "BALANCED"
 		case "explore", "exploration":
 			modeArg = "EXPLORATION"
+		case "very_explore", "very_exploration":
+			modeArg = "VERY_EXPLORATION"
 		default:
 			return &CommandResult{
-				Text:        fmt.Sprintf("❌ Unknown mode %q — valid values: strict, balanced, explore", req.Args[0]),
+				Text:        fmt.Sprintf("❌ Unknown mode %q — valid values: strict, balanced, explore, very_explore", req.Args[0]),
 				Destructive: true,
 			}, nil
 		}
@@ -445,6 +447,7 @@ func helpText() string {
 		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +
 		"/mode balanced — Switch to BALANCED mode (default)\n" +
 		"/mode explore — Switch to EXPLORATION mode (relaxed thresholds)\n" +
+		"/mode very_explore — Switch to VERY_EXPLORATION mode (maximum opportunity, new-launch sniping)\n" +
 		"/enable_trading — Clear the safety-net halt after Phase-6 shadow run\n\n" +
 		"<b>🔴 Destructive</b>\n" +
 		"/kill — Activate kill switch (halts all trading immediately)\n" +

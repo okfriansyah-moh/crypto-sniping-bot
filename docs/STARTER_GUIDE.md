@@ -2028,17 +2028,18 @@ through the PostgreSQL event bus \u2014 modules never call Telegram directly.
 
 **Operator commands** (send from your Telegram chat to the bot):
 
-| Command          | What it does                                                           |
-| ---------------- | ---------------------------------------------------------------------- |
-| `/status`        | Shows current mode (STRICT/BALANCED/EXPLORATION), active positions     |
-| `/pnl`           | Shows today's realized PnL and win/loss rate                           |
-| `/positions`     | Lists all open positions with entry price and current P&L              |
-| `/mode strict`   | Switches to STRICT mode (conservative thresholds)                      |
-| `/mode balanced` | Switches to BALANCED mode (default)                                    |
-| `/mode explore`  | Switches to EXPLORATION mode (relaxed thresholds)                      |
-| `/kill`          | Triggers emergency kill switch \u2014 halts all new trades immediately |
-| `/resume`        | Resumes trading after kill switch (requires confirmation)              |
-| `/version`       | Shows current strategy version and config snapshot hash                |
+| Command              | What it does                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `/status`            | Shows current mode (STRICT/BALANCED/EXPLORATION/VERY_EXPLORATION), active positions |
+| `/pnl`               | Shows today's realized PnL and win/loss rate                                        |
+| `/positions`         | Lists all open positions with entry price and current P&L                           |
+| `/mode strict`       | Switches to STRICT mode (conservative — rug-spike safety)                           |
+| `/mode balanced`     | Switches to BALANCED mode (default)                                                 |
+| `/mode explore`      | Switches to EXPLORATION mode (relaxed thresholds, starvation recovery)              |
+| `/mode very_explore` | Switches to VERY_EXPLORATION mode (maximum aggression — new-launch sniping)         |
+| `/kill`              | Triggers emergency kill switch \u2014 halts all new trades immediately              |
+| `/resume`            | Resumes trading after kill switch (requires confirmation)                           |
+| `/version`           | Shows current strategy version and config snapshot hash                             |
 
 > **Note:** `/kill` and `/resume` are destructive commands. They are logged with timestamp and
 > require confirmation. The kill switch also fires automatically when daily drawdown exceeds the

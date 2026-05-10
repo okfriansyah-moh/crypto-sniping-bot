@@ -61,6 +61,17 @@ type EdgeDTO struct {
 	// Empty for accepted edges; populated for EdgeType="NONE".
 	// Examples: "no_qualifying_edge", "creator_dev_buy_too_high".
 	RejectReason string `json:"reject_reason,omitempty"`
+
+	// P7 — 20-slot time-series bottom detection.
+	// BottomDetectionScore is the composite V-shape score in [0, 1].
+	// 0 = no bottom pattern / insufficient data.
+	// 1 = strong V-shape recovery detected.
+	// Populated only when the bottom-detection subsystem is enabled.
+	BottomDetectionScore float64 `json:"bottom_detection_score,omitempty"`
+
+	// SlotWindowSize records how many price observations were analysed.
+	// 0 means the bottom-detection subsystem was not active.
+	SlotWindowSize int32 `json:"slot_window_size,omitempty"`
 }
 
 // Edge type taxonomy (per docs/architecture.md § 3.3 and the

@@ -564,6 +564,22 @@ type Adapter interface {
 	// rehydrate their in-memory ring buffers.
 	// Returns an empty (non-nil) outer map when no rows exist.
 	LoadBaselines(ctx context.Context, module string) (map[string]map[string][]float64, error)
+
+	// ── Historical Market Profiles (Approach A) ───────────────────────────────
+
+	// UpsertHistoricalProfile persists a cohort-level statistical profile
+	// computed by the `hydrate` CLI command.
+	// Idempotent: ON CONFLICT (cohort_key) DO UPDATE SET …
+	UpsertHistoricalProfile(ctx context.Context, dto contracts.HistoricalMarketProfileDTO) error
+
+	// GetHistoricalProfile retrieves the profile for a given cohort key.
+	// Returns (nil, nil) when no row exists for the key.
+	GetHistoricalProfile(ctx context.Context, cohortKey string) (*contracts.HistoricalMarketProfileDTO, error)
+
+	// ListHistoricalProfiles returns all persisted cohort profiles,
+	// ordered by cohort_key ASC. Returns an empty (non-nil) slice when
+	// no rows exist.
+	ListHistoricalProfiles(ctx context.Context) ([]contracts.HistoricalMarketProfileDTO, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────

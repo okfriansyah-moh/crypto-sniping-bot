@@ -8,11 +8,12 @@ import (
 
 // canonicalProfile is the fallback decision band used when YAML omits a
 // `mode_profiles.<mode>` entry. Values come from the data-quality-engine
-// skill — STRICT / BALANCED / EXPLORATION canonical thresholds.
+// skill — STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION canonical thresholds.
 var canonicalProfile = map[string]config.DataQualityModeProfile{
-	"STRICT":      {RejectAbove: 0.30, RiskyPassAbove: 0.15, UnknownFactor: 0.5},
-	"BALANCED":    {RejectAbove: 0.50, RiskyPassAbove: 0.25, UnknownFactor: 0.0},
-	"EXPLORATION": {RejectAbove: 0.65, RiskyPassAbove: 0.35, UnknownFactor: 0.0},
+	"STRICT":           {RejectAbove: 0.30, RiskyPassAbove: 0.15, UnknownFactor: 0.5},
+	"BALANCED":         {RejectAbove: 0.50, RiskyPassAbove: 0.25, UnknownFactor: 0.0},
+	"EXPLORATION":      {RejectAbove: 0.65, RiskyPassAbove: 0.35, UnknownFactor: 0.0, MinTokenAgeSeconds: -1},
+	"VERY_EXPLORATION": {RejectAbove: 0.75, RiskyPassAbove: 0.45, UnknownFactor: 0.0, MinTokenAgeSeconds: -1},
 }
 
 // resolveProfile returns the operational-mode profile used to gate the
@@ -21,7 +22,7 @@ var canonicalProfile = map[string]config.DataQualityModeProfile{
 func resolveProfile(mode string, rt *config.DataQualityRuntimeConfig) (string, config.DataQualityModeProfile) {
 	canonical := strings.ToUpper(strings.TrimSpace(mode))
 	switch canonical {
-	case "STRICT", "BALANCED", "EXPLORATION":
+	case "STRICT", "BALANCED", "EXPLORATION", "VERY_EXPLORATION":
 		// keep as-is
 	default:
 		// DEGRADED / HALTED / "" → conservative default.

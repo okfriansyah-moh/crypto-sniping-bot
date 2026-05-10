@@ -130,10 +130,12 @@ type SolanaConfig struct {
 }
 
 // IngestionTransportConfig governs Solana streaming transport selection.
+// NOTE: GrpcAuthToken is intentionally absent from this struct. The gRPC auth
+// token MUST be supplied via SOLANA_GRPC_TOKEN env var only — never in YAML
+// config files to prevent accidental secret commit to git.
 type IngestionTransportConfig struct {
-	Mode            string `yaml:"mode"`          // "rpc" | "grpc" | "hybrid"
-	GrpcEndpoint    string `yaml:"grpc_endpoint"` // host:port
-	GrpcAuthToken   string `yaml:"grpc_auth_token" json:"-"`
+	Mode            string `yaml:"mode"`              // "rpc" | "grpc" | "hybrid"
+	GrpcEndpoint    string `yaml:"grpc_endpoint"`     // host:port
 	FallbackOnError bool   `yaml:"fallback_on_error"` // hybrid → fall back to rpc
 	FallbackErrorN  int    `yaml:"fallback_error_n"`  // consecutive errors before fallback
 }

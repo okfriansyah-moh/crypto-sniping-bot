@@ -299,7 +299,7 @@ Pass Rate: 0.5% – 5%
 ## 0.6 Adaptive Strictness (Core Mechanism)
 
 ```
-STRICT → BALANCED → EXPLORATION
+STRICT → BALANCED → EXPLORATION → VERY_EXPLORATION
 ```
 
 ### 0.6.1 Formal Controller
@@ -1739,7 +1739,7 @@ This layer is your **hard gate against adversarial data**. If it's weak, nothing
 
 **C. Adapt thresholds → controlled updates**
 
-- Adjust **threshold profiles** (strict/balanced/exploration)
+- Adjust **threshold profiles** (strict/balanced/exploration/very_exploration)
 - Updates are **bounded, versioned, sample-gated**
 
 ---
@@ -1958,7 +1958,7 @@ type DataQualityDTO struct {
     RiskScore    float64
     Flags        []string
     Decision     string // pass | risky-pass | reject
-    Profile      string // strict | balanced | exploration
+    Profile      string // strict | balanced | exploration | very_exploration
     Version      int
     Timestamp    int64
 }
@@ -2004,8 +2004,8 @@ type DQMetrics struct {
 **Mode Switching**
 
 ```
-if PassRate == 0 for T                       → downgrade profile (strict→balanced→exploration)
-if RugLossRate ↑ or FalsePositiveRate ↑      → upgrade profile (exploration→balanced→strict)
+if PassRate == 0 for T                       → downgrade profile (strict→balanced→exploration→very_exploration)
+if RugLossRate ↑ or FalsePositiveRate ↑      → upgrade profile (very_exploration→exploration→balanced→strict)
 ```
 
 **Threshold Tuning (within profile)**
@@ -4811,7 +4811,7 @@ Explicit non-goals — preserved invariants:
 - `contracts/*.go` schemas unchanged (only `Chain` enumeration is widened — additive value).
 - `database.Adapter` interface unchanged. `AllocateNonce` / `ReconcileNonce` remain EVM-only by design (callers gate on `chain ∈ {eth, bsc}`).
 - Event bus schema unchanged. No new event types are required for Phase 7 — Solana ingestion emits `market_data_event` and Solana execution emits `execution_event`, identical to EVM.
-- Operational modes (STRICT / BALANCED / EXPLORATION) apply uniformly across markets.
+- Operational modes (STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION) apply uniformly across markets.
 
 ### 3.11.10 Solana Ingestion & Execution Guarantees (Production-Grade)
 
@@ -5175,7 +5175,7 @@ ingestion_dropped_events_total  (swap drops due to backpressure)
 
 ```
 /status
-/mode STRICT|BALANCED|EXPLORATION
+/mode STRICT|BALANCED|EXPLORATION|VERY_EXPLORATION
 /pnl
 /positions
 /kill
@@ -6521,7 +6521,13 @@ exit_efficiency_global
 
 # 7. Operational Modes
 
-The system runs in one of three profiles, switchable via Telegram or automatic controllers.
+The system runs in one of **four** profiles arranged in an adaptive mode wheel. Profiles are
+switchable via Telegram `/mode` or automatically by the risk-appetite controller.
+
+```
+STRICT ←→ BALANCED ←→ EXPLORATION ←→ VERY_EXPLORATION
+          (adaptive mode wheel — bidirectional)
+```
 
 ## 7.1 STRICT
 
@@ -6530,18 +6536,21 @@ mode: STRICT
 data_quality:
   max_tax: 8
   min_liquidity: 20000
-  risk_reject: 0.65
+  risk_reject: 0.30 # tightest reject band
 edge:
   theta_momentum: high
+  edge_strength_min: 0.75
 validation:
   theta_p: 0.70
   theta_s: 0.03
+  ev_threshold_bps: 150
 capital:
   explore_budget: 1%
   cohort_multiplier_max: 1.2
+  mode_multiplier: 0.5x
 ```
 
-Use when: rug rate rising, toxic regime, drawdown spike.
+Use when: rug rate rising, toxic regime, drawdown spike. Safety floor.
 
 ## 7.2 BALANCED (default)
 
@@ -6550,18 +6559,21 @@ mode: BALANCED
 data_quality:
   max_tax: 12
   min_liquidity: 10000
-  risk_reject: 0.70
+  risk_reject: 0.50
 edge:
   theta_momentum: medium
+  edge_strength_min: 0.60
 validation:
   theta_p: 0.60
   theta_s: 0.05
+  ev_threshold_bps: 100
 capital:
   explore_budget: 2–3%
   cohort_multiplier_max: 1.3
+  mode_multiplier: 1.0x
 ```
 
-Default operating mode.
+Default cold-start mode. Operator can return here from any mode with `/mode balanced`.
 
 ## 7.3 EXPLORATION
 
@@ -6570,25 +6582,72 @@ mode: EXPLORATION
 data_quality:
   max_tax: 15
   min_liquidity: 5000
-  risk_reject: 0.75
+  risk_reject: 0.65
+  min_token_age: disabled # new-launch sniping targets creation-time tokens
 edge:
   theta_momentum: low
+  edge_strength_min: 0.45
 validation:
   theta_p: 0.50
   theta_s: 0.08
+  ev_threshold_bps: 60
 capital:
   explore_budget: 3–5%
   cohort_multiplier_max: 1.5
+  mode_multiplier: 1.3x
 ```
 
-Use when: starvation (no trades), healthy market, need to discover new cohorts.
+Auto-entered when starvation is detected (no validated edge for ≥30 min). Use when the
+market is underserved and the strategy needs to discover new cohorts.
 
-## 7.4 Mode Transition Rules
+## 7.4 VERY_EXPLORATION
 
-- **Auto-downgrade** STRICT → BALANCED → EXPLORATION when `pass_rate = 0` for T
-- **Auto-upgrade** EXPLORATION → BALANCED → STRICT when `rug_loss_rate ↑` or `FP ↑`
-- **Manual override** via Telegram `/mode` (logged, reversible)
-- One transition per window (avoid oscillation)
+```yaml
+mode: VERY_EXPLORATION
+data_quality:
+  max_tax: 20
+  min_liquidity: 1000
+  risk_reject: 0.75 # maximally permissive — accept borderline tokens
+  min_token_age: disabled # catch tokens at the moment of creation
+edge:
+  theta_momentum: minimal
+  edge_strength_min: 0.30 # very wide net — recall over precision
+validation:
+  theta_p: 0.40
+  theta_s: 0.12
+  ev_threshold_bps: 30 # accept thin edges
+capital:
+  explore_budget: 8%
+  cohort_multiplier_max: 1.8
+  mode_multiplier: 1.5x
+```
+
+Auto-entered when starvation **persists** in EXPLORATION mode for a full adaptive window.
+This is maximum aggression for new-launch token sniping — targets tokens at creation.
+**Auto-exits** (downgrade to EXPLORATION) on rug-rate spike or manual `/mode` override.
+Telecommand: `/mode very_explore` or `/mode very_exploration`.
+
+> **Risk note:** VERY_EXPLORATION maximises recall at the cost of precision. Every
+> loss-pattern classification still runs; Learning Engine feedback applies. Never remove
+> the drawdown kill switch — it is the safety floor regardless of mode.
+
+## 7.5 Mode Transition Rules
+
+**Adaptive mode wheel** (bidirectional, one transition per `transition_window_sec`):
+
+```
+STRICT ←→ BALANCED ←→ EXPLORATION ←→ VERY_EXPLORATION
+```
+
+- **Auto-upgrade** (starvation): no validated edge for `starvation_trigger_sec` → step up one mode
+  - STRICT → BALANCED → EXPLORATION → VERY_EXPLORATION
+- **Auto-downgrade** (safety): rug rate > `rug_rate_auto_downgrade` OR FP rate > `fp_rate_auto_downgrade` → step down one mode
+  - VERY_EXPLORATION → EXPLORATION → BALANCED → STRICT
+- **Manual override** via Telegram `/mode <strict|balanced|explore|very_explore>` (logged, reversible, survives one adaptive window)
+- **One transition per window** — bounded by `transition_window_sec` (default 1h); prevents oscillation
+- **Drawdown safety mode** is orthogonal: DEGRADED and HALTED are owned by the drawdown controller and override all adaptive modes
+- Already at VERY_EXPLORATION with no edges → emit `starvation_critical` alert (market conditions suspect, operator review required)
+- Already at STRICT with rug spike → emit `high_rug_rate_in_strict` alert (strategy review required)
 
 ---
 

@@ -22,6 +22,14 @@ chains:
       - address: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
         protocol: uniswap-v3
         market: eth-uniswap-v3
+      # P4: SushiSwap V2 (PairCreated event, same ABI as Uniswap V2)
+      - address: "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"
+        protocol: sushiswap-v2
+        market: eth-sushiswap-v2
+      # P4: SushiSwap V3 (PoolCreated event, same ABI as Uniswap V3)
+      - address: "0xbACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F"
+        protocol: sushiswap-v3
+        market: eth-sushiswap-v3
     backoff:
       initial_ms: 500
       max_ms: 30000
@@ -48,6 +56,10 @@ chains:
       - address: "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
         protocol: pancakeswap-v2
         market: bsc-pancake-v2
+      # P4: PancakeSwap V3 (PoolCreated event, same ABI as Uniswap V3)
+      - address: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+        protocol: pancakeswap-v3
+        market: bsc-pancake-v3
     backoff:
       initial_ms: 500
       max_ms: 30000
@@ -94,11 +106,31 @@ solana:
       kind: ws
       region: us-east
       provider: helius
+    # P5: ZeroSlot — ultra-low-latency RPC for transaction submission.
+    # Disabled by default (empty URL); set SOLANA_ZEROSLOT_HTTP to enable.
+    # ZeroSlot routes via private mempool, reducing front-run exposure.
+    - url: "${SOLANA_ZEROSLOT_HTTP}"
+      priority: 1
+      kind: http
+      region: us-east
+      provider: zeroslot
   programs:
     - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
       family: raydium-v4
     - program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
       family: pumpfun
+    # P4: PumpFun AMM (graduation events — token migrates from bonding curve to AMM)
+    - program_id: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+      family: pumpfun-amm
+    # P4: Raydium CLMM (concentrated liquidity pool creation)
+    - program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+      family: raydium-clmm
+    # P4: Orca Whirlpool (concentrated liquidity, high Solana volume)
+    - program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+      family: orca-whirlpool
+    # P4: Meteora DLMM (dynamic liquidity market maker)
+    - program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
+      family: meteora-dlmm
   # getTransaction HTTP rate cap — must be ≤ RPC provider account limit.
   # QuickNode free tier = 15 req/s; lowered to 2 to stay within daily quota.
   # At 2 req/s the daily usage is ~172k calls — well under free-tier daily caps.
@@ -147,13 +179,21 @@ solana:
     consecutive_ws_failures_threshold: 3
     circuit_open_cooldown_ms: 30000
   # Phase 11 (Reference-Repo R2 — INGEST) — pluggable transport.
-  # Mode: "rpc" (default WS), "grpc" (Yellowstone/Geyser, not yet
-  # implemented), or "hybrid" (gRPC primary, RPC fallback after
-  # fallback_error_n consecutive errors). The grpc_auth_token is
-  # marshaled with json:"-" to avoid leaking into structured logs.
+  # Mode: "rpc" (default WS), "grpc" (Yellowstone/Geyser), or "hybrid"
+  # (gRPC primary, RPC fallback after fallback_error_n consecutive errors).
+  #
+  # P5: Yellowstone gRPC — sub-100ms stream latency vs ~200ms WS+RPC.
+  # To enable: set SOLANA_GRPC_ENDPOINT to "<host>:<port>" (QuickNode /
+  # Triton endpoints supported), SOLANA_GRPC_TOKEN to the auth token,
+  # then change mode to "grpc" or "hybrid". The auth token is read from
+  # SOLANA_GRPC_TOKEN env var only — never store it in this file.
+  #
+  # P5: ZeroSlot private mempool — set mode to "hybrid" and set the
+  # SOLANA_ZEROSLOT_HTTP env var to route submissions through ZeroSlot.
   transport:
     mode: "rpc"
+    # Yellowstone/Geyser gRPC endpoint — leave blank, read from env:
+    # SOLANA_GRPC_ENDPOINT (e.g. "my-node.quiknode.pro:10000")
     grpc_endpoint: ""
-    grpc_auth_token: ""
     fallback_on_error: true
     fallback_error_n: 5

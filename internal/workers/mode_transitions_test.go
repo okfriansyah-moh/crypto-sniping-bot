@@ -33,13 +33,26 @@ func TestNextUpgrade_Balanced_ReturnsExploration(t *testing.T) {
 	}
 }
 
-func TestNextUpgrade_Exploration_ReturnsFalse(t *testing.T) {
-	// Arrange / Act: EXPLORATION is the highest mode; no further upgrade.
-	_, ok := nextUpgrade(modeExploration)
+func TestNextUpgrade_Exploration_ReturnsVeryExploration(t *testing.T) {
+	// Arrange / Act: EXPLORATION upgrades to VERY_EXPLORATION.
+	next, ok := nextUpgrade(modeExploration)
+
+	// Assert
+	if !ok {
+		t.Fatal("nextUpgrade(EXPLORATION): want ok=true")
+	}
+	if next != modeVeryExploration {
+		t.Errorf("nextUpgrade(EXPLORATION): want %q, got %q", modeVeryExploration, next)
+	}
+}
+
+func TestNextUpgrade_VeryExploration_ReturnsFalse(t *testing.T) {
+	// Arrange / Act: VERY_EXPLORATION is the highest mode; no further upgrade.
+	_, ok := nextUpgrade(modeVeryExploration)
 
 	// Assert
 	if ok {
-		t.Error("nextUpgrade(EXPLORATION): want ok=false (no higher mode)")
+		t.Error("nextUpgrade(VERY_EXPLORATION): want ok=false (no higher mode)")
 	}
 }
 
@@ -64,6 +77,19 @@ func TestNextUpgrade_Empty_ReturnsFalse(t *testing.T) {
 }
 
 // ── nextDowngrade ─────────────────────────────────────────────────────────────
+
+func TestNextDowngrade_VeryExploration_ReturnsExploration(t *testing.T) {
+	// Arrange / Act: VERY_EXPLORATION downgrades to EXPLORATION.
+	next, ok := nextDowngrade(modeVeryExploration)
+
+	// Assert
+	if !ok {
+		t.Fatal("nextDowngrade(VERY_EXPLORATION): want ok=true")
+	}
+	if next != modeExploration {
+		t.Errorf("nextDowngrade(VERY_EXPLORATION): want %q, got %q", modeExploration, next)
+	}
+}
 
 func TestNextDowngrade_Exploration_ReturnsBalanced(t *testing.T) {
 	// Arrange / Act

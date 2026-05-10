@@ -45,7 +45,7 @@ type DataQualityDTO struct {
 	TaxScore      float64 `json:"tax_score"`
 
 	// Profile is the operational-mode profile that produced the decision
-	// (one of: STRICT | BALANCED | EXPLORATION). Required for replay and
+	// (one of: STRICT | BALANCED | EXPLORATION | VERY_EXPLORATION). Required for replay and
 	// for the learning engine to attribute false positives/negatives to the
 	// active threshold profile.
 	Profile string `json:"profile"`
@@ -59,4 +59,29 @@ type DataQualityDTO struct {
 	ExpiresAt   string `json:"expires_at"`   // ISO 8601 UTC; "" = no expiry
 	Priority    int32  `json:"priority"`     // higher = processed first; default 0
 	EvaluatedAt string `json:"evaluated_at"` // ISO 8601
+
+	// ── External provider fields (P1 — additive) ──────────────────────────
+	// ExternalProviderScore is the weighted-average risk score from external
+	// validation providers (e.g. rugcheck.xyz). Range [0.0, 1.0].
+	// Zero when providers are disabled or when no supported-chain provider ran.
+	ExternalProviderScore float64 `json:"external_provider_score,omitempty"`
+
+	// ProviderFlags carries provider-specific diagnostic codes collected from
+	// external validation providers (e.g. "rugcheck:FREEZE_AUTHORITY_ENABLED").
+	// Always non-nil when providers ran; may be empty. Format: "provider:FLAG".
+	ProviderFlags []string `json:"provider_flags,omitempty"`
+
+	// ProvidersDegraded is true when at least one configured provider returned
+	// a partial or no response (timeout, HTTP error, parse failure).
+	// The pipeline continues regardless; this field is for observability only.
+	ProvidersDegraded bool `json:"providers_degraded,omitempty"`
+
+	// ── BirdEye enrichment fields (P3 — additive) ─────────────────────────
+	// CreatorRiskScore is the creator wallet's holding percentage expressed as
+	// a risk signal in [0, 1].  Set by BirdEye provider; zero when not available.
+	CreatorRiskScore float64 `json:"creator_risk_score,omitempty"`
+
+	// LpLockPct is the percentage [0, 100] of LP tokens locked per BirdEye.
+	// Zero when unavailable (not the same as "unlocked").
+	LpLockPct float64 `json:"lp_lock_pct,omitempty"`
 }

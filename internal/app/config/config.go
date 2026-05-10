@@ -172,6 +172,32 @@ type EdgeConfig struct {
 	// ModelVersion: stamped onto every emitted EdgeDTO.EdgeModelVersionID
 	// for attribution and replay differencing.
 	ModelVersion string `yaml:"model_version"`
+
+	// P7 — 20-slot time-series bottom detection.
+	// When enabled, the edge module analyses a window of recent price
+	// observations and emits BottomDetectionScore on EdgeDTO.
+	// ShadowMode: compute + log the score but do not use it as a gate.
+	BottomDetection BottomDetectionConfig `yaml:"bottom_detection"`
+}
+
+// BottomDetectionConfig configures the P7 V-shape bottom detector.
+type BottomDetectionConfig struct {
+	// Enabled gates the bottom-detection subsystem.
+	// false → EdgeDTO.BottomDetectionScore is always 0 (no cost).
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode: compute the score and log it, but do NOT use it as an
+	// edge gate.  Allows shadow validation before enabling as a real filter.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// MaxSlots is the sliding-window size (default 20).
+	// Capped at 20 by the algorithm; larger values are silently clamped.
+	MaxSlots int `yaml:"max_slots"`
+
+	// MinScore is the minimum BottomDetectionScore required to pass when
+	// NOT in shadow mode.  Values below this threshold set EdgeType=NONE
+	// with RejectReason="bottom_not_confirmed".  0 = gate disabled.
+	MinScore float64 `yaml:"min_score"`
 }
 
 // ValidationConfig holds Phase 2 EV gate parameters (fixed priors).
@@ -301,6 +327,38 @@ type PositionConfig struct {
 	// VolumeStalenessMinDeltaPctBps, force exit (reason TIME_VOLUME_STALE).
 	VolumeStalenessSeconds        int32 `yaml:"volume_staleness_seconds"`
 	VolumeStalenessMinDeltaPctBps int32 `yaml:"volume_staleness_min_delta_pct_bps"`
+
+	// P6 — Dynamic trailing stop tiers.
+	// Replaces the flat TrailingStopBps with a tiered schedule that
+	// tightens the trail as unrealized profit grows.
+	// Set DynamicTrailing.Enabled=true to activate; shadow_mode records
+	// the computed tier but uses TrailingStopBps for the actual gate.
+	DynamicTrailing DynamicTrailingConfig `yaml:"dynamic_trailing"`
+}
+
+// DynamicTrailingConfig configures the P6 tiered trailing-stop schedule.
+// All tiers are evaluated in descending trigger order; the first matching
+// tier sets the active TrailBps.
+type DynamicTrailingConfig struct {
+	// Enabled gates the dynamic trailing subsystem.
+	// false → position module uses TrailingStopBps as before (backward compat).
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode: true → compute the tiered TrailBps, log it, but use the
+	// flat TrailingStopBps for the actual exit gate.  Allows shadow validation.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// Tiers is the ordered list of (trigger, trail) pairs.
+	// TriggerBps is the minimum unrealized gain in bps (e.g. 10000 = 100% = 2×).
+	// TrailBps is the trailing width (e.g. 2000 = 20% below peak).
+	// Tiers with TrailBps ≤ 0 are dropped; order does not matter (sorted internally).
+	Tiers []DynamicTrailingTierConfig `yaml:"tiers"`
+}
+
+// DynamicTrailingTierConfig is a single (trigger_bps, trail_bps) pair.
+type DynamicTrailingTierConfig struct {
+	TriggerBps int32 `yaml:"trigger_bps"`
+	TrailBps   int32 `yaml:"trail_bps"`
 }
 
 // SolanaExecutionConfig holds Phase 7 Solana execution parameters.
@@ -312,6 +370,19 @@ type SolanaExecutionConfig struct {
 	WalletKeyPaths         []string `yaml:"wallet_key_paths"`
 	ComputeUnitLimitBuffer int      `yaml:"compute_unit_limit_buffer"`
 	PriorityFeeLamports    int64    `yaml:"priority_fee_lamports"`
+	// P5: Jito bundle submission config.
+	Jito JitoConfig `yaml:"jito"`
+}
+
+// JitoConfig holds P5 Jito bundle submission parameters.
+// BundleURL and TipAccount are read from JITO_BUNDLE_URL and JITO_TIP_ACCOUNT
+// env vars at runtime — never stored in config files.
+type JitoConfig struct {
+	Enabled         bool  `yaml:"enabled"`
+	ShadowMode      bool  `yaml:"shadow_mode"`
+	TipLamports     int64 `yaml:"tip_lamports"`
+	MaxBundleSize   int   `yaml:"max_bundle_size"`
+	SubmitTimeoutMs int   `yaml:"submit_timeout_ms"`
 }
 
 // ExecutionConfig holds Phase 3+4 execution parameters: retry/replacement (Phase 3)
@@ -540,7 +611,7 @@ type RiskConfig struct {
 }
 
 // ModeAdaptiveConfig governs the adaptive risk-appetite controller that
-// transitions the system between STRICT / BALANCED / EXPLORATION based on
+// transitions the system between STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION based on
 // starvation and rug/FP-rate signals (operational-modes skill). It is
 // orthogonal to the drawdown-driven safety mode controller in RiskConfig:
 // the adaptive controller skips entirely when the system is DEGRADED or
