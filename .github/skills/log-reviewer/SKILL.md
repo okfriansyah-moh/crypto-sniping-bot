@@ -13,6 +13,16 @@ description: >
 
 # Log Reviewer Skill
 
+> **Skill section order and priority:**
+>
+> 1. **Rules** (R1–R9) — mandatory constraints; apply all
+> 2. **Inputs** — parse and validate log stream first
+> 3. **Outputs** — emit Verdict → Findings → Plan → Confirmation Gate in order
+> 4. **Production Readiness Score** — compute after findings are complete
+>
+> When rules appear to conflict, R9 (Confirmation Gate) takes highest precedence
+> over all others because it protects against unintended code mutation.
+
 ## Purpose
 
 Turn a stream of structured logs (`{"time":..,"level":..,"msg":..,...}`) and
@@ -38,10 +48,17 @@ verdict and a delegation manifest.
 ### R1 — Only structured logs are reviewable
 
 Per `observability` skill: every reviewable line MUST be valid JSON with at
-minimum `time`, `level`, `msg`. Any unstructured line (e.g. `panic:`,
-`runtime error`, raw `fmt.Println`) is by itself a finding (`code-quality`
+minimum `time`, `level`, `msg`. Apply the following rules to non-conforming lines:
 
-- `observability` violation) — flag and route to `refactor` agent.
+- **Fully unstructured** (e.g. `panic:`, `runtime error`, raw `fmt.Println`): flag as
+  `code-quality` / `observability` violation and route to `refactor` agent.
+- **Partially valid JSON** (parseable object but missing required fields, or a line
+  where only a prefix is valid JSON): attempt to extract any parseable fields
+  (`time`, `level`, `msg`, `trace_id`) and treat the remainder as an opaque string.
+  Flag the line as `NOISE` and note which fields were unrecoverable. Route to
+  `refactor` agent for structured-logging remediation.
+- **Fully malformed JSON** (parse error on the entire line): treat as unstructured;
+  include the raw line as `example_line` in the finding.
 
 ### R2 — Trace-id is the unit of analysis
 
@@ -84,35 +101,36 @@ Layers 6–10 — see operational-modes skill).
 
 The following exact patterns MUST be flagged when observed:
 
-| Pattern                                                                                                        | Class    | Layer | Route to                                                                                         |
-| -------------------------------------------------------------------------------------------------------------- | -------- | ----- | ------------------------------------------------------------------------------------------------ |
-| `level=ERROR` or `level=WARN` (any)                                                                            | BAD      | any   | refactor + module-builder                                                                        |
-| `level=PANIC`/`FATAL`                                                                                          | BAD      | any   | doctor                                                                                           |
-| `dq_decision` with `risk_score=0` for **>95%** of tokens                                                       | STUBBED  | 1     | data-quality-engine, anti-manipulation                                                           |
-| `dq_decision` with `reject_reason=high_total_supply` for **>50%** of tokens AND no legit-supply tokens passing | DEGRADED | 1     | data-quality-engine (raise `max_total_supply` or check ingestion populates `total_supply_known`) |
-| `features_extracted` with **identical** numeric values across distinct trace_ids                               | STUBBED  | 2     | feature-stability-checker                                                                        |
-| `probability_scored` with the **same float** across distinct trace_ids                                         | STUBBED  | 4     | probability-modeling                                                                             |
-| `slippage_estimated` with constant p50/p95 across distinct trace_ids                                           | STUBBED  | 4     | probability-modeling, execution-quality-analyzer                                                 |
-| `edge_decision` with constant `edge_strength`/`edge_confidence`                                                | STUBBED  | 3     | edge-detection                                                                                   |
-| `validation_decision.reject_reason` containing `prob_join_timeout` or `*_join_timeout`                         | BAD      | 5     | orchestrator, event-bus                                                                          |
-| `validation_decision.probability_used` ≠ matching `probability_scored.probability` for same trace_id           | BAD      | 4–5   | orchestrator, event-bus                                                                          |
-| `output_event_id=""` after a non-terminal stage                                                                | DEGRADED | 1–9   | event-bus, orchestrator                                                                          |
-| Zero `selection_decision` / `allocation_decision` / `execution_*` over the window                              | STUCK    | 6–8   | operational-modes, edge-detection, capital-sizing                                                |
-| `*_heartbeat` with `events_emitted=0` AND `notifications_received>>0`                                          | BAD      | 0     | dex-scanning, rpc-management                                                                     |
-| `*_heartbeat` with rising `dto_nil_skip` / `process_errors` / `rate_limit_skip`                                | DEGRADED | 0     | dex-scanning, rpc-management                                                                     |
-| `failed_tx / notifications_received > 0.20`                                                                    | DEGRADED | 0     | rpc-management                                                                                   |
-| `telegram_destructive_command_executed` without prior confirmation log                                         | BAD      | meta  | telegram-dispatcher                                                                              |
-| `telegram_command_received` with no matching response event within 5s                                          | DEGRADED | meta  | telegram-dispatcher                                                                              |
-| Any direct Telegram API log line outside the dispatcher                                                        | BAD      | meta  | telegram-dispatcher (bus-only rule)                                                              |
-| Stage X `stage_completed` count >> Stage X+1 input count (sustained ≥3 windows)                                | STUCK    | any   | event-bus (consumer_offsets lag)                                                                 |
-| Same `event_id` appears as input to a worker_group **>1×**                                                     | BAD      | any   | idempotency, event-bus                                                                           |
-| Missing `version_id` on any event                                                                              | BAD      | any   | strategy-versioning, traceability                                                                |
-| `rescan_worker_started` absent for ≥10 min while `cfg.rescan.enabled=true`                                     | STUCK    | 0.5   | rescan-orchestration, event-bus                                                                  |
-| `rescan_band_completed.candidates=0` for **all** bands sustained ≥30 min                                       | DEGRADED | 0.5   | rescan-orchestration, data-quality-engine (eligibility too tight)                                |
-| `rescan_emit_failed` rate > 5% of candidates per band                                                          | DEGRADED | 0.5   | rescan-orchestration, event-bus                                                                  |
-| Same `(token_address, band)` re-emitted within one bucket window                                               | BAD      | 0.5   | idempotency, rescan-orchestration                                                                |
-| `transport="rescan_*"` market_data_event with no downstream `dq_decision` within 60 s                          | STUCK    | 0.5→1 | event-bus, data-quality-engine                                                                   |
-| `MOMENTUM_EDGE` count from rescanned traces >> `NEW_LAUNCH_EDGE` count from fresh traces (sustained 24 h)      | DEGRADED | 3     | edge-detection (NEW_LAUNCH window may be mis-tuned)                                              |
+| Pattern                                                                                                                               | Class    | Layer | Route to                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----- | ------------------------------------------------------------------------------------------------------------- |
+| `level=ERROR` or `level=WARN` (any)                                                                                                   | BAD      | any   | refactor + module-builder                                                                                     |
+| `level=PANIC`/`FATAL`                                                                                                                 | BAD      | any   | doctor                                                                                                        |
+| `dq_decision` with `risk_score=0` for **>95%** of tokens                                                                              | STUBBED  | 1     | data-quality-engine, anti-manipulation                                                                        |
+| `dq_decision` with `reject_reason=high_total_supply` for **>50%** of tokens AND no legit-supply tokens passing                        | DEGRADED | 1     | data-quality-engine (raise `max_total_supply` or check ingestion populates `total_supply_known`)              |
+| `features_extracted` with **identical** numeric values across distinct trace_ids                                                      | STUBBED  | 2     | feature-stability-checker                                                                                     |
+| `probability_scored` with the **same float** across distinct trace_ids                                                                | STUBBED  | 4     | probability-modeling                                                                                          |
+| `slippage_estimated` with constant p50/p95 across distinct trace_ids                                                                  | STUBBED  | 4     | probability-modeling, execution-quality-analyzer                                                              |
+| `edge_decision` with constant `edge_strength`/`edge_confidence`                                                                       | STUBBED  | 3     | edge-detection                                                                                                |
+| `validation_decision.reject_reason` containing `prob_join_timeout` or `*_join_timeout`                                                | BAD      | 5     | orchestrator, event-bus                                                                                       |
+| `validation_decision.probability_used` ≠ matching `probability_scored.probability` for same trace_id                                  | BAD      | 4–5   | orchestrator, event-bus                                                                                       |
+| `output_event_id=""` after a non-terminal stage                                                                                       | DEGRADED | 1–9   | event-bus, orchestrator                                                                                       |
+| Zero `selection_decision` / `allocation_decision` / `execution_*` over the window                                                     | STUCK    | 6–8   | operational-modes, edge-detection, capital-sizing                                                             |
+| `*_heartbeat` with `events_emitted=0` AND `notifications_received>>0`                                                                 | BAD      | 0     | dex-scanning, rpc-management                                                                                  |
+| `*_heartbeat` with rising `dto_nil_skip` / `process_errors` / `rate_limit_skip`                                                       | DEGRADED | 0     | dex-scanning, rpc-management                                                                                  |
+| `failed_tx / notifications_received > 0.20`                                                                                           | DEGRADED | 0     | rpc-management                                                                                                |
+| `telegram_destructive_command_executed` without prior confirmation log                                                                | BAD      | meta  | telegram-dispatcher                                                                                           |
+| `telegram_command_received` with no matching response event within 5s                                                                 | DEGRADED | meta  | telegram-dispatcher                                                                                           |
+| Any direct Telegram API log line outside the dispatcher                                                                               | BAD      | meta  | telegram-dispatcher (bus-only rule)                                                                           |
+| Stage X `stage_completed` count >> Stage X+1 input count (sustained ≥3 windows)                                                       | STUCK    | any   | event-bus (consumer_offsets lag)                                                                              |
+| Same `event_id` appears as input to a worker_group **>1×**                                                                            | BAD      | any   | idempotency, event-bus                                                                                        |
+| Missing `version_id` on any event                                                                                                     | BAD      | any   | strategy-versioning, traceability                                                                             |
+| `rescan_worker_started` absent for ≥10 min while `cfg.rescan.enabled=true`                                                            | STUCK    | 0.5   | rescan-orchestration, event-bus                                                                               |
+| `rescan_band_completed.candidates=0` for **all** bands sustained ≥30 min                                                              | DEGRADED | 0.5   | rescan-orchestration, data-quality-engine (eligibility too tight)                                             |
+| `rescan_emit_failed` rate > 5% of candidates per band                                                                                 | DEGRADED | 0.5   | rescan-orchestration, event-bus                                                                               |
+| `rescan_worker_started` present BUT `transport="rescan_*"` events = 0 for the full window (rescan enabled, worker alive, zero output) | STUCK    | 0.5   | rescan-orchestration, data-quality-engine (no tokens passing eligibility gate OR tick loop silently erroring) |
+| Same `(token_address, band)` re-emitted within one bucket window                                                                      | BAD      | 0.5   | idempotency, rescan-orchestration                                                                             |
+| `transport="rescan_*"` market_data_event with no downstream `dq_decision` within 60 s                                                 | STUCK    | 0.5→1 | event-bus, data-quality-engine                                                                                |
+| `MOMENTUM_EDGE` count from rescanned traces >> `NEW_LAUNCH_EDGE` count from fresh traces (sustained 24 h)                             | DEGRADED | 3     | edge-detection (NEW_LAUNCH window may be mis-tuned)                                                           |
 
 ### R5 — Stub detection heuristic
 
@@ -210,6 +228,12 @@ Required behavior:
 4. The skill MUST NOT auto-execute, auto-delegate to subagents, or modify any
    file until the `vscode_askQuestions` call returns `yes` (or the user types
    an equivalent affirmative such as `proceed`, `go`, `execute`, `approved`).
+   **The one permitted exception is pre-authorization:** if the operator has
+   explicitly set `log_reviewer.auto_execute: true` in config (default `false`),
+   the Confirmation Gate is still shown and `vscode_askQuestions` is still
+   called — the operator retains the ability to cancel. Auto-execute means the
+   plan proceeds automatically _only if the operator does not cancel_ within the
+   configured timeout. It does NOT mean the gate is skipped.
 5. If the user selects `modify`, the skill MUST re-emit the Confirmation Gate
    (another `vscode_askQuestions` call) with the revised plan and wait for
    `yes` again.
@@ -405,20 +429,23 @@ These rules define the hard boundary between "acceptable operational state" and
 
 ### Non-Tolerable (MUST produce a fix plan — stop or gate trading)
 
-| Condition                                                                | Class   | Severity | Required action                                                             |
-| ------------------------------------------------------------------------ | ------- | -------- | --------------------------------------------------------------------------- |
-| `probability_used=0.35` (fallback) on ANY token when bot is live         | BAD     | CRITICAL | Stop trading. Fix regression in probability join or confidence gate.        |
-| `ev_bps < 0` on majority (>50%) of ACCEPT decisions                      | BAD     | CRITICAL | Stop trading. EV gate broken or prior config corrupted.                     |
-| `slippage_estimated` p50/p95 constant across all tokens (R5 STUBBED)     | STUBBED | HIGH     | Pause new entries. CPMM formula broken or reserve data missing.             |
-| Any `level=PANIC` or `level=FATAL`                                       | BAD     | CRITICAL | Stop trading immediately. Run `doctor` agent.                               |
-| `validation_decision: REJECT` for >95% of tokens over 3+ windows         | STUCK   | HIGH     | Pipeline starved. Investigate mode transitions + thresholds.                |
-| `execution_confirmed=0` after >10 ACCEPT decisions with funded wallet    | STUCK   | HIGH     | Wallet config broken or RPC endpoint down.                                  |
-| `risk_score=0` on ≥95% of tokens over N≥20 window (R5 STUBBED)           | STUBBED | HIGH     | DQ detectors regressed to stub state.                                       |
-| `probability_scored` constant across ≥20 distinct trace_ids (R5 STUBBED) | STUBBED | HIGH     | Probability model regressed to stub.                                        |
-| Negative rolling EV over ≥30 closed positions (dimension 10 = 0 pts)     | BAD     | HIGH     | Strategy is losing. Pause, run `learning-engine` + `loss-pattern-analyzer`. |
-| Any duplicate `event_id` consumed by same worker group >1×               | BAD     | CRITICAL | Idempotency broken. Stop trading.                                           |
-| `drawdown > daily_loss_limit` (kill-switch not firing)                   | BAD     | CRITICAL | Kill switch malfunction. Stop manually. Fix `drawdown-protection`.          |
-| Missing `version_id` on any event                                        | BAD     | HIGH     | Strategy attribution broken. Fix before adding capital.                     |
+| Condition                                                                                                                                | Class    | Severity | Required action                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `probability_used=0.35` (fallback) on ANY token when bot is live                                                                         | BAD      | CRITICAL | Stop trading. Fix regression in probability join or confidence gate.                                                                                                                                                                                                                |
+| `ev_bps < 0` on majority (>50%) of ACCEPT decisions                                                                                      | BAD      | CRITICAL | Stop trading. EV gate broken or prior config corrupted.                                                                                                                                                                                                                             |
+| `slippage_estimated` p50/p95 constant across all tokens (R5 STUBBED)                                                                     | STUBBED  | HIGH     | Pause new entries. CPMM formula broken or reserve data missing.                                                                                                                                                                                                                     |
+| Any `level=PANIC` or `level=FATAL`                                                                                                       | BAD      | CRITICAL | Stop trading immediately. Run `doctor` agent.                                                                                                                                                                                                                                       |
+| `validation_decision: REJECT` for >95% of tokens over 3+ windows                                                                         | STUCK    | HIGH     | Pipeline starved. Investigate mode transitions + thresholds.                                                                                                                                                                                                                        |
+| `execution_confirmed=0` after >10 ACCEPT decisions with funded wallet                                                                    | STUCK    | HIGH     | Wallet config broken or RPC endpoint down.                                                                                                                                                                                                                                          |
+| `risk_score=0` on ≥95% of tokens over N≥20 window (R5 STUBBED)                                                                           | STUBBED  | HIGH     | DQ detectors regressed to stub state.                                                                                                                                                                                                                                               |
+| `probability_scored` constant across ≥20 distinct trace_ids (R5 STUBBED)                                                                 | STUBBED  | HIGH     | Probability model regressed to stub.                                                                                                                                                                                                                                                |
+| Negative rolling EV over ≥30 closed positions (dimension 10 = 0 pts)                                                                     | BAD      | HIGH     | Strategy is losing. Pause, run `learning-engine` + `loss-pattern-analyzer`.                                                                                                                                                                                                         |
+| Any duplicate `event_id` consumed by same worker group >1×                                                                               | BAD      | CRITICAL | Idempotency broken. Stop trading.                                                                                                                                                                                                                                                   |
+| `drawdown > daily_loss_limit` (kill-switch not firing)                                                                                   | BAD      | CRITICAL | Kill switch malfunction. Stop manually. Fix `drawdown-protection`.                                                                                                                                                                                                                  |
+| Missing `version_id` on any event                                                                                                        | BAD      | HIGH     | Strategy attribution broken. Fix before adding capital.                                                                                                                                                                                                                             |
+| Same `(token_address, band)` re-emitted by rescan within one window                                                                      | BAD      | CRITICAL | Rescan idempotency broken. Fix `rescan-orchestration` + `idempotency`.                                                                                                                                                                                                              |
+| `rescan_emit_failed` rate > 5% of candidates in any band                                                                                 | DEGRADED | HIGH     | Rescan→pipeline handoff failing. Fix `event-bus` + `rescan-orchestration`.                                                                                                                                                                                                          |
+| Rescan enabled (`cfg.rescan.enabled=true`) AND `rescan_worker_started` seen BUT zero `transport="rescan_*"` events over a ≥10 min window | STUCK    | HIGH     | Rescan worker alive but producing no output. Inspect eligibility thresholds (`min_age_seconds`, `max_age_seconds`, band windows) in `config/pipeline.yaml`; check `rescan_tick_error` rate; verify `dex_pool_detected` / `solana_ingestion_emitted` are populating the token table. |
 
 ---
 

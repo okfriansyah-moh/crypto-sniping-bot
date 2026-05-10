@@ -534,6 +534,18 @@ func (m *Module) processNotification(
 				continue
 			}
 			dto, normErr = res.DTO, res.Err
+		// P4: PumpFun AMM (graduation pools)
+		case "pumpfun-amm":
+			dto, normErr = NormalizePumpFunAMMCreatePool(tx, instr, m.versionID)
+		// P4: Raydium CLMM (concentrated liquidity)
+		case "raydium-clmm":
+			dto, normErr = NormalizeRaydiumCLMMCreatePool(tx, instr, m.versionID)
+		// P4: Orca Whirlpool
+		case "orca-whirlpool":
+			dto, normErr = NormalizeOrcaWhirlpoolInitPool(tx, instr, m.versionID)
+		// P4: Meteora DLMM
+		case "meteora-dlmm":
+			dto, normErr = NormalizeMeteoraDLMMInitLbPair(tx, instr, m.versionID)
 		default:
 			continue
 		}
@@ -610,6 +622,37 @@ func ShouldFetchTransaction(notif LogsNotification, prog config.SolanaProgramCon
 			}
 		}
 		// No "Instruction: Create" found — this is a swap/buy/sell, skip it.
+		return false
+	// P4: PumpFun AMM emits "Instruction: CreatePool" for graduation events.
+	case "pumpfun-amm":
+		for _, l := range notif.Logs {
+			if strings.Contains(l, "Instruction: CreatePool") {
+				return true
+			}
+		}
+		return false
+	// P4: Anchor programs with known create-pool instruction names.
+	// Filter by log prefix to avoid getTransaction on swap notifications.
+	case "raydium-clmm":
+		for _, l := range notif.Logs {
+			if strings.Contains(l, "Instruction: CreatePool") {
+				return true
+			}
+		}
+		return false
+	case "orca-whirlpool":
+		for _, l := range notif.Logs {
+			if strings.Contains(l, "Instruction: InitializePool") {
+				return true
+			}
+		}
+		return false
+	case "meteora-dlmm":
+		for _, l := range notif.Logs {
+			if strings.Contains(l, "Instruction: InitializeLbPair") {
+				return true
+			}
+		}
 		return false
 	default:
 		// raydium-v4 and unknown families: fetch and let normalize decide.

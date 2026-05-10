@@ -61,7 +61,8 @@ INSERT INTO market_data (
     symbol, name,
     liquidity_usd, lp_stats_known, wash_stats_known,
     tx_count_1m, unique_wallets_1m, wallet_entropy, repeat_ratio_1m,
-    holder_dist_known, holder_count, top5_holder_pct, pool_age_seconds
+    holder_dist_known, holder_count, top5_holder_pct, pool_age_seconds,
+    creator_address
 ) VALUES (
     $1,  $2,  $3,  $4,  $5,
     $6,  $7,  $8,  $9,  $10, $11,
@@ -73,12 +74,14 @@ INSERT INTO market_data (
     $30, $31,
     $32, $33, $34,
     $35, $36, $37, $38,
-    $39, $40, $41, $42
+    $39, $40, $41, $42,
+    $43
 )
 ON CONFLICT (event_id) DO NOTHING
 `
 	causationID := nullableString(dto.CausationID)
 	expiresAt := nullableString(dto.ExpiresAt)
+	creatorAddress := nullableString(dto.CreatorAddress)
 
 	_, err := d.pool.ExecContext(ctx, q,
 		dto.EventID, dto.TraceID, dto.CorrelationID, causationID, dto.VersionID,
@@ -92,6 +95,7 @@ ON CONFLICT (event_id) DO NOTHING
 		dto.LiquidityUsd, dto.LpStatsKnown, dto.WashStatsKnown,
 		dto.TxCount1m, dto.UniqueWallets1m, dto.WalletEntropy, dto.RepeatRatio1m,
 		dto.HolderDistKnown, dto.HolderCount, dto.Top5HolderPct, dto.PoolAgeSeconds,
+		creatorAddress,
 	)
 	if err != nil {
 		return fmt.Errorf("insert market data: %w", err)

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"crypto-sniping-bot/internal/app/config"
 )
@@ -80,15 +81,48 @@ func RecoverGap(
 				continue
 			}
 			var emitErr error
+			// ingestedAt anchors rescan eligibility to when our system
+			// processes this gap event, not when it was confirmed on-chain.
+			// blockTimestamp(tx.BlockTime) can return "" (when BlockTime==0)
+			// or a very old timestamp — both make the token permanently
+			// invisible to the rescan age-window query.
+			ingestedAt := time.Now().UTC().Format(time.RFC3339)
 			switch prog.Family {
 			case "pumpfun":
 				d, _ := NormalizePumpFunCreate(tx, instr, versionID)
 				if d != nil {
+					d.IngestedAt = ingestedAt
 					emitErr = emit(ctx, *d)
 				}
 			case "raydium-v4":
 				d, _ := NormalizeRaydiumPoolInit(tx, instr, versionID)
 				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			// P4: new Solana programs — gap recovery uses same normalizers.
+			case "pumpfun-amm":
+				d, _ := NormalizePumpFunAMMCreatePool(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			case "raydium-clmm":
+				d, _ := NormalizeRaydiumCLMMCreatePool(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			case "orca-whirlpool":
+				d, _ := NormalizeOrcaWhirlpoolInitPool(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
+					emitErr = emit(ctx, *d)
+				}
+			case "meteora-dlmm":
+				d, _ := NormalizeMeteoraDLMMInitLbPair(tx, instr, versionID)
+				if d != nil {
+					d.IngestedAt = ingestedAt
 					emitErr = emit(ctx, *d)
 				}
 			}

@@ -19,10 +19,15 @@ type DataQualityRuntimeConfig struct {
 	FailurePolicy     DataQualityFailurePolicyConfig `yaml:"failure_policy"`
 
 	// ModeProfiles maps the active operational mode (STRICT / BALANCED /
-	// EXPLORATION) onto the threshold band that turns RiskScore into a
-	// Decision. Keys MUST be lower-case ("strict", "balanced",
-	// "exploration"); the module up-cases the runtime mode before lookup.
+	// EXPLORATION / VERY_EXPLORATION) onto the threshold band that turns
+	// RiskScore into a Decision. Keys MUST be lower-case ("strict",
+	// "balanced", "exploration", "very_exploration"); the module up-cases
+	// the runtime mode before lookup.
 	ModeProfiles map[string]DataQualityModeProfile `yaml:"mode_profiles"`
+	// Providers holds configuration for the optional external provider layer
+	// (P1 — rugcheck.xyz, social gate, LP lock verification).
+	// Disabled by default; all providers boot in shadow_mode: true.
+	Providers DataQualityProvidersConfig `yaml:"providers"`
 }
 
 // DataQualityModeProfile is the per-mode decision band (Layer 1 fix).
@@ -37,6 +42,13 @@ type DataQualityModeProfile struct {
 	// Canonical: STRICT=0.5 (treat unknown as half-risk), BALANCED=0
 	// (neutral), EXPLORATION=0 (ignore).
 	UnknownFactor float64 `yaml:"unknown_factor"`
+	// MinTokenAgeSeconds overrides the global thresholds.min_token_age_seconds
+	// for this specific mode. 0 means "use the global threshold". -1 means
+	// "disable the age check entirely for this mode". Positive values set a
+	// mode-specific minimum age in seconds.
+	// EXPLORATION / VERY_EXPLORATION set this to 0 (disable) because
+	// new-launch token sniping targets tokens at the moment of creation.
+	MinTokenAgeSeconds int32 `yaml:"min_token_age_seconds"`
 }
 
 // DataQualityDetectorFlags toggles individual detectors at runtime.
@@ -47,6 +59,10 @@ type DataQualityDetectorFlags struct {
 	WashTrading        bool `yaml:"wash_trading"`
 	RugAuthority       bool `yaml:"rug_authority"`
 	ContractVerified   bool `yaml:"contract_verified"`
+	// DevReputation enables the serial-launcher + no-social-links detector.
+	// Requires the solana_creator_reputation probe to populate
+	// CreatorPrevTokenCount / SocialLinksKnown on the MarketDataDTO.
+	DevReputation bool `yaml:"dev_reputation"`
 }
 
 // DataQualityDetectorThresholds gates per-detector verdict math.
@@ -84,6 +100,26 @@ type DataQualityDetectorThresholds struct {
 	// likely to be micro-cap rugs with no real value. 0 disables the check.
 	// Recommended: 1_000_000_000 (1B).
 	MaxTotalSupply float64 `yaml:"max_total_supply"`
+
+	// Dev reputation thresholds (requires dev_reputation detector enabled).
+	//
+	// MaxCreatorPrevTokenCount — reject when the creator wallet has launched
+	// this many or more tokens previously. 0 disables. Canonical default: 5.
+	// The $RIBBIT pattern (29 launches, 0 migrations) exceeds this by 5×.
+	//
+	// NoSocialLinksRiskScore — fixed risk contribution [0,1] applied when
+	// SocialLinksKnown=true and HasSocialLinks=false. 0 disables.
+	// Canonical default: 0.40 (meaningful contribution without hard-reject).
+	MaxCreatorPrevTokenCount int32   `yaml:"max_creator_prev_token_count"`
+	NoSocialLinksRiskScore   float64 `yaml:"no_social_links_risk_score"`
+
+	// MinTokenAgeSeconds — hard-reject tokens younger than this threshold.
+	// Tokens under this age have incomplete data: holder distribution is not
+	// settled, wash patterns are not yet visible, and metadata probes may not
+	// have propagated. The rescan pipeline re-evaluates the token once it is
+	// old enough. Age is measured from BlockTimestamp (on-chain creation),
+	// falling back to IngestedAt. 0 disables. Canonical default: 900 (15 min).
+	MinTokenAgeSeconds int32 `yaml:"min_token_age_seconds"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.
@@ -108,10 +144,108 @@ type DataQualityRiskWeights struct {
 	// FakeLiquidity weight (Layer 1 fix). Optional in YAML; when 0 the
 	// default 0.20 contribution from defaultRiskWeights is used.
 	FakeLiquidity float64 `yaml:"fake_liquidity"`
+	// DevReputation weight. When 0 defaults to 0.25 inside the aggregator.
+	DevReputation float64 `yaml:"dev_reputation"`
 }
 
 // DataQualityFailurePolicyConfig governs RPC-failure handling.
 type DataQualityFailurePolicyConfig struct {
 	IndeterminateAsPositive bool `yaml:"indeterminate_as_positive"`
 	MaxIndeterminateCount   int  `yaml:"max_indeterminate_count"`
+}
+
+// ── External providers (P1 — rugcheck / social / LP lock) ─────────────────
+
+// DataQualityProvidersConfig controls the external provider layer.
+// Providers are OPTIONAL — they enhance (not replace) the internal detectors.
+// All providers boot in shadow_mode: true by default; flip to false only after
+// shadow validation shows no false-positive regression.
+type DataQualityProvidersConfig struct {
+	// Enabled gates the entire external provider subsystem.
+	// false → all providers are skipped (zero cost, 100% backward compat).
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode: true → external scores are recorded in ProviderFlags on
+	// the DataQualityDTO but do NOT blend into the final RiskScore.
+	// Use this during shadow validation before activating production impact.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// ExternalWeight is the fraction [0, 1] of the final RiskScore that comes
+	// from the external providers when shadow_mode is false.
+	// final_score = (1 - external_weight) * internal_score + external_weight * external_score
+	// Recommended starting value: 0.20 (external providers have 20% influence).
+	ExternalWeight float64 `yaml:"external_weight"`
+
+	// BudgetMs is the shared wall-clock deadline for all providers in one call.
+	// Individual providers must respect the context deadline. Default: 300.
+	BudgetMs int `yaml:"budget_ms"`
+
+	// RugCheck configures the rugcheck.xyz provider (Solana-only, free API).
+	RugCheck DataQualityRugCheckConfig `yaml:"rugcheck"`
+
+	// SocialGate configures the Twitter/X social gate via DEXScreener (P2).
+	SocialGate DataQualitySocialGateConfig `yaml:"social_gate"`
+
+	// BirdEye configures the BirdEye token security provider (P3).
+	// API key is read from env BIRDEYE_API_KEY — never stored in YAML.
+	BirdEye DataQualityBirdEyeConfig `yaml:"birdeye"`
+
+	// CopyTrade configures the copy-trading signal amplifier (P8).
+	// Wallet list is read from env COPY_TRADE_WALLETS — never stored in YAML.
+	CopyTrade DataQualityCopyTradeConfig `yaml:"copy_trade"`
+}
+
+// DataQualityRugCheckConfig controls the rugcheck.xyz provider.
+type DataQualityRugCheckConfig struct {
+	// Enabled enables the rugcheck.xyz provider within the aggregator.
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode overrides the parent ShadowMode for this specific provider.
+	// If true, this provider's score only appears in ProviderFlags.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// Weight is the relative contribution of this provider within the aggregator.
+	// The aggregator normalises all non-shadow provider weights to sum to 1.
+	Weight float64 `yaml:"weight"`
+}
+
+// DataQualitySocialGateConfig controls the Twitter/X social gate (P2).
+// Uses the DEXScreener public API — no API key required.
+type DataQualitySocialGateConfig struct {
+	// Enabled enables the social gate provider within the aggregator.
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode: if true, the score appears in ProviderFlags only.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// Weight is the relative contribution within the aggregator (normalised).
+	Weight float64 `yaml:"weight"`
+}
+
+// DataQualityBirdEyeConfig controls the BirdEye token security provider (P3).
+// The BirdEye API key is read from the environment variable BIRDEYE_API_KEY.
+// It is never stored in YAML or logged.
+type DataQualityBirdEyeConfig struct {
+	// Enabled enables the BirdEye provider within the aggregator.
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode: if true, the score appears in ProviderFlags only.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// Weight is the relative contribution within the aggregator (normalised).
+	Weight float64 `yaml:"weight"`
+}
+
+// DataQualityCopyTradeConfig controls the copy-trading signal amplifier (P8).
+// A comma-separated list of alpha-wallet addresses is read from the
+// COPY_TRADE_WALLETS environment variable — never stored in YAML or logged.
+type DataQualityCopyTradeConfig struct {
+	// Enabled enables the copy-trade provider within the aggregator.
+	Enabled bool `yaml:"enabled"`
+
+	// ShadowMode: if true, the score appears in ProviderFlags only.
+	ShadowMode bool `yaml:"shadow_mode"`
+
+	// Weight is the relative contribution within the aggregator (normalised).
+	Weight float64 `yaml:"weight"`
 }

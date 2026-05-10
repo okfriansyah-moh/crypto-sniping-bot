@@ -43,6 +43,8 @@ func runServer() {
 	logger := logging.New(cfg.Logging.Level, cfg.Logging.Format)
 	slog.SetDefault(logger)
 
+	startTime := time.Now().UTC()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -95,7 +97,8 @@ func runServer() {
 	}
 
 	// Wire Telegram dispatcher (event bus → outbound) and poller (inbound commands).
-	if dispatcher, poller := buildTelegramComponents(db, logger); dispatcher != nil {
+	rescanTrigger := make(chan struct{}, 1)
+	if dispatcher, poller := buildTelegramComponents(db, logger, cfg, startTime, rescanTrigger); dispatcher != nil {
 		go func() {
 			if err := dispatcher.Run(ctx); err != nil && err != ctx.Err() {
 				logger.Error("telegram_dispatcher_failed", "error", err)
@@ -160,8 +163,12 @@ func runServer() {
 	orch.RegisterStage("evaluation_worker", workers.NewEvaluationWorker(db, cfg, logger), "position_state_event")
 
 	// Position poll runs as a separate goroutine (timer-driven, not event-driven).
+	// GAP-02 fix: wire a real price client so TP/SL/trailing stops can fetch
+	// live token prices. DEXScreenerPriceClient uses the free public API and
+	// returns priceNative (price in chain-native token) — same unit as EntryPrice.
+	priceClient := rpc.NewDEXScreenerPriceClient(logger)
 	go func() {
-		if err := workers.RunPositionPoll(ctx, db, cfg, nil, logger); err != nil && err != ctx.Err() {
+		if err := workers.RunPositionPoll(ctx, db, cfg, priceClient, logger); err != nil && err != ctx.Err() {
 			logger.Error("position_poll_failed", "error", err)
 		}
 	}()
@@ -170,7 +177,7 @@ func runServer() {
 	// Re-emits market_data_event for tokens in configured age bands so the
 	// MOMENTUM_EDGE path can capture alpha that NEW_LAUNCH_EDGE missed.
 	go func() {
-		if err := workers.RunRescan(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+		if err := workers.RunRescan(ctx, db, cfg, logger, rescanTrigger); err != nil && err != ctx.Err() {
 			logger.Error("rescan_worker_exited", "error", err)
 		}
 	}()
@@ -494,6 +501,19 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 	// cfg.Probes.EVMPairReserves.Enabled is intentionally ignored here
 	// until the EVM RPC client is wired — keeping the block as a TODO.
 	// TODO(evm-rpc): pass real RPC client and enable registration.
+
+	// Metadata probe — HTTP only, no RPC client required. Runs for any
+	// Solana token with a non-empty MetadataURI. Registered last so it
+	// sees the enriched DTO produced by the RPC probes above.
+	if cfg.Probes.SolanaMetadata.Enabled {
+		out = append(out, probes.NewSolanaMetadataProbe(nil, probes.SolanaMetadataConfig{
+			Enabled:      true,
+			TimeoutMs:    cfg.Probes.SolanaMetadata.TimeoutMs,
+			IPFSGateway:  cfg.Probes.SolanaMetadata.IPFSGateway,
+			MaxBodyBytes: cfg.Probes.SolanaMetadata.MaxBodyBytes,
+		}, logger))
+	}
+
 	return out
 }
 

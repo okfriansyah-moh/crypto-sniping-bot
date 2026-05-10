@@ -120,8 +120,11 @@ func TestFeatures_ProducesAllFields(t *testing.T) {
 	if dto.ContractSafety < 0 || dto.ContractSafety > 1 {
 		t.Errorf("ContractSafety out of range: %v", dto.ContractSafety)
 	}
-	if dto.Confidence.LiquidityScore <= 0 {
-		t.Error("confidence must be > 0")
+	// LiquidityScore confidence is 0.0 on cold-start (no snapshot data in unit test)
+	// — that is correct behaviour after the deriveConfidence fix. Check ContractSafety
+	// confidence instead, which is always ≥ 0.4 because DQ flags are always populated.
+	if dto.Confidence.ContractSafety <= 0 {
+		t.Error("ContractSafety confidence must be > 0")
 	}
 }
 

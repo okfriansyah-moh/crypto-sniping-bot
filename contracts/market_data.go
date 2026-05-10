@@ -131,4 +131,37 @@ type MarketDataDTO struct {
 	// the DQ check is skipped rather than incorrectly rejecting.
 	TotalSupplyKnown bool    `json:"total_supply_known,omitempty"`
 	TotalSupply      float64 `json:"total_supply,omitempty"`
+
+	// ─────────────────────────────────────────────────────────────────────
+	// Dev Reputation — serial launcher and social-link signals.
+	//
+	// CreatorAddress is the wallet that deployed the token (pump.fun `user`
+	// field from the CreateEvent log, or EVM deployer). Populated by
+	// ingestion at Layer 0 so downstream workers can look up creator history
+	// without making RPC calls inside the DQ module.
+	//
+	// CreatorPrevTokenCount is the number of OTHER tokens this creator
+	// wallet has previously launched (excluding the current token). Populated
+	// by the solana_creator_reputation probe via a single DB COUNT query
+	// against the market_data table. When CreatorPrevTokenCountKnown=false
+	// (probe not yet run), the DQ detector degrades per profile — STRICT
+	// counts it as unknown risk; BALANCED/EXPLORATION ignore it.
+	//
+	// MetadataURI is the on-chain URI pointing to the token's off-chain
+	// JSON metadata (IPFS, Arweave, or HTTPS). For pump.fun tokens this is
+	// the `uri` field emitted in the CreateEvent log. Populated by ingestion
+	// at Layer 0 so the solana_metadata probe can fetch it without any extra
+	// RPC call. Empty for tokens whose program does not emit a URI.
+	//
+	// HasSocialLinks is true when the token metadata URI resolves to at least
+	// one non-empty social link (twitter / telegram / website). Populated by
+	// the solana_metadata probe. When SocialLinksKnown=false the detector
+	// degrades per profile.
+	// ─────────────────────────────────────────────────────────────────────
+	MetadataURI                string `json:"metadata_uri,omitempty"`
+	CreatorAddress             string `json:"creator_address,omitempty"`
+	CreatorPrevTokenCountKnown bool   `json:"creator_prev_token_count_known,omitempty"`
+	CreatorPrevTokenCount      int32  `json:"creator_prev_token_count,omitempty"`
+	SocialLinksKnown           bool   `json:"social_links_known,omitempty"`
+	HasSocialLinks             bool   `json:"has_social_links,omitempty"`
 }

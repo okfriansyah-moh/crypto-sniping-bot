@@ -10,7 +10,7 @@ Use this skill when:
 - You have a clear task that requires implementation, security review, and verification.
 - You need to ensure a structured workflow with explicit user approval before completion.
 - You want to maintain high standards of security, reliability, and performance in your implementations.
-- You want to optimize for deterministic and production-grade outputs while allowing controlled exploration during planning.
+- You want to optimize for deterministic and production-grade outputs, permitting limited exploration within predefined planning constraints.
 - You want to ensure that all critical decisions are clarified with the user before implementation.
 - You want to ensure that all issues are remediated before confirming completion.
 - running-prompt is designed to guide you through a comprehensive task execution process, ensuring that all aspects of the implementation are thoroughly planned, securely implemented, and rigorously verified before final approval and completion confirmation.
@@ -24,6 +24,15 @@ Follow the steps below to handle the tasks effectively.
 ---
 
 # 0. Principal Engineer Temperature Configuration
+
+> **Priority order for all constraints in this workflow:**
+>
+> 1. Capital and safety rules (never bypass security, never lose progress)
+> 2. Completion contract (finish every requested item)
+> 3. Chunking and anti-timeout rules (break work into safe batches)
+> 4. Temperature and agent-utilization guidance
+>
+> When rules appear to conflict, the higher-priority rule wins.
 
 Set temperature dynamically based on task type, optimized for deterministic and production-grade execution.
 
@@ -133,7 +142,7 @@ If a previous attempt timed out or was interrupted:
 
 # 0.6. Task Completion Guarantee — NEVER Stop Mid-Task
 
-**ABSOLUTE RULE: Once a task is accepted, it MUST be completed to the end. Stopping, pausing, or abandoning a task midway is FORBIDDEN.**
+**ABSOLUTE RULE: Once a task is accepted, it MUST be completed to the end. Abandoning a task midway without saving progress is FORBIDDEN. Pausing only to recover from a genuine context limit — with progress saved and explicit resume instructions given — is the sole permitted exception (see Context Length Strategy below).**
 
 ## The Completion Contract
 

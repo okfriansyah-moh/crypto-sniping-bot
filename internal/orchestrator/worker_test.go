@@ -82,6 +82,9 @@ func (w *workerAdapter) MoveToDLQ(_ context.Context, e database.DLQEntry) error 
 	w.dlqEntries = append(w.dlqEntries, e)
 	return nil
 }
+func (w *workerAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
+	return 0, nil
+}
 
 // ── handler stubs ────────────────────────────────────────────────────────────
 
@@ -339,5 +342,43 @@ func TestRunWorker_TransientFailure_ReleasesClaim_NotDLQ(t *testing.T) {
 	}
 	if len(adapter.released) == 0 {
 		t.Fatal("expected ReleaseEventClaim on transient failure")
+	}
+}
+
+// TestRunWorker_LifecycleAlreadyAdvanced_SkipsToProcessed verifies that when a
+// handler returns ErrLifecycleAlreadyAdvanced (stale event from a prior session),
+// RunWorker marks the event processed and does NOT invoke the retry/DLQ path.
+// This guards against the 18.6× DQ replay multiplier caused by prior-session
+// stale events hitting a lifecycle CAS guard and being retried until DLQ.
+func TestRunWorker_LifecycleAlreadyAdvanced_SkipsToProcessed(t *testing.T) {
+	// Arrange
+	evt := &database.Event{
+		EventID:       "evt-stale",
+		EventType:     "event.stale",
+		TraceID:       "t-stale",
+		CorrelationID: "c-stale",
+		VersionID:     "v-stale",
+		Payload:       []byte(`{}`),
+	}
+	adapter := newWorkerAdapter(evt)
+	handler := errorHandler{err: database.ErrLifecycleAlreadyAdvanced}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	// Act
+	orchestrator.RunWorker(ctx, adapter, "group-stale", []string{"event.stale"}, handler, time.Millisecond, nil) //nolint:errcheck
+
+	// Assert: event must be marked processed — not retried, not DLQ'd.
+	if len(adapter.marked) == 0 {
+		t.Fatal("expected MarkEventProcessed for already-advanced lifecycle")
+	}
+	if adapter.marked[0] != "evt-stale" {
+		t.Errorf("expected marked[0]=evt-stale, got %q", adapter.marked[0])
+	}
+	if len(adapter.dlqEntries) != 0 {
+		t.Errorf("expected no DLQ entries, got %d", len(adapter.dlqEntries))
+	}
+	if len(adapter.released) != 0 {
+		t.Errorf("expected no ReleaseEventClaim, got %d", len(adapter.released))
 	}
 }

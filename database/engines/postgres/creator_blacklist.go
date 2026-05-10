@@ -67,3 +67,22 @@ WHERE creator_address = $1 AND chain = $2`
 	}
 	return &e, nil
 }
+
+// CountTokensByCreator returns the number of distinct token_address values in
+// market_data where creator_address = creatorAddress, excluding excludeToken.
+// Returns 0 when the creator has no prior tokens or creator_address is empty.
+func (d *DB) CountTokensByCreator(ctx context.Context, creatorAddress string, excludeToken string) (int32, error) {
+	if creatorAddress == "" {
+		return 0, nil
+	}
+	const q = `
+SELECT COUNT(DISTINCT token_address)
+FROM market_data
+WHERE creator_address = $1
+  AND token_address   != $2`
+	var count int32
+	if err := d.pool.QueryRowContext(ctx, q, creatorAddress, excludeToken).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count tokens by creator: %w", err)
+	}
+	return count, nil
+}

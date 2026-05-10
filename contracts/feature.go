@@ -26,6 +26,13 @@ type FeatureDTO struct {
 	// the upstream MarketDataDTO.Chain for chain-aware fallback paths.
 	Chain string `json:"chain,omitempty"`
 
+	// CohortKey is the historical market cohort this token maps to
+	// (e.g. "tier1_legendary", "tier3_pumpfun_era"). Populated by the
+	// feature extraction layer via the CohortClassifier (optional; empty
+	// when no cohort mapping is available). Consumed by Layer 4
+	// (probability prior lookup) and Layer 9 (position timing).
+	CohortKey string `json:"cohort_key,omitempty"`
+
 	// Normalized [0.0, 1.0] features
 	LiquidityScore     float64 `json:"liquidity_score"`
 	TxVelocityScore    float64 `json:"tx_velocity_score"`
@@ -63,6 +70,14 @@ type FeatureDTO struct {
 	// flag. Used as a soft positive signal in EdgeDTO scoring.
 	HolderTopNPctBps int32 `json:"holder_top_n_pct_bps,omitempty"`
 	HasSocialLinks   bool  `json:"has_social_links,omitempty"`
+
+	// P7 — Recent price observations for bottom-detection.
+	// Populated by feature extraction from the per-pool swap-event sync
+	// cache; ordered oldest-first (ascending block timestamp).
+	// Each element is a USD price.  Empty when price history is
+	// unavailable — the edge module's bottom detector returns score=0 in
+	// that case and the pipeline continues without gating.
+	RecentPricesUsd []float64 `json:"recent_prices_usd,omitempty"`
 }
 
 // FeatureConfidence holds per-feature confidence scores.

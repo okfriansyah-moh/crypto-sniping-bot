@@ -39,7 +39,7 @@ execution:
   poll_interval_ms: 2000
 
 priority:
-  # Operational mode thresholds (STRICT | BALANCED | EXPLORATION)
+  # Operational mode thresholds (STRICT | BALANCED | EXPLORATION | VERY_EXPLORATION)
   # See docs/architecture.md § 7.
   modes:
     strict:
@@ -59,6 +59,12 @@ priority:
       edge_strength_min: 0.45
       ev_threshold_bps: 60
       max_positions: 20
+
+    very_exploration:
+      explore_budget_pct: 8.0 # maximum aggression — catches early launches at creation
+      edge_strength_min: 0.30 # very permissive — prioritise recall over precision
+      ev_threshold_bps: 30 # accept thin edges that would be noise in other modes
+      max_positions: 25 # higher position ceiling for wider net
 
   # Active mode (overridden at runtime by /mode command)
   active_mode: balanced

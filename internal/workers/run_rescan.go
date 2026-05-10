@@ -25,6 +25,11 @@ import (
 // RunRescan starts the time-banded rescan worker.
 // Blocks until ctx is cancelled.
 //
+// triggerCh is an optional channel the operator can send to in order to force
+// an immediate rescan tick outside the normal ticker schedule.  Pass nil to
+// disable the external trigger; a nil receive-channel is never selected in
+// Go's select statement.
+//
 // When cfg.Rescan.Enabled is false the worker logs a single diagnostic line
 // and parks on ctx.Done() — it never aborts the caller goroutine.
 func RunRescan(
@@ -32,6 +37,7 @@ func RunRescan(
 	adapter database.Adapter,
 	cfg *config.Config,
 	logger *slog.Logger,
+	triggerCh <-chan struct{}, // nil = no external trigger
 ) error {
 	if logger == nil {
 		logger = slog.Default()
@@ -64,6 +70,37 @@ func RunRescan(
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		case _, ok := <-triggerCh:
+			if !ok {
+				// Closed trigger channel must be detached; otherwise select would
+				// spin this branch immediately and force infinite rescans.
+				triggerCh = nil
+				logger.Warn("rescan_trigger_channel_closed")
+				continue
+			}
+			// Force-triggered by operator /rescan command.
+			// Drain any additional queued triggers before running the tick
+			// so a rapid double-tap does not fire two back-to-back cycles.
+		drainLoop:
+			for {
+				select {
+				case _, ok := <-triggerCh:
+					if !ok {
+						triggerCh = nil
+						logger.Warn("rescan_trigger_channel_closed")
+						break drainLoop
+					}
+				default:
+					break drainLoop
+				}
+			}
+			t := time.Now().UTC()
+			logger.Info("rescan_force_triggered")
+			if err := runRescanTick(ctx, adapter, cfg, versionID, t, logger); err != nil {
+				logger.Warn("rescan_tick_error", "error", err)
+			}
+
 		case t := <-ticker.C:
 			if err := runRescanTick(ctx, adapter, cfg, versionID, t, logger); err != nil {
 				logger.Warn("rescan_tick_error", "error", err)

@@ -221,12 +221,44 @@ DUP_EVENT_IDS=$(jq -r 'select(
 # Heartbeat zero-emitted check
 HB_ZERO_EMITTED=$(count_jq 'select(.msg | test("_heartbeat")) | select(.events_emitted == 0)')
 
+# ── Rescan Worker (Layer 0.5) ─────────────────────────────────────────────────
+COUNT_RESCAN_STARTED=$(count_jq 'select(.msg == "rescan_worker_started")')
+COUNT_RESCAN_DISABLED=$(count_jq 'select(.msg == "rescan_worker_disabled")')
+COUNT_RESCAN_TICK_ERR=$(count_jq 'select(.msg == "rescan_tick_error")')
+COUNT_RESCAN_HB_ZERO=$(count_jq 'select(.msg == "rescan_worker_heartbeat" and .events_emitted == 0)')
+COUNT_RESCAN_EMITTED=$(count_jq 'select(.transport != null and (.transport | test("^rescan_")))')
+COUNT_RESCAN_15M=$(count_jq 'select(.transport == "rescan_15m")')
+COUNT_RESCAN_30M=$(count_jq 'select(.transport == "rescan_30m")')
+COUNT_RESCAN_45M=$(count_jq 'select(.transport == "rescan_45m")')
+COUNT_RESCAN_1H=$(count_jq 'select(.transport == "rescan_1h")')
+COUNT_RESCAN_BAND_ZERO=$(count_jq 'select(.msg == "rescan_band_completed" and (.candidates // 1) == 0)')
+COUNT_RESCAN_EMIT_FAIL=$(count_jq 'select(.msg == "rescan_emit_failed")')
+COUNT_RESCAN_DUP=$(jq -r 'select(.transport != null and (.transport | test("^rescan_"))) | "\(.token_address // "")|\(.transport // "")"' "$CLEAN_LOG" 2>/dev/null \
+  | sort | uniq -d | wc -l | tr -d ' ')
+COUNT_RESCAN_EDGE=$(count_jq 'select(.msg == "edge_decision" and (.transport // "" | test("^rescan_")))')
+
+# Rescan emit-fail rate for non-tolerable check
+RESCAN_ORPHAN_RISK="OK"
+if [[ "$COUNT_RESCAN_EMITTED" -gt 0 && "$COUNT_RESCAN_EMIT_FAIL" -gt 0 ]]; then
+  RESCAN_FAIL_PCT=$(( COUNT_RESCAN_EMIT_FAIL * 100 / COUNT_RESCAN_EMITTED ))
+  [[ "$RESCAN_FAIL_PCT" -gt 5 ]] && RESCAN_ORPHAN_RISK="${RESCAN_FAIL_PCT}% emit failures"
+fi
+
+# Rescan enabled + worker alive but producing zero output
+RESCAN_SILENT_RISK="OK"
+if [[ "$COUNT_RESCAN_STARTED" -gt 0 && "$COUNT_RESCAN_EMITTED" -eq 0 ]]; then
+  RESCAN_SILENT_RISK="STUCK — worker started but 0 rescan events emitted"
+fi
+
 # ── PRS Dimension Scoring ─────────────────────────────────────────────────────
 # Each dimension: 10=full, 5=partial, 0=fail
 D1=0; D2=0; D3=0; D4=0; D5=0; D6=0; D7=0; D8=0; D9=0; D10=0
 
 # D1 — Pipeline completeness
-if [[ "$COUNT_POS_OPEN" -gt 0 ]]; then D1=10
+# Full score requires end-to-end trace AND rescan either disabled or ≥1 trace reaches edge_decision
+RESCAN_D1_OK=0
+[[ "$COUNT_RESCAN_STARTED" -eq 0 || "$COUNT_RESCAN_DISABLED" -gt 0 || "$COUNT_RESCAN_EDGE" -gt 0 ]] && RESCAN_D1_OK=1
+if [[ "$COUNT_POS_OPEN" -gt 0 && "$RESCAN_D1_OK" -eq 1 ]]; then D1=10
 elif [[ "$COUNT_VAL" -gt 0 ]]; then D1=5
 fi
 
@@ -301,6 +333,8 @@ if [[ "$COUNT_VAL_REJECT" -gt 0 && "$COUNT_VAL" -gt 0 ]]; then
   REJECT_PCT=$(( COUNT_VAL_REJECT * 100 / COUNT_VAL ))
   [[ "$REJECT_PCT" -gt 95 ]] && (( OPEN_CRITICAL++ )) || true
 fi
+[[ "$COUNT_RESCAN_DUP" -gt 0 ]] && (( OPEN_CRITICAL++ )) || true
+[[ "$RESCAN_SILENT_RISK" != "OK" ]] && (( OPEN_CRITICAL++ )) || true
 
 # ── Phase 3: Write Summary ────────────────────────────────────────────────────
 log "Phase 3/3 — Writing summary to $SUMMARY"
@@ -356,6 +390,7 @@ echo "════════════════════════�
 echo "PIPELINE STAGE COUNTS (R3)"
 echo "═══════════════════════════════════════════════════════════════════"
 echo "  L0  ingestion:             $COUNT_INGESTION"
+echo "  L0.5 rescan_emitted:      $COUNT_RESCAN_EMITTED  (15m=$COUNT_RESCAN_15M 30m=$COUNT_RESCAN_30M 45m=$COUNT_RESCAN_45M 1h=$COUNT_RESCAN_1H)"
 echo "  L1  dq_decision:           $COUNT_DQ"
 echo "  L2  features_extracted:    $COUNT_FEATURES"
 echo "  L3  edge_decision:         $COUNT_EDGE"
@@ -391,6 +426,29 @@ echo "  Duplicate event_ids:       $DUP_EVENT_IDS"
 echo "  Heartbeat zero-emitted:    $HB_ZERO_EMITTED"
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
+echo "RESCAN WORKER (Layer 0.5)"
+echo "═══════════════════════════════════════════════════════════════════"
+if [[ "$COUNT_RESCAN_STARTED" -gt 0 ]]; then
+echo "  Status:                ENABLED (worker started in window)"
+elif [[ "$COUNT_RESCAN_DISABLED" -gt 0 ]]; then
+echo "  Status:                DISABLED (rescan_worker_disabled observed)"
+else
+echo "  Status:                not observed in window"
+fi
+echo "  rescan_worker_started: $COUNT_RESCAN_STARTED"
+echo "  rescan_tick_errors:    $COUNT_RESCAN_TICK_ERR"
+echo "  rescan_hb_zero_emit:   $COUNT_RESCAN_HB_ZERO"
+echo "  Total emitted:         $COUNT_RESCAN_EMITTED"
+echo "    band 15m:            $COUNT_RESCAN_15M"
+echo "    band 30m:            $COUNT_RESCAN_30M"
+echo "    band 45m:            $COUNT_RESCAN_45M"
+echo "    band 1h:             $COUNT_RESCAN_1H"
+echo "  Band-completed-zero:   $COUNT_RESCAN_BAND_ZERO"
+echo "  Emit-failed:           $COUNT_RESCAN_EMIT_FAIL"
+echo "  Duplicate (addr+band): $COUNT_RESCAN_DUP"
+echo "  Rescan→edge_decision:  $COUNT_RESCAN_EDGE"
+echo ""
+echo "═══════════════════════════════════════════════════════════════════"
 echo "NON-TOLERABLE PATTERN CHECK"
 echo "═══════════════════════════════════════════════════════════════════"
 # Check each non-tolerable condition and print status
@@ -422,6 +480,10 @@ if [[ "$COUNT_VAL" -gt 0 ]]; then
 else
   printf "  %-40s N/A (no validation events)\n" "Reject rate ≤95%"
 fi
+[[ "$COUNT_RESCAN_DUP" -eq 0 ]] && NT_RSCAN_DUP="NONE" || NT_RSCAN_DUP="${COUNT_RESCAN_DUP} duplicate(s)"
+check_nt "Rescan duplicate (addr+band)"   "$NT_RSCAN_DUP"       "NONE"
+check_nt "Rescan emit-fail rate"          "$RESCAN_ORPHAN_RISK"  "OK"
+check_nt "Rescan enabled but no output"   "$RESCAN_SILENT_RISK"  "OK"
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 echo "HOW TO USE THIS SUMMARY WITH COPILOT LOG-REVIEWER"

@@ -161,11 +161,11 @@ func (c *Config) validateRanges(logger *slog.Logger) error {
 			)
 		}
 		switch ma.DefaultStartupMode {
-		case "BALANCED", "STRICT", "EXPLORATION":
+		case "BALANCED", "STRICT", "EXPLORATION", "VERY_EXPLORATION":
 			// ok
 		default:
 			return fmt.Errorf(
-				"config: mode_adaptive.default_startup_mode=%q must be one of {BALANCED, STRICT, EXPLORATION}",
+				"config: mode_adaptive.default_startup_mode=%q must be one of {BALANCED, STRICT, EXPLORATION, VERY_EXPLORATION}",
 				ma.DefaultStartupMode,
 			)
 		}
@@ -279,6 +279,20 @@ func (c *Config) validateRanges(logger *slog.Logger) error {
 	if v := c.Probes.HoneypotSim.TimeoutMs; v != 0 && (v < 100 || v > 30000) {
 		return fmt.Errorf(
 			"config: probes.honeypot_sim.timeout_ms=%d must be in [100, 30000] (or 0 for default)",
+			v,
+		)
+	}
+
+	// ── probes.solana_metadata ─────────────────────────────────────────
+	if v := c.Probes.SolanaMetadata.TimeoutMs; v != 0 && (v < 100 || v > 30000) {
+		return fmt.Errorf(
+			"config: probes.solana_metadata.timeout_ms=%d must be in [100, 30000] (or 0 for default)",
+			v,
+		)
+	}
+	if v := c.Probes.SolanaMetadata.MaxBodyBytes; v != 0 && (v < 1024 || v > 1024*1024) {
+		return fmt.Errorf(
+			"config: probes.solana_metadata.max_body_bytes=%d must be in [1024, 1048576] (or 0 for default 65536)",
 			v,
 		)
 	}

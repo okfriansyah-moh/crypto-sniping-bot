@@ -11,7 +11,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: crypto-sniping-bot <command>")
-		fmt.Println("Commands: serve, migrate")
+		fmt.Println("Commands: serve, migrate, hydrate")
 		os.Exit(1)
 	}
 
@@ -20,6 +20,8 @@ func main() {
 		runServer()
 	case "migrate":
 		runMigrate()
+	case "hydrate":
+		runHydrate()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		os.Exit(1)

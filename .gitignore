@@ -57,5 +57,6 @@ secrets/
 # Logs
 *.log
 logs/
+results.txt
 
 PHASE_TASK.md

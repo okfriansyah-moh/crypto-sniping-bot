@@ -16,11 +16,14 @@ probability:
   # If probDTO.Confidence < this, fall back to prior and log low_model_confidence.
   #
   # Phase 0 (safety net, log-reviewer 2026-05-02): raised 0.40 → 0.70.
-  # Stub features have feature_confidence ≈ 0.5; this gate forces fallback
-  # to prior_probability=0.35 → EV ≈ −1900 bps → blanket REJECT until
-  # Phase 4 enrichment lands real signals. Lower again only after the
-  # 48h shadow gate proves dispersion (Phase 6).
-  min_model_confidence: 0.70
+  # Phase 7 (2026-05-04): lowered 0.70 → 0.35. deriveConfidence now returns 0.0
+  # for completely absent (known=false, N=0) features so they are excluded from
+  # minFeatureConfidence, preventing a single cold-start feature (e.g. VolumeMomentum
+  # on logs_only-path tokens) from collapsing model confidence to 0.10. With absent
+  # features excluded, the minimum over known features is ≥0.40 (ContractSafety
+  # floor), so threshold 0.35 leaves a buffer while still blocking truly-absent
+  # feature sets (all-absent → minFeatureConfidence=0 → 0 < 0.35 → fallback).
+  min_model_confidence: 0.35
 
   # ── Probability join (validation worker) ──────────────────────
   prob_join_timeout_ms: 200 # max wait for prob_event before fallback
@@ -39,3 +42,60 @@ probability:
   # fall back over a 1h window (proves model output is normally available).
   fallback_alert_pct: 0.05
   fallback_alert_window_sec: 3600
+
+  # ── Historical Priors (Approach B — per-cohort prior probability) ──
+  # Cohort-keyed prior probabilities consumed by Layer 4 (probability model).
+  # When a FeatureDTO carries a CohortKey that matches an entry here, the
+  # cohort prior overrides the global prior_probability on the cold-start /
+  # fallback path. Falls back to global prior_probability when key is absent.
+  # Populated by the `hydrate` CLI from config/historical_seeds.yaml.
+  historical_priors:
+    enabled: true
+    cohorts:
+      tier1_legendary:
+        prior_probability: 0.72
+        liquidity_min_usd: 500000.0
+        ath_multiple_p50: 150.0
+      tier2_high_virality:
+        prior_probability: 0.60
+        liquidity_min_usd: 100000.0
+        ath_multiple_p50: 80.0
+      tier3_pumpfun_era:
+        prior_probability: 0.45
+        liquidity_min_usd: 10000.0
+        ath_multiple_p50: 20.0
+      tier4_ai_meme:
+        prior_probability: 0.40
+        liquidity_min_usd: 5000.0
+        ath_multiple_p50: 15.0
+      tier5_animal_meta:
+        prior_probability: 0.38
+        liquidity_min_usd: 3000.0
+        ath_multiple_p50: 10.0
+      tier6_degen_culture:
+        prior_probability: 0.35
+        liquidity_min_usd: 2000.0
+        ath_multiple_p50: 8.0
+      tier7_social_community:
+        prior_probability: 0.32
+        liquidity_min_usd: 1000.0
+        ath_multiple_p50: 5.0
+      tier8_meme_infra_adjacent:
+        prior_probability: 0.30
+        liquidity_min_usd: 1000.0
+        ath_multiple_p50: 4.0
+      tier9_ultra_viral_short:
+        prior_probability: 0.20
+        liquidity_min_usd: 500.0
+        ath_multiple_p50: 3.0
+        time_to_rug_p10_sec: 180.0
+      tier10_historical_early:
+        prior_probability: 0.25
+        liquidity_min_usd: 500.0
+        ath_multiple_p50: 5.0
+    pooled_fallback:
+      prior_probability: 0.35
+      ath_multiple_p50: 8.0
+      liquidity_min_usd: 5000.0
+      buy_sell_ratio_healthy_min: 1.2
+      top10_holder_pct_danger: 0.65

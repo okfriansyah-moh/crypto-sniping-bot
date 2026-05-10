@@ -161,7 +161,7 @@ func TestRescanWorker_DisabledExitsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	err := RunRescan(ctx, adapter, cfg, nil)
+	err := RunRescan(ctx, adapter, cfg, nil, nil)
 	if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
 		t.Fatalf("expected nil or ctx error, got: %v", err)
 	}
@@ -332,6 +332,31 @@ func TestRescanWorker_PerTokenErrorDoesNotAbortBand(t *testing.T) {
 		if md.TokenAddress == "0xFail" {
 			t.Error("0xFail token should have been skipped, not emitted")
 		}
+	}
+}
+
+// TestRescanWorker_ClosedTriggerChannel_NoHotLoop ensures a closed trigger
+// channel is detached and does not cause repeated forced rescan cycles.
+func TestRescanWorker_ClosedTriggerChannel_NoHotLoop(t *testing.T) {
+	t.Parallel()
+	adapter := newRescanAdapter([]contracts.MarketDataDTO{sampleDTO("0xToken1")})
+	cfg := minRescanConfig(true)
+
+	triggerCh := make(chan struct{})
+	close(triggerCh)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	err := RunRescan(ctx, adapter, cfg, nil, triggerCh)
+	if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
+		t.Fatalf("RunRescan unexpected error: %v", err)
+	}
+
+	// With default interval=60s there should be no periodic tick in 120ms.
+	// A hot-loop would emit many events; expect zero after proper detachment.
+	if got := adapter.eventsCount(); got != 0 {
+		t.Fatalf("expected 0 events (no hot-loop), got %d", got)
 	}
 }
 

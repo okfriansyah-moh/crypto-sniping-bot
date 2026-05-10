@@ -212,3 +212,38 @@ func TestClamp_AboveHi(t *testing.T) {
 		t.Error("expected 1.0")
 	}
 }
+
+// ── deriveConfidence ─────────────────────────────────────────────────────────
+
+// TestDeriveConfidence_ColdStartAbsent_ReturnsZero verifies that a completely
+// absent feature (known=false, N=0) returns 0.0 so that minFeatureConfidence
+// treats it as "not provided" and excludes it from the minimum. Without this,
+// a single cold-start feature (e.g. VolumeMomentum on logs_only-path tokens)
+// collapses model confidence to 0.10 and triggers the fallback gate on every trade.
+func TestDeriveConfidence_ColdStartAbsent_ReturnsZero(t *testing.T) {
+	got := deriveConfidence(false, NormalizedSignal{N: 0})
+	if got != 0.0 {
+		t.Errorf("expected 0.0 for cold-start absent feature, got %v", got)
+	}
+}
+
+// TestDeriveConfidence_KnownNoSamples_ReturnsBase verifies that a feature
+// with a computed value (known=true) but no baseline samples still returns
+// a non-zero confidence (0.4 base + 0.1 hygiene = 0.50).
+func TestDeriveConfidence_KnownNoSamples_ReturnsBase(t *testing.T) {
+	got := deriveConfidence(true, NormalizedSignal{N: 0})
+	const want = 0.50 // 0.4 known + 0.0 coverage + 0.1 hygiene
+	if got != want {
+		t.Errorf("expected %v for known=true N=0, got %v", want, got)
+	}
+}
+
+// TestDeriveConfidence_UnknownWithSamples_UsesSampleCoverage verifies that
+// a feature that is not "known" (no direct value) but has baseline samples
+// still gets a non-zero confidence from the coverage term.
+func TestDeriveConfidence_UnknownWithSamples_UsesSampleCoverage(t *testing.T) {
+	got := deriveConfidence(false, NormalizedSignal{N: 10})
+	if got <= 0 {
+		t.Errorf("expected positive confidence for N=10 unknown feature, got %v", got)
+	}
+}

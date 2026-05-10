@@ -21,12 +21,14 @@ import (
 	"html"
 	"log/slog"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/telegram"
 )
 
@@ -36,6 +38,9 @@ import (
 func buildTelegramComponents(
 	db database.Adapter,
 	logger *slog.Logger,
+	cfg *config.Config,
+	startTime time.Time,
+	rescanTrigger chan struct{},
 ) (*telegram.Dispatcher, *telegram.Poller) {
 	token := os.Getenv("SNIPER_TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("SNIPER_TELEGRAM_CHAT_ID")
@@ -55,20 +60,25 @@ func buildTelegramComponents(
 	client := telegram.NewClient(token, chatID)
 
 	handler := telegram.NewHandler(telegram.HandlerOptions{
-		StatusFn:        buildStatusFn(db),
-		PnlFn:           buildPnlFn(db),
-		PositionsFn:     buildPositionsFn(db),
-		PositionFn:      buildPositionFn(db),
-		HealthFn:        buildHealthFn(db),
-		ForceCloseFn:    buildForceCloseFn(db, logger),
-		EnableTradingFn: buildEnableTradingFn(db, logger),
-		KillFn:          buildKillFn(db, logger),
-		ResumeFn:        buildResumeFn(db, logger),
-		VersionFn:       buildVersionFn(db),
-		ModeFn:          buildModeFn(db, logger),
-		PipelineFn:      buildPipelineFn(db),
-		AllowedUserIDs:  allowedIDs,
-		Logger:          logger,
+		StatusFn:         buildStatusFn(db, startTime),
+		PnlFn:            buildPnlFn(db),
+		PositionsFn:      buildPositionsFn(db),
+		PositionFn:       buildPositionFn(db),
+		HealthFn:         buildHealthFn(db),
+		ForceCloseFn:     buildForceCloseFn(db, logger),
+		EnableTradingFn:  buildEnableTradingFn(db, logger),
+		KillFn:           buildKillFn(db, logger),
+		ResumeFn:         buildResumeFn(db, logger),
+		VersionFn:        buildVersionFn(db),
+		ModeFn:           buildModeFn(db, logger),
+		PipelineFn:       buildPipelineFn(db),
+		RescanPipelineFn: buildRescanPipelineFn(db),
+		RescanFn:         buildRescanFn(rescanTrigger),
+		RescanStatusFn:   buildRescanStatusFn(db, cfg),
+		DqFn:             buildDqFn(db),
+		DlqFn:            buildDlqFn(db),
+		AllowedUserIDs:   allowedIDs,
+		Logger:           logger,
 	})
 
 	dispatcher := telegram.NewDispatcher(db, client, logger)
@@ -95,7 +105,7 @@ func parseTelegramAllowedUsers() []string {
 
 // ── Command function builders ─────────────────────────────────────────────────
 
-func buildStatusFn(db database.Adapter) func(ctx context.Context) (string, error) {
+func buildStatusFn(db database.Adapter, startTime time.Time) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		state, err := db.GetSystemState(ctx)
 		if err != nil {
@@ -124,12 +134,15 @@ func buildStatusFn(db database.Adapter) func(ctx context.Context) (string, error
 				"Open positions: <code>%d</code>\n"+
 				"Exposure: <code>$%.2f</code>\n"+
 				"Strategy: <code>%s</code>\n"+
+				"Running since: <code>%s (%s ago)</code>\n"+
 				"Updated: <code>%s</code>%s",
 			state.Mode,
 			state.DrawdownPct*100,
 			state.OpenPositions,
 			state.TotalExposureUsd,
 			versionLabel,
+			startTime.Format("2006-01-02 15:04:05 UTC"),
+			humanDuration(time.Since(startTime)),
 			state.UpdatedAt,
 			haltInfo,
 		), nil
@@ -624,8 +637,10 @@ func buildPipelineFn(db database.Adapter) func(ctx context.Context) (string, err
 		}
 
 		var sb strings.Builder
-		sb.WriteString("<b>Pipeline Funnel (last 24h)</b>\n\n")
+		sb.WriteString("<b>Pipeline Funnel (last 24h — cumulative)</b>\n\n")
 
+		// stats.Detected is the true total (COUNT(*) of all tokens in window).
+		// All percentages are relative to this base, so DETECTED always reads 100%.
 		total := stats.Detected
 		pct := func(n int64) string {
 			if total == 0 {
@@ -643,8 +658,15 @@ func buildPipelineFn(db database.Adapter) func(ctx context.Context) (string, err
 		sb.WriteString(fmt.Sprintf("EXECUTED     <code>%6d</code>  (%s)\n", stats.Executed, pct(stats.Executed)))
 		sb.WriteString(fmt.Sprintf("POS OPEN     <code>%6d</code>  (%s)\n", stats.PositionOpen, pct(stats.PositionOpen)))
 		sb.WriteString(fmt.Sprintf("POS CLOSED   <code>%6d</code>  (%s)\n", stats.PositionClosed, pct(stats.PositionClosed)))
+		sb.WriteString(fmt.Sprintf("EVALUATED    <code>%6d</code>  (%s)\n", stats.Evaluated, pct(stats.Evaluated)))
+		sb.WriteString("\n")
 		sb.WriteString(fmt.Sprintf("REJECTED     <code>%6d</code>\n", stats.Rejected))
 		sb.WriteString(fmt.Sprintf("FAILED       <code>%6d</code>\n", stats.Failed))
+		if stats.Failed > 0 {
+			sb.WriteString(fmt.Sprintf("  ↳ exec fail  <code>%6d</code>  (SELECTED→FAILED)\n", stats.FailedAtSelected))
+			sb.WriteString(fmt.Sprintf("  ↳ pos-open   <code>%6d</code>  (EXECUTED→FAILED)\n", stats.FailedAtExecuted))
+			sb.WriteString(fmt.Sprintf("  ↳ pos-close  <code>%6d</code>  (POSITION_OPEN→FAILED)\n", stats.FailedAtPositionOpen))
+		}
 
 		if len(stats.Recent) > 0 {
 			sb.WriteString("\n<b>Recent tokens:</b>\n")
@@ -668,6 +690,337 @@ func buildPipelineFn(db database.Adapter) func(ctx context.Context) (string, err
 			}
 		}
 
+		return sb.String(), nil
+	}
+}
+
+// rescanQueryer is a local interface for the optional GetRescanStats method.
+// The postgres *DB implements this concretely; stubs and other adapters do not.
+// Using a local interface avoids adding GetRescanStats to the global Adapter interface.
+type rescanQueryer interface {
+	GetRescanStats(ctx context.Context, windowHours int) (*database.RescanStats, error)
+}
+
+// rescanPipelineQueryer is a local interface for the optional GetRescanPipelineStats
+// method.  The postgres *DB implements this concretely; stubs do not.
+type rescanPipelineQueryer interface {
+	GetRescanPipelineStats(ctx context.Context, windowHours int) (*database.RescanPipelineStats, error)
+}
+
+// buildRescanFn returns a function that sends a force-trigger to the rescan worker.
+// triggerCh is a buffered channel (cap=1) created in server.go and shared with
+// RunRescan.  The send is non-blocking: if a trigger is already queued the
+// operator is told the worker will fire shortly.
+func buildRescanFn(triggerCh chan struct{}) func(ctx context.Context) (string, error) {
+	return func(_ context.Context) (string, error) {
+		if triggerCh == nil {
+			return "⚠️ Rescan worker not configured.", nil
+		}
+		select {
+		case triggerCh <- struct{}{}:
+			return "✅ Rescan force-triggered. Check /rescan_status in a few seconds for results.", nil
+		default:
+			return "⏳ Rescan trigger already queued — worker will fire shortly.", nil
+		}
+	}
+}
+
+// buildRescanStatusFn returns a function that shows the rescan worker
+// configuration and last-24h per-band emission counts.
+
+// buildRescanPipelineFn returns a function that shows the pipeline funnel for
+// tokens re-emitted via the rescan worker (transport LIKE 'rescan_%').
+// Uses a type assertion to the concrete postgres method — adapters that don't
+// implement it return a graceful "not supported" message.
+func buildRescanPipelineFn(db database.Adapter) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		rq, ok := db.(rescanPipelineQueryer)
+		if !ok {
+			return "⚠️ /rescan_pipeline is not supported by the current database adapter.", nil
+		}
+		rs, err := rq.GetRescanPipelineStats(ctx, 24)
+		if err != nil {
+			return "", fmt.Errorf("get rescan pipeline stats: %w", err)
+		}
+
+		var sb strings.Builder
+		sb.WriteString("<b>Rescan Pipeline Funnel (last 24h — rescan tokens only)</b>\n\n")
+
+		if rs.Detected == 0 {
+			sb.WriteString("No tokens were rescanned in the last 24h.")
+			return sb.String(), nil
+		}
+
+		total := rs.Detected
+		pct := func(n int64) string {
+			if total == 0 {
+				return "0.0%"
+			}
+			return fmt.Sprintf("%.1f%%", float64(n)/float64(total)*100)
+		}
+
+		sb.WriteString(fmt.Sprintf("DETECTED     <code>%6d</code>  (100%%)\n", rs.Detected))
+		sb.WriteString(fmt.Sprintf("DQ_PASSED    <code>%6d</code>  (%s)\n", rs.DQPassed, pct(rs.DQPassed)))
+		sb.WriteString(fmt.Sprintf("FEATURE      <code>%6d</code>  (%s)\n", rs.FeatureReady, pct(rs.FeatureReady)))
+		sb.WriteString(fmt.Sprintf("EDGE         <code>%6d</code>  (%s)\n", rs.EdgeDetected, pct(rs.EdgeDetected)))
+		sb.WriteString(fmt.Sprintf("VALIDATED    <code>%6d</code>  (%s)\n", rs.Validated, pct(rs.Validated)))
+		sb.WriteString(fmt.Sprintf("SELECTED     <code>%6d</code>  (%s)\n", rs.Selected, pct(rs.Selected)))
+		sb.WriteString(fmt.Sprintf("EXECUTED     <code>%6d</code>  (%s)\n", rs.Executed, pct(rs.Executed)))
+		sb.WriteString(fmt.Sprintf("POS OPEN     <code>%6d</code>  (%s)\n", rs.PositionOpen, pct(rs.PositionOpen)))
+		sb.WriteString(fmt.Sprintf("POS CLOSED   <code>%6d</code>  (%s)\n", rs.PositionClosed, pct(rs.PositionClosed)))
+		sb.WriteString(fmt.Sprintf("EVALUATED    <code>%6d</code>  (%s)\n", rs.Evaluated, pct(rs.Evaluated)))
+		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("REJECTED     <code>%6d</code>\n", rs.Rejected))
+		sb.WriteString(fmt.Sprintf("FAILED       <code>%6d</code>\n", rs.Failed))
+		if rs.Failed > 0 {
+			sb.WriteString(fmt.Sprintf("  ↳ exec fail  <code>%6d</code>  (SELECTED→FAILED)\n", rs.FailedAtSelected))
+			sb.WriteString(fmt.Sprintf("  ↳ pos-open   <code>%6d</code>  (EXECUTED→FAILED)\n", rs.FailedAtExecuted))
+			sb.WriteString(fmt.Sprintf("  ↳ pos-close  <code>%6d</code>  (POSITION_OPEN→FAILED)\n", rs.FailedAtPositionOpen))
+		}
+
+		// Per-band breakdown
+		if len(rs.ByBand) > 0 {
+			sb.WriteString(fmt.Sprintf("\n<b>Emissions by band (24h):  %d total</b>\n", rs.TotalEmitted))
+			bandNames := make([]string, 0, len(rs.ByBand))
+			for b := range rs.ByBand {
+				bandNames = append(bandNames, b)
+			}
+			sort.Strings(bandNames)
+			for _, b := range bandNames {
+				sb.WriteString(fmt.Sprintf("  <code>%-6s</code>  %d\n", b, rs.ByBand[b]))
+			}
+		}
+
+		// Recent rescanned tokens
+		if len(rs.Recent) > 0 {
+			sb.WriteString("\n<b>Recent rescanned tokens:</b>\n")
+			for _, rt := range rs.Recent {
+				addr := rt.TokenAddress
+				if len(addr) > 12 {
+					addr = addr[:6] + "…" + addr[len(addr)-4:]
+				}
+				ticker := rt.Symbol
+				if ticker == "" {
+					ticker = "—"
+				}
+				chain := rt.Chain
+				if chain == "" {
+					chain = "?"
+				}
+				sb.WriteString(fmt.Sprintf(
+					"<code>%s</code> [%s] %s · %s\n",
+					addr, ticker, rt.State, chain,
+				))
+			}
+		}
+
+		return sb.String(), nil
+	}
+}
+
+func buildRescanStatusFn(db database.Adapter, cfg *config.Config) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		rc := cfg.Rescan
+		var sb strings.Builder
+
+		// Header
+		status := "✅ enabled"
+		if !rc.Enabled {
+			status = "🔴 disabled"
+		}
+		sb.WriteString(fmt.Sprintf("<b>Rescan Status</b>  %s\n\n", status))
+
+		// Config
+		sb.WriteString(fmt.Sprintf("Interval:           <code>%ds</code>\n", rc.IntervalSeconds))
+		sb.WriteString(fmt.Sprintf("Max per band/tick:  <code>%d</code>\n", rc.MaxPerBandPerTick))
+		skipOpen := "no"
+		if rc.SkipOpenPositions {
+			skipOpen = "yes"
+		}
+		sb.WriteString(fmt.Sprintf("Skip open positions:<code>%s</code>\n", skipOpen))
+
+		// Bands table
+		if len(rc.Bands) > 0 {
+			sb.WriteString("\n<b>Bands:</b>\n")
+			bands := make([]config.RescanBand, len(rc.Bands))
+			copy(bands, rc.Bands)
+			sort.Slice(bands, func(i, j int) bool { return bands[i].Priority < bands[j].Priority })
+			for _, b := range bands {
+				minM := b.MinAgeSeconds / 60
+				maxM := b.MaxAgeSeconds / 60
+				sb.WriteString(fmt.Sprintf("  <code>%-6s</code>  %d–%dm  priority %d\n",
+					b.Name, minM, maxM, b.Priority))
+			}
+		}
+
+		// Mode overrides eligibility
+		if len(rc.ModeOverrides) > 0 {
+			sb.WriteString("\n<b>Eligibility thresholds by mode:</b>\n")
+			modes := make([]string, 0, len(rc.ModeOverrides))
+			for m := range rc.ModeOverrides {
+				modes = append(modes, m)
+			}
+			sort.Strings(modes)
+			for _, mode := range modes {
+				e := rc.ModeOverrides[mode]
+				parts := []string{}
+				if e.MaxHoneypotScore != nil {
+					parts = append(parts, fmt.Sprintf("hp≤%.2f", *e.MaxHoneypotScore))
+				}
+				if e.MaxRugScore != nil {
+					parts = append(parts, fmt.Sprintf("rug≤%.2f", *e.MaxRugScore))
+				}
+				if e.MaxBuyTaxBps != nil {
+					parts = append(parts, fmt.Sprintf("tax≤%dbps", *e.MaxBuyTaxBps))
+				}
+				desc := "default"
+				if len(parts) > 0 {
+					desc = strings.Join(parts, ", ")
+				}
+				sb.WriteString(fmt.Sprintf("  <code>%-12s</code>  %s\n", mode, desc))
+			}
+		}
+
+		// Last 24h emission stats (optional — postgres only, via type assertion)
+		if rq, ok := db.(rescanQueryer); ok {
+			rs, err := rq.GetRescanStats(ctx, 24)
+			if err == nil && rs.TotalEmitted > 0 {
+				sb.WriteString(fmt.Sprintf("\n<b>Last 24h emissions:</b>  <code>%d total</code>\n", rs.TotalEmitted))
+				if len(rs.ByBand) > 0 {
+					bandNames := make([]string, 0, len(rs.ByBand))
+					for b := range rs.ByBand {
+						bandNames = append(bandNames, b)
+					}
+					sort.Strings(bandNames)
+					for _, b := range bandNames {
+						sb.WriteString(fmt.Sprintf("  <code>%-6s</code>  %d\n", b, rs.ByBand[b]))
+					}
+				}
+			} else if err == nil {
+				sb.WriteString("\n<i>No rescan events in the last 24h.</i>\n")
+			}
+		}
+
+		return sb.String(), nil
+	}
+}
+
+func buildDqFn(db database.Adapter) func(ctx context.Context, hours int) (string, error) {
+	return func(ctx context.Context, hours int) (string, error) {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("<b>Data Quality  (last %dh)</b>\n\n", hours))
+
+		// Adaptive DQ stats (rolling window — uses seconds)
+		windowSec := hours * 3600
+		totalDecisions, rugRejects, dqErr := db.GetAdaptiveDQStats(ctx, windowSec)
+		if dqErr == nil {
+			sb.WriteString("<b>Adaptive DQ decisions:</b>\n")
+			sb.WriteString(fmt.Sprintf("  Total decisions:  <code>%d</code>\n", totalDecisions))
+			sb.WriteString(fmt.Sprintf("  Rug rejects:      <code>%d</code>\n", rugRejects))
+			rugRate := 0.0
+			if totalDecisions > 0 {
+				rugRate = float64(rugRejects) / float64(totalDecisions) * 100
+			}
+			sb.WriteString(fmt.Sprintf("  Rug rate:         <code>%.1f%%</code>\n", rugRate))
+		}
+
+		// Pipeline DQ stage counts (from cumulative funnel)
+		ps, err := db.GetPipelineStats(ctx, hours)
+		if err != nil {
+			return "", fmt.Errorf("get pipeline stats: %w", err)
+		}
+		sb.WriteString("\n<b>Funnel gate (DQ):</b>\n")
+		sb.WriteString(fmt.Sprintf("  Tokens detected:  <code>%d</code>\n", ps.Detected))
+		sb.WriteString(fmt.Sprintf("  DQ passed:        <code>%d</code>\n", ps.DQPassed))
+		sb.WriteString(fmt.Sprintf("  Rejected (any):   <code>%d</code>\n", ps.Rejected))
+		passRate := 0.0
+		rejectRate := 0.0
+		if ps.Detected > 0 {
+			passRate = float64(ps.DQPassed) / float64(ps.Detected) * 100
+			rejectRate = float64(ps.Rejected) / float64(ps.Detected) * 100
+		}
+		sb.WriteString(fmt.Sprintf("  Pass rate:        <code>%.1f%%</code>\n", passRate))
+		sb.WriteString(fmt.Sprintf("  Reject rate:      <code>%.1f%%</code>\n", rejectRate))
+
+		// Health verdict
+		verdict := "✅ Healthy"
+		if rejectRate > 80 {
+			verdict = "🔴 High reject rate — check thresholds or data feed"
+		} else if passRate < 5 && ps.Detected > 10 {
+			verdict = "⚠️ Very low pass rate — review DQ thresholds"
+		}
+		sb.WriteString(fmt.Sprintf("\nVerdict: %s\n", verdict))
+
+		return sb.String(), nil
+	}
+}
+
+func buildDlqFn(db database.Adapter) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		entries, err := db.ListDLQ(ctx, database.DLQFilter{Limit: 10})
+		if err != nil {
+			return "", fmt.Errorf("list dlq: %w", err)
+		}
+
+		var sb strings.Builder
+		sb.WriteString("<b>Dead-Letter Queue</b>\n\n")
+
+		if len(entries) == 0 {
+			sb.WriteString("✅ DLQ is empty.\n")
+			return sb.String(), nil
+		}
+
+		sb.WriteString(fmt.Sprintf("Showing last %d entries:\n\n", len(entries)))
+
+		// Summarize by reason
+		byCause := make(map[string]int)
+		for _, e := range entries {
+			cause := e.Reason
+			if cause == "" {
+				cause = "unknown"
+			}
+			byCause[cause]++
+		}
+
+		if len(byCause) > 0 {
+			sb.WriteString("<b>Reason breakdown:</b>\n")
+			type kv struct {
+				k string
+				v int
+			}
+			sorted := make([]kv, 0, len(byCause))
+			for k, v := range byCause {
+				sorted = append(sorted, kv{k, v})
+			}
+			sort.Slice(sorted, func(i, j int) bool { return sorted[i].v > sorted[j].v })
+			for _, kv := range sorted {
+				sb.WriteString(fmt.Sprintf("  <code>%s</code>  ×%d\n", html.EscapeString(kv.k), kv.v))
+			}
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("<b>Recent entries:</b>\n")
+		for _, e := range entries {
+			reason := e.Reason
+			if reason == "" {
+				reason = "unknown"
+			}
+			errMsg := e.ErrorMessage
+			if len(errMsg) > 80 {
+				errMsg = errMsg[:80] + "…"
+			}
+			ts := e.LastFailedAt
+			if len(ts) > 16 {
+				ts = ts[:16] // ISO truncated to minute
+			}
+			sb.WriteString(fmt.Sprintf(
+				"<code>%s</code>  retries:%d  consumer:%s  reason:%s\n<i>%s</i>\n",
+				ts, e.RetryCount, html.EscapeString(e.Consumer),
+				html.EscapeString(reason), html.EscapeString(errMsg),
+			))
+		}
+
+		sb.WriteString("\n<i>Use the rescan worker or requeue mechanism to retry events.</i>\n")
 		return sb.String(), nil
 	}
 }

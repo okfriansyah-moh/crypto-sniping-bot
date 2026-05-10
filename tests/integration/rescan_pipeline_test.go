@@ -138,7 +138,7 @@ func runOneTick(t *testing.T, rec *rescanRecorder, cfg *config.Config) {
 	ctx, cancel := context.WithTimeout(context.Background(),
 		time.Duration(cfg.Rescan.IntervalSeconds)*time.Second+500*time.Millisecond)
 	defer cancel()
-	_ = workers.RunRescan(ctx, rec, cfg, nopLogger())
+	_ = workers.RunRescan(ctx, rec, cfg, nopLogger(), nil)
 }
 
 // ── Scenario 1: Disabled by default ─────────────────────────────────────────
@@ -149,7 +149,7 @@ func TestRescanInteg_DisabledByDefault(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_ = workers.RunRescan(ctx, rec, cfg, nopLogger())
+	_ = workers.RunRescan(ctx, rec, cfg, nopLogger(), nil)
 
 	if rec.eventCount() != 0 {
 		t.Errorf("disabled worker emitted %d events, expected 0", rec.eventCount())
@@ -218,7 +218,7 @@ func TestRescanInteg_IdempotentOnSecondTick(t *testing.T) {
 	// Run worker for slightly more than 2 intervals to get 2 ticks.
 	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
 	defer cancel()
-	_ = workers.RunRescan(ctx, rec, cfg, nopLogger())
+	_ = workers.RunRescan(ctx, rec, cfg, nopLogger(), nil)
 
 	// Both ticks may emit (different bucket_ts per interval_seconds), but
 	// within the SAME bucket the EventID must be deterministic.

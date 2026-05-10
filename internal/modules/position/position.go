@@ -24,7 +24,8 @@ type PriceClient interface {
 
 // Module is the position management engine.
 type Module struct {
-	cfg *config.PositionConfig
+	cfg          *config.PositionConfig
+	dynamicTrail *DynamicTrailCalculator // optional; nil = disabled (P6)
 }
 
 // New returns a new position Module.
@@ -37,7 +38,21 @@ func New(cfg *config.PositionConfig) *Module {
 			MaxHoldSeconds: 300,
 		}
 	}
-	return &Module{cfg: cfg}
+	m := &Module{cfg: cfg}
+
+	// Wire P6 dynamic trailing calculator when configured.
+	if cfg.DynamicTrailing.Enabled && len(cfg.DynamicTrailing.Tiers) > 0 {
+		tiers := make([]DynamicTrailTier, 0, len(cfg.DynamicTrailing.Tiers))
+		for _, t := range cfg.DynamicTrailing.Tiers {
+			tiers = append(tiers, DynamicTrailTier{
+				TriggerBps: t.TriggerBps,
+				TrailBps:   t.TrailBps,
+			})
+		}
+		m.dynamicTrail = NewDynamicTrailCalculator(tiers)
+	}
+
+	return m
 }
 
 // OpenPosition creates the initial position snapshot from an ExecutionResultDTO.
@@ -237,7 +252,40 @@ func (m *Module) PollExitWithVolume(
 	if pos.Tp1FilledPctBps > 0 && pos.TrailingStopBps > 0 {
 		peak, _ := parsePrice(updated.PeakPrice)
 		if peak > 0 {
-			trailingFloor := peak * (1.0 - float64(pos.TrailingStopBps)/10000.0)
+			activeTrailBps := pos.TrailingStopBps
+
+			// P6: dynamic trailing overrides the flat TrailingStopBps when enabled.
+			if m.dynamicTrail != nil && m.dynamicTrail.Len() > 0 {
+				gainBpsFloat := (currentPrice - entryPrice) / entryPrice * 10000.0
+				const maxBps = float64(math.MaxInt32)
+				const minBps = float64(math.MinInt32)
+				switch {
+				case gainBpsFloat > maxBps:
+					gainBpsFloat = maxBps
+				case gainBpsFloat < minBps:
+					gainBpsFloat = minBps
+				}
+
+				gainBps := int32(math.Round(gainBpsFloat))
+				if gainBpsFloat < 0 && gainBps == 0 {
+					// Preserve negative sign near zero to avoid accidental tier activation.
+					gainBps = -1
+				}
+				tieredBps := m.dynamicTrail.TrailBpsForGain(gainBps)
+
+				cfg := m.cfg
+				inShadow := cfg != nil && cfg.DynamicTrailing.ShadowMode
+
+				if tieredBps > 0 && !inShadow {
+					// Production: use the tighter (smaller) of the two trail widths.
+					// We never widen the trail via dynamic config — only tighten it.
+					if tieredBps < activeTrailBps {
+						activeTrailBps = tieredBps
+					}
+				}
+			}
+
+			trailingFloor := peak * (1.0 - float64(activeTrailBps)/10000.0)
 			if currentPrice <= trailingFloor {
 				return m.buildExit(updated, currentPriceStr, currentPrice, entryPrice, "TRAILING", now), nil
 			}

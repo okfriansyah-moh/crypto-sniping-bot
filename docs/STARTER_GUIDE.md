@@ -24,6 +24,10 @@
    - [EVM Wallet Private Key](#33-crypto-wallet-private-key)
    - [Solana RPC Endpoints (Phase 7)](#34-solana-rpc-endpoints-phase-7)
    - [Solana Wallet Keypair (Phase 7)](#35-solana-wallet-keypair-phase-7)
+   - [BirdEye API Key (Phase 9 — optional)](#36-birdeye-api-key-phase-9--optional)
+   - [Jito Bundle Credentials (Phase 11 — optional)](#37-jito-bundle-credentials-phase-11--optional)
+   - [Solana gRPC Credentials (Phase 11 — optional)](#38-solana-grpc-transport-credentials-phase-11--optional)
+   - [Copy-Trade Alpha Wallets (Phase 9 — optional)](#39-copy-trade-alpha-wallets-phase-9--optional)
 4. [Clone the Repository](#4-clone-the-repository)
 5. [Configure the Application](#5-configure-the-application)
    - [Create .env File](#51-create-env-file--all-environment-variables)
@@ -264,16 +268,21 @@ git --version
 
 ## 3. Obtaining All Required Credentials
 
-You need up to five types of credentials:
+You need up to nine types of credentials:
 
 1. **EVM RPC endpoint URLs** — to read from and write to Ethereum and BSC
 2. **Telegram Bot Token + Chat ID** — to receive alerts and send commands
 3. **EVM Wallet private key** — to sign ETH/BSC trades
 4. **Solana RPC endpoint URLs** — to read from and write to Solana (Phase 7, required only if running Solana chain)
 5. **Solana Wallet keypair JSON file** — to sign Solana trades (Phase 7, required only if running Solana chain)
+6. **BirdEye API key** — enriches dev reputation and token metadata DQ checks (Phase 9, optional)
+7. **Jito bundle URL + tip account** — Solana MEV protection via Jito block-engine (Phase 11, optional)
+8. **Solana gRPC endpoint + auth token** — ultra-low-latency Solana ingestion via Yellowstone gRPC (Phase 11, optional)
+9. **Copy-trade alpha wallet addresses** — smart wallet tracking for copy-trade DQ signal (Phase 9, optional)
 
 > **Minimum setup:** To run the bot with only Ethereum or BSC, you only need credentials 1–3.
 > Solana credentials (4–5) are only required when you enable Solana in `config/chains.yaml`.
+> Credentials 6–9 are optional enrichments — the bot runs without them at reduced DQ coverage.
 
 ---
 
@@ -520,8 +529,9 @@ SNIPER_TELEGRAM_CHAT_ID=123456789
 ```
 
 > **Note:** The Telegram dispatcher is fully operational in the codebase
-> (`internal/telegram/`). It receives all notifications through the event bus and supports
-> operator commands: `/status`, `/mode`, `/pnl`, `/positions`, `/kill`, `/resume`, `/version`.
+> (`internal/telegram/`). It receives all notifications through the event bus and supports the
+> full operator command set — see **Section 13.3** for the complete 21-command reference including
+> read-only queries, mode switching, and destructive commands.
 > Set these values now — they take effect immediately.
 
 ---
@@ -878,6 +888,215 @@ SOLANA_WALLET_KEY_1=/etc/sniper/keys/solana-wallet-1.json
 
 ---
 
+### 3.6 BirdEye API Key (Phase 9 — optional)
+
+> **Skip if:** You don't need dev reputation checks or token holder concentration data.
+> Without this key, the `dev_reputation` and token metadata DQ providers are disabled — the bot
+> still works, but misses serial-launcher and no-social-links risk signals.
+
+BirdEye is a Solana/EVM token analytics platform. The bot uses its API for:
+
+- **Developer reputation** — detect serial launcher wallets with prior rug history
+- **Token metadata** — verify social link presence and holder concentration
+- **Holder distribution** — surface top-holder concentration risk
+
+**Important:** BirdEye has two separate systems. The regular `birdeye.so` profile page does
+**not** have API key management. API keys are managed through the separate
+**BDS (Birdeye Data Services)** dashboard at `bds.birdeye.so`.
+
+**How to get your API key:**
+
+1. Go to [https://bds.birdeye.so/auth/sign-up](https://bds.birdeye.so/auth/sign-up) and create an account
+   (if you already have a `birdeye.so` account, the same email/password works — they share one account)
+2. Log in at [https://bds.birdeye.so/auth/sign-in](https://bds.birdeye.so/auth/sign-in)
+3. In the BDS Dashboard, click the **Security** tab in the left sidebar
+4. Click **Generate Key** and give it a name (e.g., "sniper-bot")
+5. Copy the generated key immediately — it is only shown once
+
+**Set it in your `.env` file:**
+
+```bash
+BIRDEYE_API_KEY=your_birdeye_api_key_here
+```
+
+> **Cost:** BirdEye uses a **Compute Unit (CU)** pricing model, not simple requests-per-minute.
+> The free starter package includes a limited CU budget per month. The codebase has
+> **no built-in rate limiter** for BirdEye — when CUs are exhausted or rate-limited (HTTP 429),
+> the provider returns `Degraded: true` and the pipeline continues without the score. In quiet
+> markets this is fine. In busy markets (Solana bull runs, 100+ launches/minute), BirdEye
+> degrades silently — it becomes a no-op. Keep `shadow_mode: true` in `config/data_quality.yaml`
+> while validating, and check your CU usage in the BDS Dashboard before disabling shadow mode.
+
+> **Security:** This key is read via `os.Getenv("BIRDEYE_API_KEY")` at startup — it is never
+> written to any YAML file, never logged, and never committed to Git.
+
+---
+
+### 3.7 Jito Bundle Credentials (Phase 11 — optional)
+
+> **Skip if:** You are not trading on Solana, or you are in shadow mode.
+> Jito bundle submission is enabled via `execution.solana.jito.enabled: true` in `config/execution.yaml`.
+> By default `enabled: false` and `shadow_mode: true` — no bundles are submitted until you explicitly enable it.
+
+Jito is a Solana MEV infrastructure that lets you submit transactions as **bundles** to Jito
+block-engine validators, providing priority inclusion and MEV protection. Use this when:
+
+- You are competing for new PumpFun/Raydium launches at high frequency
+- You want to tip validators for guaranteed inclusion in a specific slot
+
+The bot needs two values:
+
+| Variable           | What it is                                                   |
+| ------------------ | ------------------------------------------------------------ |
+| `JITO_BUNDLE_URL`  | The Jito block-engine bundle submission HTTPS endpoint       |
+| `JITO_TIP_ACCOUNT` | A Jito tip account address (one per region — sends lamports) |
+
+**How to get these:**
+
+1. Go to [https://jito.network](https://jito.network) — Jito infrastructure is permissionless;
+   no account or API key is required. The bundle endpoint URLs are publicly documented.
+
+2. Choose the closest regional endpoint:
+
+   | Region         | Bundle URL                                                           |
+   | -------------- | -------------------------------------------------------------------- |
+   | US East        | `https://mainnet.block-engine.jito.labs.io/api/v1/bundles`           |
+   | US West        | `https://dallas.mainnet.block-engine.jito.labs.io/api/v1/bundles`    |
+   | EU (Amsterdam) | `https://amsterdam.mainnet.block-engine.jito.labs.io/api/v1/bundles` |
+   | Asia (Tokyo)   | `https://tokyo.mainnet.block-engine.jito.labs.io/api/v1/bundles`     |
+
+   > **For Jakarta/Singapore VPS:** Use the Tokyo endpoint for lowest latency.
+
+3. Pick a Jito tip account (any of these work — rotate if you want):
+
+   ```
+   96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
+   HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe
+   Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY
+   ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1sTaC4pr870
+   ```
+
+**Set in your `.env` file:**
+
+```bash
+# For Singapore VPS users — use Tokyo as closest Jito relay
+JITO_BUNDLE_URL=https://tokyo.mainnet.block-engine.jito.labs.io/api/v1/bundles
+JITO_TIP_ACCOUNT=96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
+```
+
+> **Security:** The bot enforces HTTPS-only for `JITO_BUNDLE_URL` — any non-HTTPS URL is
+> rejected at startup (except loopback addresses used in test servers). Never use HTTP.
+> The response body is capped at 64 KiB to prevent unbounded reads.
+
+> **Cost:** Jito charges no subscription fee. You pay a **tip in lamports** per bundle
+> (configured via `execution.solana.jito.tip_lamports: 1000` in `config/execution.yaml`).
+> At 1000 lamports per bundle, this is $0.000001 per trade — effectively free.
+
+---
+
+### 3.8 Solana gRPC Transport Credentials (Phase 11 — optional)
+
+> **Skip if:** You are using the default WebSocket transport (the default `mode: rpc` in
+> `config/chains.yaml`). gRPC is only needed for ultra-low-latency sniping where WebSocket
+> latency (~50ms per event) is a bottleneck.
+
+The Phase 11 hybrid transport supports **Yellowstone gRPC** (Geyser plugin streaming), which
+delivers new slot and transaction notifications faster than WebSocket subscription. Two providers
+support this:
+
+| Provider   | gRPC Support           | Cost        | Notes                            |
+| ---------- | ---------------------- | ----------- | -------------------------------- |
+| Triton One | ✅ Native Yellowstone  | $100+/month | Dedicated node; lowest latency   |
+| Helius     | ✅ Geyser via Business | $499+/month | Business tier required           |
+| QuickNode  | ❌ Not yet             | —           | WebSocket only on standard plans |
+
+**How to get gRPC access:**
+
+**Triton One:**
+
+1. Contact [https://triton.one](https://triton.one) — email or Discord
+2. Request a Yellowstone gRPC node
+3. They provide: `endpoint: your-node.rpcpool.com:443` and a bearer token
+
+**Helius:**
+
+1. Log in at [https://www.helius.dev](https://www.helius.dev)
+2. Upgrade to the **Business** tier
+3. Go to **Geyser Plugin** → **gRPC endpoint** in dashboard
+
+**Set in your `.env` file:**
+
+```bash
+# The endpoint overrides the value in config/chains.yaml — only needed if using gRPC mode
+SOLANA_GRPC_ENDPOINT=your-node.rpcpool.com:443
+
+# Auth token — NEVER put this in YAML — env var only
+SOLANA_GRPC_TOKEN=your_bearer_token_here
+```
+
+**Enable gRPC in config:**
+
+```yaml
+# config/chains.yaml
+solana:
+  transport:
+    mode: grpc # Change from "rpc" to "grpc"
+    grpc_endpoint: "" # Leave blank — SOLANA_GRPC_ENDPOINT env var takes precedence
+    # grpc_auth_token is loaded from env var SOLANA_GRPC_TOKEN (never put in YAML)
+    fallback_on_error: true # Auto-fall back to WebSocket if gRPC fails
+    fallback_error_n: 5
+```
+
+> **Security:** `SOLANA_GRPC_TOKEN` is intentionally absent from all YAML config structs in the
+> codebase — it can only be provided via environment variable. The field `GrpcAuthToken` was
+> deliberately removed from `TransportConfig` to prevent accidental YAML serialization.
+
+---
+
+### 3.9 Copy-Trade Alpha Wallets (Phase 9 — optional)
+
+> **Skip if:** You don't have alpha wallet addresses to track. This provider adds a copy-trade
+> signal to the DQ layer — if a known smart wallet recently bought the same token, it gets a
+> positive signal. Without wallet addresses, the provider runs in degraded mode (returns no-match).
+
+Copy-trade tracking requires no external account or API key. You simply provide a list of wallet
+addresses that you consider "alpha" — wallets with a proven track record of buying tokens early
+that later pumped significantly.
+
+**How to find alpha wallets:**
+
+Common approaches:
+
+- **Cielo Finance** ([https://app.cielo.finance](https://app.cielo.finance)) — browse public
+  wallet leaderboards and see top-performing Solana wallets
+- **Birdeye Wallet** — look at "Top Traders" on tokens that pumped
+- **Dune Analytics** — query on-chain data for wallets with consistent early entries
+- **GMGN** ([https://gmgn.ai](https://gmgn.ai)) — Solana wallet analyzer, shows winrate/ROI
+
+**Set in your `.env` file:**
+
+```bash
+# Comma-separated list — no spaces around commas
+# EVM wallets: 0x-prefixed addresses
+# Solana wallets: base58 addresses
+COPY_TRADE_WALLETS=0xAlphaWallet1,0xAlphaWallet2,SolanaWalletBase58Address
+```
+
+> **How it works in the pipeline:** When the Data Quality Engine evaluates a token, the
+> `CopyTradeProvider` checks whether any wallet in `COPY_TRADE_WALLETS` has recently bought
+> that token (via DEXScreener's wallet transaction history). If a match is found, the token
+> receives a `copy_trade_alpha_match` flag and a reduced risk score — bypassing some conservative
+> DQ thresholds. If no wallets are configured, the provider logs a warning at startup and returns
+> a neutral `copy_trade_no_wallets` flag for every token (no rejection, no boost).
+
+> **Chain support:** Only `ethereum`/`eth`, `bsc`/`bnb`, `solana`/`sol`, and `base` are accepted.
+> Unknown chain identifiers are rejected (fail-closed) — no passthrough.
+
+> **Security:** Wallet addresses are never logged at INFO level. If you rotate wallets, just
+> update `COPY_TRADE_WALLETS` and restart the bot — no database changes required.
+
+---
+
 ## 4. Clone the Repository
 
 Open Terminal (macOS/Linux) or Git Bash (Windows) and run:
@@ -979,6 +1198,9 @@ SNIPER_WALLET_KEY=yourPrivateKeyHere64CharHexNoPrefixNoQuotes
 # Solana HTTP RPC endpoint (for transaction submission and slot queries)
 SOLANA_RPC_HTTP_1=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
 
+# Solana HTTP RPC fallback endpoint (optional but recommended)
+SOLANA_RPC_HTTP_2=https://YOUR-ENDPOINT.solana-mainnet.quiknode.pro/YOUR_KEY/
+
 # Solana WebSocket endpoint (for real-time Raydium/PumpFun log subscription)
 SOLANA_WS_1=wss://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
 
@@ -992,11 +1214,44 @@ SOLANA_WS_1=wss://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
 SOLANA_WALLET_KEY_1=/home/your_username/.config/sniper/keys/solana-wallet-1.json
 
 # =============================================================================
+# SOLANA GRPC TRANSPORT (optional — Phase 11, for Triton One / Helius Business)
+# Provides ~10-20ms lower latency than WebSocket. Leave unset to use WebSocket.
+# SOLANA_GRPC_TOKEN is read from env only — NEVER put it in YAML.
+# =============================================================================
+
+# SOLANA_GRPC_ENDPOINT=your-triton-endpoint.rpcpool.com:443
+# SOLANA_GRPC_TOKEN=your_grpc_auth_token_here
+
+# =============================================================================
+# JITO BUNDLE SUBMISSION (optional — Solana MEV protection)
+# Loaded from env only — NEVER put these in YAML or config files.
+# =============================================================================
+
+# JITO_BUNDLE_URL=https://mainnet.block-engine.jito.labs.io/api/v1/bundles
+# JITO_TIP_ACCOUNT=96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
+
+# =============================================================================
+# OPTIONAL DATA QUALITY ENRICHMENT
+# These providers improve scam detection. Bot works without them (reduced coverage).
+# =============================================================================
+
+# BirdEye API key — enriches dev reputation and token metadata checks
+# Get yours at https://birdeye.so/profile/api-key
+# BIRDEYE_API_KEY=your_birdeye_api_key_here
+
+# Copy-trade alpha wallets — comma-separated smart wallet addresses to track
+# COPY_TRADE_WALLETS=0xAlphaWallet1,0xAlphaWallet2
+
+# =============================================================================
 # TELEGRAM (fully operational — see Section 3.2 for setup instructions)
 # =============================================================================
 
 SNIPER_TELEGRAM_BOT_TOKEN=1234567890:YourTelegramBotTokenHere
 SNIPER_TELEGRAM_CHAT_ID=123456789
+
+# Optional: comma-separated Telegram user IDs allowed to use operator commands.
+# If unset, all users who can message the bot can send commands (less secure).
+# SNIPER_TELEGRAM_ALLOWED_USERS=123456789,987654321
 
 # =============================================================================
 # SERVER
@@ -1103,7 +1358,7 @@ The most important settings for beginners:
 ```yaml
 capital:
   # How much USD to spend per trade (start small when testing!)
-  fixed_entry_size_usd: 50.0
+  fixed_entry_size_usd: 5.0
 
   # Maximum total USD across all open positions
   max_total_exposure_usd: 500.0
@@ -1112,17 +1367,17 @@ capital:
   max_concurrent_positions: 1
 
 position:
-  # Take Profit 1: exit 50% of position when up 20%
-  tp1_bps: 2000
+  # Take Profit 1: exit 50% of position when up 15%
+  tp1_bps: 1500
 
-  # Take Profit 2: exit remaining when up 50%
-  tp2_bps: 5000
+  # Take Profit 2: exit remaining when up 40%
+  tp2_bps: 4000
 
-  # Stop Loss: exit all when down 15%
-  sl_bps: 1500
+  # Stop Loss: exit all when down 5%
+  sl_bps: 500
 
-  # Maximum time to hold a position (seconds) — 3600 = 1 hour
-  max_hold_seconds: 3600
+  # Maximum time to hold a position (seconds) — 300 = 5 minutes (meme tokens pump or dump fast)
+  max_hold_seconds: 300
 
   # Phase 10: Trailing stop — activates only after TP1 is hit
   trailing_stop_bps: 500 # Exit if price drops 5% from peak after TP1 (0 = disabled)
@@ -1146,20 +1401,20 @@ validation:
 
 # Phase 11: Per-creator dedup
 selection:
-  max_positions_per_creator: 1 # At most 1 open position per creator wallet (0 = disabled)
+  max_positions_per_creator: 0 # At most 1 open position per creator wallet (0 = disabled)
 
 # Phase 11: Congestion-aware slippage
 models:
   congestion:
-    enabled: true
-    latency_anchor_ms: 200 # Normal latency baseline
-    max_multiplier: 2.5 # Cap slippage multiplier under congestion
+    enabled: false
+    latency_anchor_ms: 800 # Normal latency baseline
+    max_multiplier: 2.0 # Cap slippage multiplier under congestion
 
 # Phase 11: Creator blacklist (auto-populated by learning engine)
 learning:
   creator_blacklist:
-    enabled: true
-    auto_blacklist_rug_count: 3 # Auto-blacklist after N confirmed rugs
+    enabled: false
+    min_rugs_for_blacklist: 2 # Auto-blacklist after 2 confirmed rugs
 ```
 
 > **Tip for beginners:** Start with `fixed_entry_size_usd: 10.0` and `max_concurrent_positions: 1`
@@ -1200,6 +1455,8 @@ data_quality:
     lp_lock: true # Require liquidity locked for 30+ days
     wash_trading: true # Detect same-wallet circular trading
     rug_authority: true # Detect mint/pause/blacklist functions
+    contract_verified: true # Check source code is public on Etherscan/BscScan
+    dev_reputation: true # Check deployer wallet history for prior rugs
 
   risk_weights:
     honeypot: 0.30 # 30% of risk score comes from honeypot check
@@ -1208,6 +1465,7 @@ data_quality:
     lp_lock_missing: 0.15
     wash_trading: 0.10
     contract_unverified: 0.05
+    # dev_reputation weight is applied via serial-launcher risk score (see data_quality.yaml)
 ```
 
 #### `config/capital.yaml` — Position sizing (Phase 9)
@@ -1218,12 +1476,18 @@ sizing. **Start with the defaults and adjust after observing live behavior.**
 ```yaml
 capital:
   use_dynamic_sizing: true # Phase 9: size ∝ edge × probability × confidence
-  base_size_usd: 50.0 # Starting point for Kelly calculation
+  base_size_usd: 5.0 # Starting point for Kelly calculation
   min_size_usd: 5.0 # Minimum trade size
   max_size_usd: 500.0 # Maximum trade size cap
 
   kelly:
     cap: 0.25 # Use at most 25% of Kelly-optimal size (conservative)
+
+  mode_multipliers:
+    STRICT: 0.5 # In STRICT mode, halve the position size
+    BALANCED: 1.0 # In BALANCED mode, normal sizing
+    EXPLORATION: 1.3 # In EXPLORATION mode, 30% larger (exploring new patterns)
+    VERY_EXPLORATION: 1.5 # In VERY_EXPLORATION mode, 50% larger (maximum aggression)
 
   failure_policy:
     on_missing_probability: "reject" # Safest: skip trades with no probability score
@@ -1375,7 +1639,7 @@ You should see structured JSON log output like:
 ```json
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Config loaded","schema_version":"1"}
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Database connected","host":"localhost"}
-{"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Migrations OK","count":13}
+{"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Migrations OK","count":17}
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"HTTP server started","port":8080}
 {"time":"2026-04-26T10:00:00Z","level":"INFO","msg":"Orchestrator started"}
 ```
@@ -1485,14 +1749,9 @@ docker compose down
 docker compose down -v
 ```
 
-Or use the Makefile shortcuts:
-
-```bash
-make docker-build   # Build the image only
-make docker-up      # Start all services (detached)
-make docker-down    # Stop all services
-make docker-logs    # Tail bot logs
-```
+> **Note:** Docker is managed via `docker compose` commands directly. There are no `make docker-*`
+> shortcuts — use `docker compose build`, `docker compose up -d`, `docker compose down`, and
+> `docker compose logs -f bot` instead.
 
 ### Step 5 — Verify
 
@@ -1881,37 +2140,45 @@ make test-cover
 Complete reference of every environment variable the bot reads. Variables marked **Required** will
 cause startup failure if not set.
 
-| Variable                    | Required     | Default                | Description                                                   |
-| --------------------------- | ------------ | ---------------------- | ------------------------------------------------------------- |
-| `SNIPER_DB_PASSWORD`        | **Required** | —                      | PostgreSQL password for the `sniper` database user            |
-| `SNIPER_DB_HOST`            | Optional     | `localhost`            | PostgreSQL hostname                                           |
-| `SNIPER_DB_NAME`            | Optional     | `sniper`               | PostgreSQL database name                                      |
-| `SNIPER_DB_USER`            | Optional     | `sniper`               | PostgreSQL username                                           |
-| `SNIPER_DB_SSL_MODE`        | Optional     | `disable`              | PostgreSQL SSL mode (`disable`, `require`, `verify-full`)     |
-| `ETH_RPC_1`                 | Required\*   | —                      | Ethereum HTTP RPC endpoint #1 (\*if ETH chain enabled)        |
-| `ETH_RPC_2`                 | Optional     | —                      | Ethereum HTTP RPC endpoint #2 (fallback)                      |
-| `ETH_WS_1`                  | Required\*   | —                      | Ethereum WebSocket endpoint (\*if ETH chain enabled)          |
-| `BSC_RPC_1`                 | Required\*   | —                      | BSC HTTP RPC endpoint #1 (\*if BSC chain enabled)             |
-| `BSC_RPC_2`                 | Optional     | —                      | BSC HTTP RPC endpoint #2 (fallback)                           |
-| `BSC_WS_1`                  | Required\*   | —                      | BSC WebSocket endpoint (\*if BSC chain enabled)               |
-| `SNIPER_WALLET_ADDRESS`     | **Required** | —                      | Primary trading wallet address (0x...)                        |
-| `SNIPER_WALLET_KEY`         | **Required** | —                      | Primary wallet private key (64-char hex, no 0x prefix)        |
-| `SNIPER_WALLET_0_ADDRESS`   | Optional     | —                      | Shard 0 wallet address (overrides single wallet for sharding) |
-| `SNIPER_WALLET_0_KEY`       | Optional     | —                      | Shard 0 private key                                           |
-| `SNIPER_WALLET_1_ADDRESS`   | Optional     | —                      | Shard 1 wallet address                                        |
-| `SNIPER_WALLET_1_KEY`       | Optional     | —                      | Shard 1 private key                                           |
-| `SNIPER_WALLET_2_ADDRESS`   | Optional     | —                      | Shard 2 wallet address                                        |
-| `SNIPER_WALLET_2_KEY`       | Optional     | —                      | Shard 2 private key                                           |
-| `SNIPER_WALLET_3_ADDRESS`   | Optional     | —                      | Shard 3 wallet address                                        |
-| `SNIPER_WALLET_3_KEY`       | Optional     | —                      | Shard 3 private key                                           |
-| `SOLANA_RPC_HTTP_1`         | Required‡    | —                      | Solana HTTP RPC endpoint (‡if Solana chain enabled)           |
-| `SOLANA_WS_1`               | Required‡    | —                      | Solana WebSocket endpoint (‡if Solana chain enabled)          |
-| `SOLANA_WALLET_KEY_1`       | Required‡    | —                      | File path to Solana keypair JSON (‡if Solana chain enabled)   |
-| `SNIPER_TELEGRAM_BOT_TOKEN` | Optional     | —                      | Telegram bot token (for notifications)                        |
-| `SNIPER_TELEGRAM_CHAT_ID`   | Optional     | —                      | Telegram chat/group ID (for notifications)                    |
-| `PORT`                      | Optional     | `8080`                 | HTTP server port for health check endpoint                    |
-| `LOG_LEVEL`                 | Optional     | `info`                 | Log verbosity: `debug`, `info`, `warn`, `error`               |
-| `CONFIG_PATH`               | Optional     | `config/pipeline.yaml` | Override path to main config file                             |
+| Variable                        | Required     | Default                | Description                                                   |
+| ------------------------------- | ------------ | ---------------------- | ------------------------------------------------------------- |
+| `SNIPER_DB_PASSWORD`            | **Required** | —                      | PostgreSQL password for the `sniper` database user            |
+| `SNIPER_DB_HOST`                | Optional     | `localhost`            | PostgreSQL hostname                                           |
+| `SNIPER_DB_NAME`                | Optional     | `sniper`               | PostgreSQL database name                                      |
+| `SNIPER_DB_USER`                | Optional     | `sniper`               | PostgreSQL username                                           |
+| `SNIPER_DB_SSL_MODE`            | Optional     | `disable`              | PostgreSQL SSL mode (`disable`, `require`, `verify-full`)     |
+| `ETH_RPC_1`                     | Required\*   | —                      | Ethereum HTTP RPC endpoint #1 (\*if ETH chain enabled)        |
+| `ETH_RPC_2`                     | Optional     | —                      | Ethereum HTTP RPC endpoint #2 (fallback)                      |
+| `ETH_WS_1`                      | Required\*   | —                      | Ethereum WebSocket endpoint (\*if ETH chain enabled)          |
+| `BSC_RPC_1`                     | Required\*   | —                      | BSC HTTP RPC endpoint #1 (\*if BSC chain enabled)             |
+| `BSC_RPC_2`                     | Optional     | —                      | BSC HTTP RPC endpoint #2 (fallback)                           |
+| `BSC_WS_1`                      | Required\*   | —                      | BSC WebSocket endpoint (\*if BSC chain enabled)               |
+| `SNIPER_WALLET_ADDRESS`         | **Required** | —                      | Primary trading wallet address (0x...)                        |
+| `SNIPER_WALLET_KEY`             | **Required** | —                      | Primary wallet private key (64-char hex, no 0x prefix)        |
+| `SNIPER_WALLET_0_ADDRESS`       | Optional     | —                      | Shard 0 wallet address (overrides single wallet for sharding) |
+| `SNIPER_WALLET_0_KEY`           | Optional     | —                      | Shard 0 private key                                           |
+| `SNIPER_WALLET_1_ADDRESS`       | Optional     | —                      | Shard 1 wallet address                                        |
+| `SNIPER_WALLET_1_KEY`           | Optional     | —                      | Shard 1 private key                                           |
+| `SNIPER_WALLET_2_ADDRESS`       | Optional     | —                      | Shard 2 wallet address                                        |
+| `SNIPER_WALLET_2_KEY`           | Optional     | —                      | Shard 2 private key                                           |
+| `SNIPER_WALLET_3_ADDRESS`       | Optional     | —                      | Shard 3 wallet address                                        |
+| `SNIPER_WALLET_3_KEY`           | Optional     | —                      | Shard 3 private key                                           |
+| `SOLANA_RPC_HTTP_1`             | Required‡    | —                      | Solana HTTP RPC endpoint #1 (‡if Solana chain enabled)        |
+| `SOLANA_RPC_HTTP_2`             | Optional     | —                      | Solana HTTP RPC endpoint #2 (fallback)                        |
+| `SOLANA_WS_1`                   | Required‡    | —                      | Solana WebSocket endpoint (‡if Solana chain enabled)          |
+| `SOLANA_WALLET_KEY_1`           | Required‡    | —                      | File path to Solana keypair JSON (‡if Solana chain enabled)   |
+| `SOLANA_GRPC_ENDPOINT`          | Optional     | —                      | Solana gRPC endpoint URL (Phase 11; only when `mode: grpc`)   |
+| `SOLANA_GRPC_TOKEN`             | Optional     | —                      | Solana gRPC auth token (Phase 11; env only — never in YAML)   |
+| `JITO_BUNDLE_URL`               | Optional‡    | —                      | Jito bundle submission URL — HTTPS only (‡if Solana MEV on)   |
+| `JITO_TIP_ACCOUNT`              | Optional‡    | —                      | Jito tip account address (‡if Solana MEV on)                  |
+| `BIRDEYE_API_KEY`               | Optional     | —                      | BirdEye API key for dev reputation and token metadata DQ      |
+| `COPY_TRADE_WALLETS`            | Optional     | —                      | Comma-separated alpha wallet addresses for copy-trade DQ      |
+| `SNIPER_TELEGRAM_BOT_TOKEN`     | Optional     | —                      | Telegram bot token (for notifications)                        |
+| `SNIPER_TELEGRAM_CHAT_ID`       | Optional     | —                      | Telegram chat/group ID (for notifications)                    |
+| `SNIPER_TELEGRAM_ALLOWED_USERS` | Optional     | —                      | Comma-separated Telegram user IDs permitted to issue commands |
+| `PORT`                          | Optional     | `8080`                 | HTTP server port for health check endpoint                    |
+| `LOG_LEVEL`                     | Optional     | `info`                 | Log verbosity: `debug`, `info`, `warn`, `error`               |
+| `CONFIG_PATH`                   | Optional     | `config/pipeline.yaml` | Override path to main config file                             |
 
 > **‡ Solana variables** are only required when `config/chains.yaml` has a `solana:` block with
 > valid `rpc:` entries. If the env vars are absent, the Solana ingestion and execution workers
@@ -2028,21 +2295,33 @@ through the PostgreSQL event bus \u2014 modules never call Telegram directly.
 
 **Operator commands** (send from your Telegram chat to the bot):
 
-| Command          | What it does                                                           |
-| ---------------- | ---------------------------------------------------------------------- |
-| `/status`        | Shows current mode (STRICT/BALANCED/EXPLORATION), active positions     |
-| `/pnl`           | Shows today's realized PnL and win/loss rate                           |
-| `/positions`     | Lists all open positions with entry price and current P&L              |
-| `/mode strict`   | Switches to STRICT mode (conservative thresholds)                      |
-| `/mode balanced` | Switches to BALANCED mode (default)                                    |
-| `/mode explore`  | Switches to EXPLORATION mode (relaxed thresholds)                      |
-| `/kill`          | Triggers emergency kill switch \u2014 halts all new trades immediately |
-| `/resume`        | Resumes trading after kill switch (requires confirmation)              |
-| `/version`       | Shows current strategy version and config snapshot hash                |
+| Command                      | What it does                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| `/status`                    | Shows current mode (STRICT/BALANCED/EXPLORATION/VERY_EXPLORATION), active positions |
+| `/pnl`                       | Shows today's realized PnL and win/loss rate                                        |
+| `/positions`                 | Lists all open positions with entry price and current P&L                           |
+| `/position <prefix>`         | Shows detail for one position matched by token address prefix                       |
+| `/health`                    | Shows worker health: ingestion, execution, position, learning, telegram             |
+| `/pipeline`                  | Shows pipeline stage counters: events processed per stage in the last hour          |
+| `/rescan_pipeline`           | Shows rescan worker status and how many tokens are queued per band (15m/30m/45m/1h) |
+| `/rescan_status`             | Shows rescan worker enabled/disabled state and last run timestamp                   |
+| `/dq [hours]`                | Shows Data Quality rejection breakdown for the last N hours (default: 1)            |
+| `/dlq`                       | Shows Dead Letter Queue size and top error types                                    |
+| `/version`                   | Shows current strategy version and config snapshot hash                             |
+| `/mode strict`               | Switches to STRICT mode (conservative — rug-spike safety)                           |
+| `/mode balanced`             | Switches to BALANCED mode (default)                                                 |
+| `/mode explore`              | Switches to EXPLORATION mode (relaxed thresholds, starvation recovery)              |
+| `/mode very_explore`         | Switches to VERY_EXPLORATION mode (maximum aggression — new-launch sniping)         |
+| `/enable_trading`            | Enables live trade execution (bot starts in shadow mode — no trades by default)     |
+| `/rescan`                    | Manually triggers a full rescan of eligible tokens in all age bands                 |
+| `/force_close <addr_prefix>` | Force-closes a position by token address prefix (use carefully — bypasses TP/SL)    |
+| `/kill`                      | Triggers emergency kill switch — halts all new trades immediately                   |
+| `/resume`                    | Resumes trading after kill switch (requires confirmation)                           |
+| `/help`                      | Lists all available commands with short descriptions                                |
 
-> **Note:** `/kill` and `/resume` are destructive commands. They are logged with timestamp and
+> **Note:** `/kill`, `/resume`, and `/force_close` are destructive commands. They are logged with timestamp and
 > require confirmation. The kill switch also fires automatically when daily drawdown exceeds the
-> `halt_drawdown_pct` threshold (default: 10%).
+> configured threshold (default: 10%).
 
 ---
 
@@ -2079,6 +2358,7 @@ combine the results. Now every weight comes from `config/data_quality.yaml`.
 | Wash trading        | Checks if the same wallets keep trading with themselves                 | 1 RPC call |
 | Rug authority       | Checks if the contract has dangerous functions (mint, pause, blacklist) | 1 RPC call |
 | Contract verified   | Checks if the source code is public on Etherscan/BscScan                | 1 API call |
+| Dev reputation      | Checks if the deployer wallet has previously rugged other tokens        | 1 DB query |
 
 **What you can tune:**
 
@@ -2220,7 +2500,7 @@ size = base_size_usd × kelly_fraction × mode_multiplier × cohort_multiplier
 ```yaml
 capital:
   use_dynamic_sizing: true # Set to false to revert to fixed_entry_size_usd (emergency only)
-  base_size_usd: 50.0 # Starting point for sizing calculation
+  base_size_usd: 5.0 # Starting point for sizing calculation
   min_size_usd: 5.0 # Never allocate less than $5 (not worth gas)
   max_size_usd: 500.0 # Never allocate more than $500 per trade
 
@@ -2231,6 +2511,7 @@ capital:
     STRICT: 0.5 # In STRICT mode, halve the position size
     BALANCED: 1.0 # In BALANCED mode, normal sizing
     EXPLORATION: 1.3 # In EXPLORATION mode, 30% larger (exploring new patterns)
+    VERY_EXPLORATION: 1.5 # In VERY_EXPLORATION mode, 50% larger (maximum aggression)
 
   failure_policy:
     on_missing_probability: "reject" # "reject" or "fallback_prior"
@@ -2268,14 +2549,14 @@ The existing position parameters in `config/pipeline.yaml` still control exit be
 
 ```yaml
 position:
-  tp1_bps: 2000 # Take Profit 1: sell 50% when up 20%
-  tp2_bps: 5000 # Take Profit 2: sell rest when up 50%
-  sl_bps: 1500 # Stop Loss: sell all when down 15%
-  max_hold_seconds: 3600 # Emergency exit after 1 hour regardless of price
+  tp1_bps: 1500 # Take Profit 1: sell 50% when up 15%
+  tp2_bps: 4000 # Take Profit 2: sell rest when up 40%
+  sl_bps: 500 # Stop Loss: sell all when down 5%
+  max_hold_seconds: 300 # Emergency exit after 5 minutes — meme tokens pump or dump fast
 ```
 
 > **What changed for you:** Your stop-loss and take-profit now trigger faster. If you previously
-> set `sl_bps: 1500` and were seeing losses deeper than 15%, this improvement will help. If you
+> set `sl_bps: 500` and were seeing losses deeper than 5%, this improvement will help. If you
 > were not seeing that issue, no action is needed.
 
 ---
@@ -2314,7 +2595,7 @@ Phase 10 adds a **trailing stop** that activates only after TP1 fires:
 ```yaml
 # config/pipeline.yaml
 position:
-  tp1_bps: 2000 # Still take 50% at +20%
+  tp1_bps: 1500 # Still take 50% at +15%
   tp1_filled_pct_bps: 5000 # Sell exactly 50% at TP1
   trailing_stop_bps: 500 # Trailing stop: lock in profits — exit if price drops 5% from peak
   trailing_activate_at_tp1: true # Only activate trailing stop after TP1 is hit
@@ -2450,13 +2731,14 @@ gate rejects marginal trades that would be unprofitable under actual congestion 
 # config/pipeline.yaml
 models:
   congestion:
-    enabled: true
-    latency_anchor_ms: 200 # "Normal" latency — no adjustment below this
-    max_multiplier: 2.5 # Cap the congestion multiplier at 2.5× base slippage
+    enabled: false # Disabled by default; enable after baseline latency data is collected
+    latency_anchor_ms: 800 # "Normal" latency — no adjustment below this
+    max_multiplier: 2.0 # Cap the congestion multiplier at 2× base slippage
 ```
 
-> **Beginner note:** Leave these at defaults. The congestion multiplier is derived from the
-> RPC latency the bot measures in real time — you do not need to set a fixed value for it.
+> **Beginner note:** Leave `enabled: false` until you have at least a week of latency baseline
+> data from your RPC provider. The congestion multiplier is derived from real-time RPC latency
+> measurements — once enabled, you do not need to set a fixed value.
 
 #### 13.6.6 Simulation Diff Evaluation — `config/priority.yaml` (Layer 9→10)
 
@@ -2468,7 +2750,7 @@ the `LearningRecord` and used by the learning engine to improve future slippage 
 ```yaml
 # config/priority.yaml
 evaluation:
-  enable_simulation_diff: true # Record simulated vs realized slippage variance
+  enable_simulation_diff: false # Set true to record simulated vs realized slippage variance
 ```
 
 #### 13.6.7 Solana Hybrid Transport — `config/chains.yaml`
@@ -2484,7 +2766,7 @@ solana:
   transport:
     mode: rpc # "rpc" (default WebSocket) or "grpc"
     grpc_endpoint: "" # Required if mode=grpc: e.g. "your-triton-endpoint:443"
-    # grpc_auth_token is loaded from env var SOLANA_GRPC_AUTH_TOKEN (never put in YAML)
+    # grpc_auth_token is loaded from env var SOLANA_GRPC_TOKEN (never put in YAML)
     fallback_on_error: true # Automatically fall back to RPC if gRPC fails
     fallback_error_n: 5 # Fall back after this many consecutive gRPC errors
 ```
@@ -2580,8 +2862,6 @@ LOG_LEVEL=debug
 #### Step 2 — Start the full Docker stack
 
 ```bash
-make docker-up
-# OR
 docker compose up --build
 ```
 
@@ -2876,18 +3156,18 @@ capital:
   max_concurrent_positions: 1 # Recommended: 1 for first week
 
 position:
-  # Stop-loss — do not widen this on your first run
-  sl_bps: 1500 # 15% max loss per trade (default — do not increase)
+  # Stop-loss — do not widen this on your first run (default is -5%, tight for meme tokens)
+  sl_bps: 500 # 5% max loss per trade (default — do not increase for your first week)
 
-  # Max hold time — set conservatively
-  max_hold_seconds: 1800 # 30 minutes maximum (reduce if you see many stale positions)
+  # Max hold time — keep short for meme tokens
+  max_hold_seconds: 300 # 5 minutes maximum (raise only after validating strategy)
 ```
 
 - [ ] `fixed_entry_size_usd` ≤ 25 USD for the first week
 - [ ] `max_total_exposure_usd` ≤ 5× your entry size
 - [ ] `max_concurrent_positions` = 1 for the first week
-- [ ] `sl_bps` not wider than 1500 (15%)
-- [ ] `halt_drawdown_pct` set to 10% (the daily loss % that auto-fires the kill switch)
+- [ ] `sl_bps` not wider than 500 (5% — the default for meme tokens)
+- [ ] `max_hold_seconds` kept at 300 or below for the first week
 
 #### 4.3 — Kill Switch Functional
 
@@ -2937,7 +3217,7 @@ docker compose up --build -d  # recreates fresh database with migrations
 
 - [ ] No stuck open positions from test runs
 - [ ] Strategy version initialized in database
-- [ ] Migration count matches expected (`make migrate-up` output shows all 13 applied)
+- [ ] Migration count matches expected (`make migrate-up` output shows all 17 applied)
 
 #### 4.5 — Wallet Security
 

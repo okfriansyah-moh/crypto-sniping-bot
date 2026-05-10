@@ -157,6 +157,34 @@ func (m *Module) ProcessWithContext(
 	// observers see continuous signal evolution.
 	momentumScore := MomentumScore(in.PriceMomentum, in.VolumeMomentum)
 
+	// P7 — Bottom detection: analyse recent price slots to confirm a
+	// V-shape recovery.  Runs only when configured and price data is
+	// available.  In shadow mode the score is recorded but NOT used as a
+	// gate; this allows shadow validation before enabling as a real filter.
+	var bottomScore float64
+	var bottomSlotsAnalysed int32
+
+	if m.cfg.BottomDetection.Enabled && len(in.RecentPricesUsd) > 0 {
+		pslots := make([]PriceSlot, len(in.RecentPricesUsd))
+		for i, p := range in.RecentPricesUsd {
+			pslots[i] = PriceSlot{PriceUsd: p, SlotIndex: i}
+		}
+		sig := AnalyzeBottom(pslots, m.cfg.BottomDetection.MaxSlots)
+		bottomScore = sig.BottomDetectionScore
+		bottomSlotsAnalysed = int32(sig.SlotsAnalyzed)
+
+		// Apply as a hard gate only when NOT in shadow mode and MinScore > 0.
+		minScoreGate := m.cfg.BottomDetection.MinScore > 0
+		if !m.cfg.BottomDetection.ShadowMode && minScoreGate &&
+			chosen.edgeType != contracts.EdgeTypeNone &&
+			bottomScore < m.cfg.BottomDetection.MinScore {
+			chosen = edgeCandidate{
+				edgeType:     contracts.EdgeTypeNone,
+				rejectReason: "bottom_not_confirmed",
+			}
+		}
+	}
+
 	// Opportunity window scales with momentum_score regardless of
 	// edge type — preserves legacy semantics expected by Layer 5.
 	opportunityWindowMs := int32(
@@ -193,6 +221,10 @@ func (m *Module) ProcessWithContext(
 
 		EdgeModelVersionID: m.cfg.ModelVersion,
 		RejectReason:       chosen.rejectReason,
+
+		// P7 bottom detection (zero when subsystem is disabled or inactive).
+		BottomDetectionScore: bottomScore,
+		SlotWindowSize:       bottomSlotsAnalysed,
 	}, nil
 }
 

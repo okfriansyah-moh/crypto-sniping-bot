@@ -16,6 +16,7 @@ func TestValidateTransition_AllowedPaths(t *testing.T) {
 	cases := [][2]string{
 		{"DETECTED", "DQ_PASSED"},
 		{"DETECTED", "REJECTED"},
+		{"REJECTED", "DQ_PASSED"}, // rescan recovery
 		{"DQ_PASSED", "FEATURE_READY"},
 		{"DQ_PASSED", "REJECTED"},
 		{"FEATURE_READY", "EDGE_DETECTED"},
@@ -43,7 +44,7 @@ func TestValidateTransition_ForbiddenPaths(t *testing.T) {
 	cases := [][2]string{
 		{"DETECTED", "SELECTED"},
 		{"EVALUATED", "DETECTED"},
-		{"REJECTED", "DQ_PASSED"},
+		{"REJECTED", "FEATURE_READY"}, // REJECTED can only recover to DQ_PASSED
 		{"FAILED", "EXECUTED"},
 		{"POSITION_CLOSED", "REJECTED"},
 	}
@@ -64,8 +65,8 @@ func TestIsTerminal(t *testing.T) {
 	if !IsTerminal("EVALUATED") {
 		t.Error("EVALUATED should be terminal")
 	}
-	if !IsTerminal("REJECTED") {
-		t.Error("REJECTED should be terminal")
+	if IsTerminal("REJECTED") {
+		t.Error("REJECTED should not be terminal — rescan recovery (REJECTED→DQ_PASSED) is permitted")
 	}
 	if !IsTerminal("FAILED") {
 		t.Error("FAILED should be terminal")

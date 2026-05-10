@@ -844,6 +844,9 @@ func (m *memAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.C
 func (m *memAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
 }
+func (m *memAdapter) CountTokensByCreator(_ context.Context, _ string, _ string) (int32, error) {
+	return 0, nil
+}
 func (m *memAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
 	return 0, 0, nil
 }
@@ -857,4 +860,16 @@ func (m *memAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map[
 // Phase 10 rescan layer stub.
 func (m *memAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
+}
+
+// ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
+
+func (m *memAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.HistoricalMarketProfileDTO) error {
+	return nil
+}
+func (m *memAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
+	return nil, nil
+}
+func (m *memAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
+	return nil, nil
 }

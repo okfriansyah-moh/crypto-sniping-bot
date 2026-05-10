@@ -47,6 +47,9 @@ func (c *checkpointAdapter) GetRun(_ context.Context, _ string) (*database.Pipel
 	}
 	return c.getRun, nil
 }
+func (c *checkpointAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
+	return 0, nil
+}
 
 // ── Checkpoint ───────────────────────────────────────────────────────────────
 

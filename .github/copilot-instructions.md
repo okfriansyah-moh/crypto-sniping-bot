@@ -166,11 +166,12 @@ These rules extend the skeleton-parallel framework with the specific architectur
 
 ### Operational Modes (per `docs/architecture.md` § 7)
 
-The system runs in exactly one of three modes at any time:
+The system runs in exactly one of four modes at any time:
 
 - `STRICT` — conservative thresholds, low explore budget (≤1%)
 - `BALANCED` — default operating mode
 - `EXPLORATION` — relaxed thresholds, higher explore budget (3–5%), used for starvation recovery
+- `VERY_EXPLORATION` — maximum relaxation; auto-entered when starvation persists in EXPLORATION
 
 Mode transitions are **bounded**: one transition per window, auto-downgrade on starvation, auto-upgrade on rug/FP spike, manual override via `/mode` (logged, reversible). Values live in `config/` YAML.
 
@@ -192,6 +193,15 @@ All adaptive updates are non-negotiably:
 - **Bounded parallelism** — global semaphore, concurrency_limit ∈ [5, 20], adaptive on failure rate
 - **Idempotency keys** — each `AllocationDTO` has unique `execution_id`; duplicate submissions are dropped
 - **Multi-endpoint RPC fallback** with circuit breaker; fee bumps on stuck tx use same nonce, δ ≈ 10–20%, max 2–3 retries
+
+### Security Invariants (enforced, never relax)
+
+- **HTTPS only for Jito bundle URLs** — `NewJitoClient` rejects any non-HTTPS URL unless `shadow_mode: true` or the URL is a loopback address (`http://127.` / `http://localhost`) for test servers. Never disable this check in production code.
+- **Chain allowlist for DEXScreener** — `CopyTradeProvider` accepts only `ethereum`/`eth`, `bsc`/`bnb`, `solana`/`sol`, `base`. Unknown chains return an error (fail-closed). No passthrough allowed.
+- **gRPC auth tokens from env vars only** — `SOLANA_GRPC_TOKEN` is read exclusively via `os.Getenv`. The field `GrpcAuthToken` is intentionally absent from `TransportConfig`, `IngestionTransportConfig`, and `config/chains.yaml`. Never add it back.
+- **API keys never in YAML** — all external API keys (`BIRDEYE_API_KEY`, `TWITTER_BEARER_TOKEN`, `COPY_TRADE_WALLETS`, `JITO_BUNDLE_URL`, `JITO_TIP_ACCOUNT`, etc.) are read via `os.Getenv` at constructor only. Never log, never config-file.
+- **Response bodies are bounded** — Jito HTTP response: 64 KiB cap. DEXScreener copy-trade: 128 KiB cap. Never use `io.ReadAll` without a `LimitReader`.
+- **RPC error messages are truncated** — `truncate(msg, 200)` before surfacing in returned errors or logs. Never expose raw RPC error strings of arbitrary length.
 
 ### DTO Contract Rules (per `docs/architecture.md` § 2.1, § 4.5)
 
@@ -432,7 +442,8 @@ Skills are pre-digested knowledge packages that agents load on-demand. They live
 ├── monitoring-loop-engine/SKILL.md   # Price-driven position poll loop, kill switch first
 ├── exposure-monitor/SKILL.md         # 80% portfolio cap, 20 positions, 0.5% single limit gate
 ├── signal-normalizer/SKILL.md        # Z-score + sigmoid two-stage normalization to [-1,+1]
-└── price-feed-integration/SKILL.md   # Live price feed (EVM getAmountsOut + Solana AMM decode), GAP-02
+├── price-feed-integration/SKILL.md   # Live price feed (EVM getAmountsOut + Solana AMM decode), GAP-02
+└── production-gate-reviewer/SKILL.md # Production readiness gate — BLOCKER vs SAFE_TO_IGNORE, shadow/micro-capital/live progression
 ```
 
 ### Skill Loading Rules

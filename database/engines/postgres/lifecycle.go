@@ -46,15 +46,19 @@ func (d *DB) TransitionState(ctx context.Context, req database.TransitionRequest
 	}
 
 	var terminalReason *string
-	if req.Reason != "" && isTerminalState(req.NewState) {
+	if isTerminalState(req.NewState) && req.Reason != "" {
 		terminalReason = &req.Reason
 	}
+	// When transitioning OUT of a terminal state (e.g. REJECTED→DQ_PASSED rescan
+	// recovery), terminalReason stays nil which explicitly clears the stale reason.
+	// Using $2 directly (no COALESCE) ensures the column is always consistent with
+	// the current state rather than preserving a stale value from a prior rejection.
 
 	const q = `
 UPDATE token_lifecycle
 SET current_state   = $1,
     state_version   = state_version + 1,
-    terminal_reason = COALESCE($2, terminal_reason),
+    terminal_reason = $2,
     updated_at      = $3
 WHERE token_lifecycle_id = $4
   AND current_state      = $5
@@ -187,9 +191,14 @@ func (d *DB) scanLifecycle(row *sql.Row) (*database.Lifecycle, error) {
 
 // isValidTransition checks whether a state machine forward transition is permitted.
 // Phase 2 best-effort: any forward transition is allowed; CAS guards reject concurrent races.
+//
+// REJECTED→DQ_PASSED: rescan re-evaluation path — the rescan worker re-emits
+// market_data_event for tokens that were previously rejected (e.g. token_too_young).
+// When the token now passes DQ the lifecycle must recover forward rather than stall.
 func isValidTransition(from, to string) bool {
 	allowed := map[string][]string{
 		"DETECTED":      {"DQ_PASSED", "REJECTED"},
+		"REJECTED":      {"DQ_PASSED"}, // rescan recovery: re-evaluated token now passes
 		"DQ_PASSED":     {"FEATURE_READY", "REJECTED"},
 		"FEATURE_READY": {"EDGE_DETECTED", "REJECTED"},
 		"EDGE_DETECTED": {"VALIDATED", "REJECTED"},
@@ -219,65 +228,100 @@ func isTerminalState(state string) bool {
 	return false
 }
 
-// GetPipelineStats returns funnel counts per lifecycle state and the 10 most
-// recently detected tokens (with their ticker if available) for the given
-// window. A single GROUP BY query drives the funnel; a second JOIN query
-// fetches the recent-token list.
+// GetPipelineStats returns cumulative funnel counts and the 10 most recently
+// detected tokens for the given window.
+//
+// Counts are CUMULATIVE: each value represents "tokens that reached AT LEAST
+// this stage". DETECTED = total tokens in window. REJECTED and FAILED are
+// raw terminal counts. A single single-row aggregate query replaces the
+// former GROUP BY approach which returned point-in-time snapshot counts,
+// making the denominator (Detected) nearly always zero for fast-moving tokens.
 func (d *DB) GetPipelineStats(ctx context.Context, windowHours int) (*database.PipelineStats, error) {
 	stats := &database.PipelineStats{WindowHours: windowHours}
 
-	// ── Funnel counts ─────────────────────────────────────────────────────────
+	// ── Cumulative funnel counts ──────────────────────────────────────────────
+	// Uses a CTE to look up the "failed-from" state for each FAILED token via
+	// token_state_transitions. This lets us accurately place FAILED tokens in
+	// the funnel:
+	//   SELECTED→FAILED  = failed during execution attempt (never executed)
+	//   EXECUTED→FAILED  = failed during position-open (never opened)
+	//   POSITION_OPEN→FAILED = failed during position-close
+	// Without this, all FAILED tokens would inflate EXECUTED and POSITION_OPEN
+	// counts even when no trade was ever submitted.
 	const countQ = `
-SELECT current_state, COUNT(*)
-FROM token_lifecycle
-WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
-GROUP BY current_state`
+WITH failed_from AS (
+    -- For each FAILED token find the predecessor state.
+    -- FAILED is terminal so there is exactly one X→FAILED row per lifecycle;
+    -- DISTINCT ON + ORDER BY is a safety guard against duplicate rows.
+    SELECT DISTINCT ON (t.lifecycle_id)
+           t.lifecycle_id,
+           t.from_state
+    FROM   token_state_transitions t
+    WHERE  t.to_state = 'FAILED'
+    ORDER  BY t.lifecycle_id, t.transitioned_at DESC
+)
+SELECT
+    COUNT(*)                                                                   AS detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN ('DETECTED','REJECTED'))    AS dq_passed,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED'))                                    AS feature_ready,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY'))                    AS edge_detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED'))    AS validated,
+    -- selected: reached SELECTED or any later state (including FAILED from SELECTED+)
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+        'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED')) AS selected,
+    -- executed: actually submitted a transaction (reached EXECUTED) or failed
+    --           AFTER execution completed (EXECUTED→FAILED or POSITION_OPEN→FAILED)
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state IN ('EXECUTED','POSITION_OPEN')))                AS executed,
+    -- position_open: an on-chain position was actually opened (reached POSITION_OPEN)
+    --                or failed while managing a live position (POSITION_OPEN→FAILED)
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state = 'POSITION_OPEN'))                              AS position_open,
+    COUNT(*) FILTER (WHERE tl.current_state IN ('POSITION_CLOSED','EVALUATED'))AS position_closed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'EVALUATED')                     AS evaluated,
+    COUNT(*) FILTER (WHERE tl.current_state = 'REJECTED')                      AS rejected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED')                        AS failed,
+    -- Failure stage breakdown (sums to failed)
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'SELECTED')                                        AS failed_at_selected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'EXECUTED')                                        AS failed_at_executed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'POSITION_OPEN')                                   AS failed_at_position_open
+FROM token_lifecycle tl
+LEFT JOIN failed_from ff ON ff.lifecycle_id = tl.token_lifecycle_id
+WHERE tl.created_at >= NOW() - ($1 * INTERVAL '1 hour')`
 
-	rows, err := d.pool.QueryContext(ctx, countQ, windowHours)
-	if err != nil {
+	row := d.pool.QueryRowContext(ctx, countQ, windowHours)
+	if err := row.Scan(
+		&stats.Detected,
+		&stats.DQPassed,
+		&stats.FeatureReady,
+		&stats.EdgeDetected,
+		&stats.Validated,
+		&stats.Selected,
+		&stats.Executed,
+		&stats.PositionOpen,
+		&stats.PositionClosed,
+		&stats.Evaluated,
+		&stats.Rejected,
+		&stats.Failed,
+		&stats.FailedAtSelected,
+		&stats.FailedAtExecuted,
+		&stats.FailedAtPositionOpen,
+	); err != nil {
 		return nil, fmt.Errorf("get pipeline stats counts: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var state string
-		var cnt int64
-		if err := rows.Scan(&state, &cnt); err != nil {
-			return nil, fmt.Errorf("get pipeline stats scan: %w", err)
-		}
-		switch state {
-		case "DETECTED":
-			stats.Detected = cnt
-		case "DQ_PASSED":
-			stats.DQPassed = cnt
-		case "FEATURE_READY":
-			stats.FeatureReady = cnt
-		case "EDGE_DETECTED":
-			stats.EdgeDetected = cnt
-		case "VALIDATED":
-			stats.Validated = cnt
-		case "SELECTED":
-			stats.Selected = cnt
-		case "EXECUTED":
-			stats.Executed = cnt
-		case "POSITION_OPEN":
-			stats.PositionOpen = cnt
-		case "POSITION_CLOSED":
-			stats.PositionClosed = cnt
-		case "REJECTED":
-			stats.Rejected = cnt
-		case "FAILED":
-			stats.Failed = cnt
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("get pipeline stats rows: %w", err)
-	}
-
-	// ── Recent tokens (last 10 that passed DQ, newest first) ─────────────────
+	// ── Recent tokens (last 10, newest first) ─────────────────────────────────
 	// LEFT JOIN market_data to pick up symbol/name/chain when persisted (Solana tokens).
-	// DISTINCT ON token_address avoids duplicates when multiple market_data rows
-	// exist for the same token (e.g. multiple swap events after pool creation).
 	const recentQ = `
 SELECT tl.token_address,
        COALESCE(md.symbol, '') AS symbol,
@@ -315,6 +359,213 @@ LIMIT 10`
 	}
 	if err := rrows.Err(); err != nil {
 		return nil, fmt.Errorf("get pipeline stats recent rows: %w", err)
+	}
+
+	return stats, nil
+}
+
+// GetRescanStats returns emission counts for the rescan worker over the given
+// window, grouped by band name (extracted from the transport column prefix
+// "rescan_<band_name>"). This is a concrete method on *DB — it is NOT part
+// of the database.Adapter interface so callers use a local type assertion.
+func (d *DB) GetRescanStats(ctx context.Context, windowHours int) (*database.RescanStats, error) {
+	const q = `
+SELECT transport, COUNT(*) AS cnt
+FROM market_data
+WHERE transport LIKE 'rescan_%'
+  AND ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+GROUP BY transport
+ORDER BY cnt DESC`
+
+	rows, err := d.pool.QueryContext(ctx, q, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get rescan stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &database.RescanStats{
+		WindowHours: windowHours,
+		ByBand:      make(map[string]int64),
+	}
+	for rows.Next() {
+		var transport string
+		var cnt int64
+		if err := rows.Scan(&transport, &cnt); err != nil {
+			return nil, fmt.Errorf("get rescan stats scan: %w", err)
+		}
+		// strip "rescan_" prefix to get band name
+		band := transport
+		if len(transport) > 7 {
+			band = transport[7:] // "rescan_15m" → "15m"
+		}
+		stats.ByBand[band] = cnt
+		stats.TotalEmitted += cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get rescan stats rows: %w", err)
+	}
+	return stats, nil
+}
+
+// GetRescanPipelineStats returns a pipeline funnel snapshot for tokens that
+// were re-emitted via the rescan worker (market_data.transport LIKE 'rescan_%')
+// within the given window. Funnel semantics match GetPipelineStats: counts are
+// cumulative relative to the DETECTED base.
+//
+// This is a concrete method on *DB — it is NOT part of the database.Adapter
+// interface. Callers type-assert to rescanPipelineQueryer (defined in cmd/).
+func (d *DB) GetRescanPipelineStats(ctx context.Context, windowHours int) (*database.RescanPipelineStats, error) {
+	stats := &database.RescanPipelineStats{
+		WindowHours: windowHours,
+		ByBand:      make(map[string]int64),
+	}
+
+	// ── Funnel counts ──────────────────────────────────────────────────────────
+	// Anchored on market_data.ingested_at (rescan emission time).
+	// We JOIN token_lifecycle on token_address so we see the current pipeline
+	// state of each rescanned token regardless of when first detection happened.
+	const countQ = `
+WITH rescan_tokens AS (
+    SELECT DISTINCT token_address
+    FROM market_data
+    WHERE transport LIKE 'rescan_%'
+      AND NULLIF(ingested_at, '')::timestamptz >= NOW() - ($1::int * INTERVAL '1 hour')
+),
+failed_from AS (
+    SELECT DISTINCT ON (t.lifecycle_id)
+           t.lifecycle_id,
+           t.from_state
+    FROM   token_state_transitions t
+    WHERE  t.to_state = 'FAILED'
+    ORDER  BY t.lifecycle_id, t.transitioned_at DESC
+)
+SELECT
+    COUNT(*)                                                                    AS detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN ('DETECTED','REJECTED'))     AS dq_passed,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED'))                                     AS feature_ready,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY'))                     AS edge_detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED'))     AS validated,
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+        'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED'))
+                                                                                AS selected,
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state IN ('EXECUTED','POSITION_OPEN')))                 AS executed,
+    COUNT(*) FILTER (WHERE tl.current_state IN (
+            'POSITION_OPEN','POSITION_CLOSED','EVALUATED')
+        OR (tl.current_state = 'FAILED'
+            AND ff.from_state = 'POSITION_OPEN'))                               AS position_open,
+    COUNT(*) FILTER (WHERE tl.current_state IN ('POSITION_CLOSED','EVALUATED')) AS position_closed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'EVALUATED')                      AS evaluated,
+    COUNT(*) FILTER (WHERE tl.current_state = 'REJECTED')                       AS rejected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED')                         AS failed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'SELECTED')                                         AS failed_at_selected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'EXECUTED')                                         AS failed_at_executed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
+        AND ff.from_state = 'POSITION_OPEN')                                    AS failed_at_position_open
+FROM token_lifecycle tl
+INNER JOIN rescan_tokens rt ON rt.token_address = tl.token_address
+LEFT JOIN  failed_from   ff ON ff.lifecycle_id  = tl.token_lifecycle_id`
+
+	row := d.pool.QueryRowContext(ctx, countQ, windowHours)
+	if err := row.Scan(
+		&stats.Detected,
+		&stats.DQPassed,
+		&stats.FeatureReady,
+		&stats.EdgeDetected,
+		&stats.Validated,
+		&stats.Selected,
+		&stats.Executed,
+		&stats.PositionOpen,
+		&stats.PositionClosed,
+		&stats.Evaluated,
+		&stats.Rejected,
+		&stats.Failed,
+		&stats.FailedAtSelected,
+		&stats.FailedAtExecuted,
+		&stats.FailedAtPositionOpen,
+	); err != nil {
+		return nil, fmt.Errorf("get rescan pipeline stats counts: %w", err)
+	}
+
+	// ── Per-band emission counts ───────────────────────────────────────────────
+	// Count distinct tokens per band (not raw emission rows) so the numbers
+	// are comparable with the funnel counts above.
+	const bandQ = `
+SELECT transport, COUNT(DISTINCT token_address) AS cnt
+FROM market_data
+WHERE transport LIKE 'rescan_%'
+  AND NULLIF(ingested_at, '')::timestamptz >= NOW() - ($1::int * INTERVAL '1 hour')
+GROUP BY transport
+ORDER BY transport`
+
+	brows, err := d.pool.QueryContext(ctx, bandQ, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get rescan pipeline band counts: %w", err)
+	}
+	defer brows.Close()
+
+	for brows.Next() {
+		var transport string
+		var cnt int64
+		if err := brows.Scan(&transport, &cnt); err != nil {
+			return nil, fmt.Errorf("get rescan pipeline band scan: %w", err)
+		}
+		band := transport
+		if len(transport) > 7 {
+			band = transport[7:] // "rescan_15m" → "15m"
+		}
+		stats.ByBand[band] = cnt
+		stats.TotalEmitted += cnt
+	}
+	if err := brows.Err(); err != nil {
+		return nil, fmt.Errorf("get rescan pipeline band rows: %w", err)
+	}
+
+	// ── Recent rescanned tokens (last 10, newest rescan emission first) ────────
+	const recentQ = `
+SELECT sub.token_address,
+       COALESCE(sub.symbol, '')           AS symbol,
+       COALESCE(sub.name,   '')           AS name,
+       COALESCE(tl.current_state, '')     AS current_state,
+       COALESCE(sub.chain,  '')           AS chain,
+       sub.ingested_at
+FROM (
+    SELECT DISTINCT ON (token_address)
+           token_address, symbol, name, chain, ingested_at
+    FROM   market_data
+    WHERE  transport LIKE 'rescan_%'
+      AND  NULLIF(ingested_at, '')::timestamptz >= NOW() - ($1::int * INTERVAL '1 hour')
+    ORDER  BY token_address, ingested_at DESC
+) sub
+LEFT JOIN token_lifecycle tl ON tl.token_address = sub.token_address
+ORDER BY sub.ingested_at DESC
+LIMIT 10`
+
+	rrows, err := d.pool.QueryContext(ctx, recentQ, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get rescan pipeline recent: %w", err)
+	}
+	defer rrows.Close()
+
+	for rrows.Next() {
+		var rt database.RecentToken
+		if err := rrows.Scan(
+			&rt.TokenAddress, &rt.Symbol, &rt.Name,
+			&rt.State, &rt.Chain, &rt.DetectedAt,
+		); err != nil {
+			return nil, fmt.Errorf("get rescan pipeline recent scan: %w", err)
+		}
+		stats.Recent = append(stats.Recent, rt)
+	}
+	if err := rrows.Err(); err != nil {
+		return nil, fmt.Errorf("get rescan pipeline recent rows: %w", err)
 	}
 
 	return stats, nil

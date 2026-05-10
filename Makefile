@@ -97,6 +97,51 @@ log-analyze:
 	@[[ -n "$(LOG)" ]] || (echo "Usage: make log-analyze LOG=output/logs/raw_TIMESTAMP.log" && exit 1)
 	@bash scripts/collect_logs.sh --analyze $(LOG)
 
+# ── Production Gate Review ────────────────────────────────────────────────────
+# Collect live bot logs, compute production-gate-reviewer evidence, and write
+# a structured gate-review brief ready for the production-gate-reviewer Copilot
+# session.
+#
+# Usage:
+#   make gate-collect               # collect for 60 min (default)
+#   make gate-collect MINS=10       # quick smoke test — 10 min window
+#   make gate-collect MINS=5 SVC=bot MODE=PIPELINE_PROOF
+#   make gate-latest                # print the most recent gate brief to stdout
+#   make gate-list                  # list all gate review sessions
+#   make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log
+#
+# Output files (output/logs/):
+#   gate_raw_<TIMESTAMP>.log        — raw collected JSON log
+#   gate_brief_<TIMESTAMP>.txt      — structured gate-review brief (paste into Copilot)
+#   gate_evidence_<TIMESTAMP>.json  — machine-readable evidence snapshot
+
+MODE ?=
+
+.PHONY: gate-collect
+gate-collect:
+	@echo "Starting gate-review log collection for $(MINS) minute(s) on service '$(SVC)'..."
+	@echo "Mode override: $(if $(MODE),$(MODE),(auto-detected))"
+	@echo "Press Ctrl-C to stop early — the brief is written on exit."
+	@bash scripts/gate_review_collect.sh $(MINS) $(SVC) $(MODE)
+
+# Print the most recent gate-review brief.
+.PHONY: gate-latest
+gate-latest:
+	@ls -t output/logs/gate_brief_*.txt 2>/dev/null | head -1 | xargs cat || \
+	  echo "No gate brief files found. Run 'make gate-collect' first."
+
+# List all gate-review sessions.
+.PHONY: gate-list
+gate-list:
+	@ls -lt output/logs/gate_brief_*.txt 2>/dev/null || echo "No gate briefs yet."
+
+# Re-run analysis on a previously collected gate raw log.
+# Usage: make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log
+.PHONY: gate-analyze
+gate-analyze:
+	@[[ -n "$(LOG)" ]] || (echo "Usage: make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log" && exit 1)
+	@bash scripts/gate_review_collect.sh --analyze $(LOG) $(MODE)
+
 # ── Docker targets ────────────────────────────────────────────────────────────
 
 # Build the Docker image (does not start any services).

@@ -27,6 +27,7 @@ package ingestion_solana
 import (
 	"context"
 	"errors"
+	"os"
 	"sync/atomic"
 )
 
@@ -169,3 +170,50 @@ func (h *HybridTransport) Close() error {
 
 // UsingFallback is exposed for tests and observability.
 func (h *HybridTransport) UsingFallback() bool { return h.usingFallback.Load() }
+
+// TransportConfig is the minimal config snapshot needed by BuildTransport.
+// Maps directly to SolanaConfig.Transport in config/chains.yaml.
+// NOTE: GrpcAuthToken is intentionally absent — the auth token MUST be
+// supplied via SOLANA_GRPC_TOKEN env var only (never in YAML/git).
+type TransportConfig struct {
+	Mode            string // "rpc" | "grpc" | "hybrid"
+	GrpcEndpoint    string // hint from config; real endpoint overridden by SOLANA_GRPC_ENDPOINT env
+	FallbackOnError bool
+	FallbackErrorN  int32
+}
+
+// BuildTransport constructs the correct Transport implementation from cfg.
+// SOLANA_GRPC_ENDPOINT env var overrides the config file endpoint value.
+// SOLANA_GRPC_TOKEN env var is the sole source for the gRPC auth token —
+// it is never accepted from config files to prevent accidental secret commit.
+// Returns RpcTransport when mode=="rpc" or when gRPC endpoint is empty.
+func BuildTransport(cfg TransportConfig) Transport {
+	// Env vars are the authoritative source (MED-02: token from env only).
+	endpoint := cfg.GrpcEndpoint
+	if v := os.Getenv("SOLANA_GRPC_ENDPOINT"); v != "" {
+		endpoint = v
+	}
+	token := os.Getenv("SOLANA_GRPC_TOKEN")
+
+	rpc := NewRpcTransport()
+
+	switch cfg.Mode {
+	case "grpc":
+		if endpoint == "" {
+			// No endpoint configured — fall back to RPC silently.
+			return rpc
+		}
+		return NewGrpcTransport(endpoint, token)
+	case "hybrid":
+		if endpoint == "" {
+			return rpc
+		}
+		maxErr := cfg.FallbackErrorN
+		if maxErr <= 0 {
+			maxErr = 5
+		}
+		return NewHybridTransport(NewGrpcTransport(endpoint, token), rpc, maxErr)
+	default: // "rpc" or anything unrecognised
+		return rpc
+	}
+}

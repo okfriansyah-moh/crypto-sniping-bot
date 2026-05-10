@@ -440,3 +440,18 @@ func (s *dispatcherStubAdapter) LoadBaselines(_ context.Context, _ string) (map[
 func (s *dispatcherStubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
 }
+func (s *dispatcherStubAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
+	return 0, nil
+}
+
+// ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
+
+func (s *dispatcherStubAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.HistoricalMarketProfileDTO) error {
+	return nil
+}
+func (s *dispatcherStubAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
+	return nil, nil
+}
+func (s *dispatcherStubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
+	return nil, nil
+}
