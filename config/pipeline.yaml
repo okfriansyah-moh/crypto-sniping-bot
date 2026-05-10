@@ -375,6 +375,7 @@ rescan:
     max_buy_tax_bps: 3000
     include_passed: true
   bands:
+    # ── Phase 1: Early dense (Goal A — organic momentum, 0-8h) ──────────────
     - name: "15m"
       min_age_seconds: 900
       max_age_seconds: 1800
@@ -389,8 +390,49 @@ rescan:
       priority: 40
     - name: "1h"
       min_age_seconds: 3600
+      max_age_seconds: 5400
+      priority: 30
+    - name: "1.5h"
+      min_age_seconds: 5400
       max_age_seconds: 7200
+      priority: 28
+    - name: "2h"
+      min_age_seconds: 7200
+      max_age_seconds: 10800
+      priority: 26
+    - name: "3h"
+      min_age_seconds: 10800
+      max_age_seconds: 14400
+      priority: 24
+    - name: "4h"
+      min_age_seconds: 14400
+      max_age_seconds: 21600
+      priority: 22
+    - name: "6h"
+      min_age_seconds: 21600
+      max_age_seconds: 28800
       priority: 20
+    - name: "8h"
+      min_age_seconds: 28800
+      max_age_seconds: 43200
+      priority: 18
+    # ── Phase 2: Recovery checkpoints (Goal B+C — reversal + CEX catalyst) ──
+    - name: "12h"
+      min_age_seconds: 43200
+      max_age_seconds: 86400
+      priority: 16
+    - name: "24h"
+      min_age_seconds: 86400
+      max_age_seconds: 129600
+      priority: 14
+    - name: "36h"
+      min_age_seconds: 129600
+      max_age_seconds: 172800
+      priority: 12
+    - name: "48h"
+      min_age_seconds: 172800
+      max_age_seconds: 201600
+      priority: 10
   mode_overrides:
     STRICT:
       max_honeypot_score: 0.30

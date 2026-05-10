@@ -536,16 +536,16 @@ All values below live in `config/pipeline.yaml` unless noted.
 
 #### Layer 0.5 — Rescan Worker (`rescan:`)
 
-| Parameter                        | Default        | Description                                                                 |
-| -------------------------------- | -------------- | --------------------------------------------------------------------------- |
-| `enabled`                        | `false`        | Set `true` to activate; disabled by default                                 |
-| `interval_seconds`               | `60`           | Poll cadence — lower = faster second-chance detection                       |
-| `max_per_band_per_tick`          | `100`          | Max tokens re-emitted per age band per tick                                 |
-| `skip_open_positions`            | `true`         | Never rescan tokens already in an open position                             |
-| Bands                            | 15m/30m/45m/1h | Age windows; each band has `min_age_seconds`, `max_age_seconds`, `priority` |
-| `eligibility.max_honeypot_score` | `0.5`          | Tokens above this score are excluded from rescan                            |
-| `eligibility.max_rug_score`      | `0.65`         | Tokens above this score are excluded from rescan                            |
-| `eligibility.max_buy_tax_bps`    | `3000`         | Tokens above this tax are excluded from rescan                              |
+| Parameter                        | Default                                                                                                                                                            | Description                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `enabled`                        | `true`                                                                                                                                                             | Enabled by default; set `false` to disable                                  |
+| `interval_seconds`               | `60`                                                                                                                                                               | Poll cadence — lower = faster second-chance detection                       |
+| `max_per_band_per_tick`          | `100`                                                                                                                                                              | Max tokens re-emitted per age band per tick                                 |
+| `skip_open_positions`            | `true`                                                                                                                                                             | Never rescan tokens already in an open position                             |
+| Bands                            | **14 bands**: 15m/30m/45m/1h/1.5h/2h/3h/4h/6h/8h (Phase 1 — Goal A organic momentum, 0–8h) + 12h/24h/36h/48h (Phase 2 — Goals B+C reversal + CEX catalyst, 12–48h) | Age windows; each band has `min_age_seconds`, `max_age_seconds`, `priority` |
+| `eligibility.max_honeypot_score` | `0.5`                                                                                                                                                              | Tokens above this score are excluded from rescan                            |
+| `eligibility.max_rug_score`      | `0.65`                                                                                                                                                             | Tokens above this score are excluded from rescan                            |
+| `eligibility.max_buy_tax_bps`    | `3000`                                                                                                                                                             | Tokens above this tax are excluded from rescan                              |
 
 #### Layer 3 — Edge Detection (`edge:`)
 

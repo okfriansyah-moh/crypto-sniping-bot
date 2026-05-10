@@ -53,16 +53,18 @@ DETECT → FILTER → SCORE → SELECT → EXECUTE → EXIT → EVALUATE → ADJ
 Mapped to the 10 layers (`docs/architecture.md` § 3):
 
 ```
-Layer 1  Data Quality Engine        (reject manipulation, honeypots, rugs)
-Layer 2  Feature Extraction         (normalized FeatureDTO + FeatureConfidence)
-Layer 3  Signal & Edge Discovery    (NEW_LAUNCH_EDGE, adaptive momentum threshold)
-Layer 4  Probability/Slippage/Latency Models
-Layer 5  Edge Validation            (EV gate, adaptive thresholds)
-Layer 6  Selection Engine           (Top-K greedy + diversity + exploration band)
-Layer 7  Capital Engine             (size ∝ Score × P × Confidence, cohort multipliers)
-Layer 8  Execution Engine           (wallet sharding, prebuilt calldata, bounded parallelism)
-Layer 9  Position Engine            (TP1/TP2/SL/TIME, adaptive per cohort)
-Layer 10 Learning Engine            (FP/FN, cohort analysis, bounded updates)
+Layer 0   Data Ingestion            (DEX events, new pool detection, MarketDataDTO)
+Layer 0.5 Rescan Worker             (re-emit market_data_event at 14 age bands: 15m→48h; see § Rescan Worker)
+Layer 1   Data Quality Engine       (reject manipulation, honeypots, rugs)
+Layer 2   Feature Extraction        (normalized FeatureDTO + FeatureConfidence)
+Layer 3   Signal & Edge Discovery   (NEW_LAUNCH_EDGE, adaptive momentum threshold)
+Layer 4   Probability/Slippage/Latency Models
+Layer 5   Edge Validation           (EV gate, adaptive thresholds)
+Layer 6   Selection Engine          (Top-K greedy + diversity + exploration band)
+Layer 7   Capital Engine            (size ∝ Score × P × Confidence, cohort multipliers)
+Layer 8   Execution Engine          (wallet sharding, prebuilt calldata, bounded parallelism)
+Layer 9   Position Engine           (TP1/TP2/SL/TIME, adaptive per cohort)
+Layer 10  Learning Engine           (FP/FN, cohort analysis, bounded updates)
 ```
 
 ### Core Invariant (do not violate)
@@ -149,6 +151,18 @@ These rules extend the skeleton-parallel framework with the specific architectur
 - The pipeline runs **one independent instance per market** (`eth-uniswap-v2`, `bsc-pancake-v2`, etc.)
 - No cross-market coupling — each market has isolated configs, workers, checkpoints
 - Horizontal scalability = add more market workers; no shared mutable state
+
+### Rescan Worker — Layer 0.5 (per `docs/architecture.md` § 3.0.5, `docs/RESCAN_PLAN.md`)
+
+- **Pure DB reader + event emitter** — no RPC, no on-chain calls, no private keys, no new event types or DTOs
+- Re-emits `market_data_event` at **14 fixed age bands (15m → 48h)** across two phases:
+  - **Phase 1** (Goal A — organic momentum, 0–8h): 15m / 30m / 45m / 1h / 1.5h / 2h / 3h / 4h / 6h / 8h
+  - **Phase 2** (Goals B+C — reversal + CEX catalyst, 12–48h): 12h / 24h / 36h / 48h
+- **EventID** = `SHA256(chain ‖ token_address ‖ band_name ‖ bucket_ts)[:16]` — content-addressable, idempotent via `ON CONFLICT DO NOTHING`
+- **Eligibility is SQL-side only** — honeypot_score, rug_score, buy_tax_bps filters plus open-position skip; mode-adaptive thresholds
+- **Transport tag** = `"rescan_<band_name>"` (e.g. `"rescan_8h"`) on every re-emitted `MarketDataDTO`
+- **Fully generic**: worker iterates `cfg.Rescan.Bands` at runtime — add/remove bands via `config/pipeline.yaml` only, no code changes
+- **Configured in:** `config/pipeline.yaml` → `rescan:` block (enabled by default); defaults in `internal/app/config/rescan_config.go`
 
 ### Telegram via Event Bus Only (per `docs/architecture.md` § 2.5, § 4.4)
 

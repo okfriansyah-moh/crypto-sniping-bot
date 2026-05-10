@@ -1,8 +1,8 @@
-# PLAN.md — Time-Banded Rescan Layer (Option C)
+# PLAN.md — Time-Banded Rescan Layer (14-Band, 0–48h Coverage)
 
-> **Version:** 1.0
-> **Date:** May 3, 2026
-> **Status:** Ready for Implementation (Phase 10 — Group G)
+> **Version:** 2.0
+> **Date:** May 10, 2026 (v1.0: May 3, 2026 — 4 bands; v2.0: May 10, 2026 — extended to 14 bands, 48h coverage)
+> **Status:** Implemented (Phase 10 — Group G, fully extended)
 > **Source of Truth:** `docs/architecture.md`, `docs/PROFITABILITY_GAPS.md`, `.github/copilot-instructions.md`
 > **Related design notes:** `docs/specs/2026-05-03-time-banded-rescan-design.md` (this file is the executable spec)
 > **Runnable via:** `./scripts/run_parallel.sh start --mode=2 10`
@@ -11,13 +11,17 @@
 
 ## 1. Goal
 
-Add a **second scanning track** to the pipeline that re-emits eligible tokens at fixed age bands (15m / 30m / 45m / 1h after first detection) so the existing `MOMENTUM_EDGE` path can capture alpha that the `NEW_LAUNCH_EDGE` path missed.
+Add a **second scanning track** to the pipeline that re-emits eligible tokens at **14 fixed age bands spanning 0–48h** after first detection, so the existing `MOMENTUM_EDGE` path can capture alpha that the `NEW_LAUNCH_EDGE` path missed across three distinct alpha windows:
+
+- **Goal A** — Organic momentum buildup (0–8h): early-phase community growth, volume accumulation, and `MOMENTUM_EDGE` ignition on pump.fun and Raydium tokens that were illiquid at t=0.
+- **Goal B** — Stalled position reversal (8–24h): tokens already held that show recovery from a temporary dip; rescan provides a second evaluation point for the DQ → Edge → Validation stack.
+- **Goal C** — Post-dip recovery and CEX catalyst window (24–48h): macro reversal rescans, exchange listing rumor detection, and narrative-driven second-wave momentum (data: PNUT=11d, GOAT=37d, WIF=81d to $1B — second-wave alpha is real).
 
 The capability is implemented as **one new periodic worker** that re-emits `market_data_event` for tokens whose first scan was _temporally_ unfavourable but not _structurally_ malicious. The downstream pipeline (DQ → Features → Edge → Validation → Selection → Capital → Execution → Position → Learning) is **completely unchanged** and processes rescanned tokens identically to fresh ones.
 
 **Why** (priority order — explicit per operator):
 
-1. **Profit first.** Today the pipeline only sees a token once. Tokens that are illiquid at minute 0 but build organic momentum by minute 30 are invisible. This unlocks the `MOMENTUM_EDGE` taxonomy that already exists in `internal/modules/edge/` but rarely fires because no event re-arrives to trigger it.
+1. **Profit first.** Today the pipeline only sees a token once. Tokens that build organic momentum over 2–8h are invisible after first detection. 14 bands across 48h unlocks `MOMENTUM_EDGE` opportunities at every alpha cluster identified in memecoin lifecycle data. See § 1.1 for data-driven band design rationale.
 2. **Security second.** No new attack surface. The rescan worker is a pure DB reader + event emitter — it makes no RPC calls, holds no keys, executes no transactions.
 3. **Capital protection third.** Filters out tokens with structural reject signatures (honeypot, high tax, rug score) so capital is never re-exposed to known-bad contracts. Skips tokens already in open positions to prevent double-entry.
 
@@ -27,6 +31,50 @@ The capability is implemented as **one new periodic worker** that re-emits `mark
 - Not changing DQ, Features, Edge, Validation, Selection, Capital, Execution, Position, or Learning modules.
 - Not adding probe/RPC re-fetch on rescan (separate future work — see § 11 Future Work).
 - Not introducing new database engines or breaking the modular-monolith invariant.
+
+---
+
+## 1.1 Band Design Rationale (Data-Driven)
+
+Band density is calibrated to historical memecoin alpha windows derived from Solana memecoin lifecycle data (100 tokens, Tier 1–10, May 2026 research):
+
+| Alpha Window | Tokens                                  | Pattern                                     | Band Coverage                    |
+| ------------ | --------------------------------------- | ------------------------------------------- | -------------------------------- |
+| 0–6h         | Tier 9–10 (CHILLGUY, WOJAK, FAP)        | Explode fast, die fast                      | 15m / 30m / 45m / 1h / 1.5h / 2h |
+| 30m–8h       | Tier 3–6 (MICHI, GIGA, FWOG, CHAD)      | pump.fun organic momentum buildup           | 2h / 3h / 4h / 6h / 8h           |
+| 2h–48h       | Tier 4–5 (GOAT 37d, MEW 214d)           | Narrative builds over days                  | 8h / 12h / 24h                   |
+| 6h–48h+      | Tier 1–2 (WIF 81d, PNUT 11d, BONK 356d) | CEX listing catalysts, second-wave momentum | 12h / 24h / 36h / 48h            |
+
+**Key finding:** Uniform 15-minute intervals from 0–48h (192 events/token) have ~90% noise in the 8h–24h dead zone. Sparse bands with variable density concentrate rescan compute where historical data shows alpha clusters. The 14-band design reduces event volume by **93%** vs uniform 15m while maintaining full coverage of all alpha windows.
+
+**Band structure (14 bands total):**
+
+```
+Phase 1 — Early dense (Goal A: organic momentum, 0–8h):
+  15m → 30m → 45m → 1h → 1.5h → 2h → 3h → 4h → 6h → 8h
+
+Phase 2 — Recovery checkpoints (Goals B+C: reversal + CEX catalyst, 12–48h):
+  12h → 24h → 36h → 48h
+```
+
+**Age windows (seconds):**
+
+| Band | MinAge (s) | MaxAge (s) | Width | Priority | Goal |
+| ---- | ---------- | ---------- | ----- | -------- | ---- |
+| 15m  | 900        | 1800       | 15m   | 80       | A    |
+| 30m  | 1800       | 2700       | 15m   | 60       | A    |
+| 45m  | 2700       | 3600       | 15m   | 40       | A    |
+| 1h   | 3600       | 5400       | 30m   | 30       | A    |
+| 1.5h | 5400       | 7200       | 30m   | 28       | A    |
+| 2h   | 7200       | 10800      | 1h    | 26       | A    |
+| 3h   | 10800      | 14400      | 1h    | 24       | A    |
+| 4h   | 14400      | 21600      | 2h    | 22       | A    |
+| 6h   | 21600      | 28800      | 2h    | 20       | A    |
+| 8h   | 28800      | 43200      | 4h    | 18       | A+B  |
+| 12h  | 43200      | 86400      | 12h   | 16       | B    |
+| 24h  | 86400      | 129600     | 12h   | 14       | B+C  |
+| 36h  | 129600     | 172800     | 12h   | 12       | C    |
+| 48h  | 172800     | 201600     | 8h    | 10       | C    |
 
 ---
 
@@ -233,7 +281,7 @@ type RescanBand struct {
 }
 ```
 
-**Defaults (in `applyRescanDefaults`):**
+**Defaults (in `applyRescanDefaults`) — 14-band design (v2.0):**
 
 ```go
 // Disabled by default — operators must opt in.
@@ -241,16 +289,29 @@ Enabled:           false,
 IntervalSeconds:   60,
 SkipOpenPositions: true,
 Eligibility:       { MaxHoneypotScore: 0.5, MaxRugScore: 0.65, MaxBuyTaxBps: 3000, IncludePassed: true },
+// Phase 1 — Early dense (Goal A: organic momentum, 0-8h)
+// Phase 2 — Recovery checkpoints (Goals B+C: reversal + CEX catalyst, 12-48h)
 Bands: [
-  { Name: "15m", MinAgeSeconds: 900,  MaxAgeSeconds: 1800,  Priority: 80 },
-  { Name: "30m", MinAgeSeconds: 1800, MaxAgeSeconds: 2700,  Priority: 60 },
-  { Name: "45m", MinAgeSeconds: 2700, MaxAgeSeconds: 3600,  Priority: 40 },
-  { Name: "1h",  MinAgeSeconds: 3600, MaxAgeSeconds: 7200,  Priority: 20 },
+  { Name: "15m",  MinAgeSeconds: 900,    MaxAgeSeconds: 1800,   Priority: 80 },
+  { Name: "30m",  MinAgeSeconds: 1800,   MaxAgeSeconds: 2700,   Priority: 60 },
+  { Name: "45m",  MinAgeSeconds: 2700,   MaxAgeSeconds: 3600,   Priority: 40 },
+  { Name: "1h",   MinAgeSeconds: 3600,   MaxAgeSeconds: 5400,   Priority: 30 },
+  { Name: "1.5h", MinAgeSeconds: 5400,   MaxAgeSeconds: 7200,   Priority: 28 },
+  { Name: "2h",   MinAgeSeconds: 7200,   MaxAgeSeconds: 10800,  Priority: 26 },
+  { Name: "3h",   MinAgeSeconds: 10800,  MaxAgeSeconds: 14400,  Priority: 24 },
+  { Name: "4h",   MinAgeSeconds: 14400,  MaxAgeSeconds: 21600,  Priority: 22 },
+  { Name: "6h",   MinAgeSeconds: 21600,  MaxAgeSeconds: 28800,  Priority: 20 },
+  { Name: "8h",   MinAgeSeconds: 28800,  MaxAgeSeconds: 43200,  Priority: 18 },
+  { Name: "12h",  MinAgeSeconds: 43200,  MaxAgeSeconds: 86400,  Priority: 16 },
+  { Name: "24h",  MinAgeSeconds: 86400,  MaxAgeSeconds: 129600, Priority: 14 },
+  { Name: "36h",  MinAgeSeconds: 129600, MaxAgeSeconds: 172800, Priority: 12 },
+  { Name: "48h",  MinAgeSeconds: 172800, MaxAgeSeconds: 201600, Priority: 10 },
 ],
 ModeOverrides: {
-  "STRICT":      { MaxHoneypotScore: 0.30, MaxRugScore: 0.50, MaxBuyTaxBps: 1500, IncludePassed: false },
-  "BALANCED":    {} /* uses defaults */,
-  "EXPLORATION": { MaxHoneypotScore: 0.60, MaxRugScore: 0.75, MaxBuyTaxBps: 4500, IncludePassed: true  },
+  "STRICT":           { MaxHoneypotScore: 0.30, MaxRugScore: 0.50, MaxBuyTaxBps: 1500, IncludePassed: false },
+  "BALANCED":         {} /* uses defaults */,
+  "EXPLORATION":      { MaxHoneypotScore: 0.60, MaxRugScore: 0.75, MaxBuyTaxBps: 4500, IncludePassed: true  },
+  "VERY_EXPLORATION": { MaxHoneypotScore: 0.75, MaxRugScore: 0.85, MaxBuyTaxBps: 6000, IncludePassed: true  },
 },
 ```
 

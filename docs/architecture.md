@@ -1663,6 +1663,97 @@ Layer 1 (Data Quality Engine) is the first layer that applies business logic to 
 
 ---
 
+## 3.0.5 Rescan Worker (Layer 0.5)
+
+Layer 0.5 sits between the raw ingestion layer (Layer 0) and the Data Quality Engine (Layer 1). It is a **pure DB reader plus event emitter** — no RPC calls, no on-chain access, no private keys, no new event types. It is intentionally the cheapest possible second-pass mechanism.
+
+### 3.0.5.1 Purpose
+
+Re-emit `market_data_event` for tokens at fixed age bands after first detection, enabling the existing `MOMENTUM_EDGE` path to capture alpha windows that `NEW_LAUNCH_EDGE` missed at t=0:
+
+- **Goal A** — Organic momentum buildup (0–8h): early community growth, volume accumulation on pump.fun and Raydium tokens that were illiquid at first detection.
+- **Goal B** — Stalled position reversal (8–24h): second evaluation point for tokens already held or previously filtered.
+- **Goal C** — Post-dip recovery and CEX catalyst window (24–48h): macro reversal, exchange listing rumor detection, second-wave narrative momentum.
+
+### 3.0.5.2 14-Band Design
+
+Band density is calibrated to historical memecoin alpha windows. Phase 1 provides dense coverage of the critical early momentum window; Phase 2 sparse coverage of the recovery and catalyst windows.
+
+```
+Phase 1 — Early dense (Goal A, 0–8h):
+  15m → 30m → 45m → 1h → 1.5h → 2h → 3h → 4h → 6h → 8h
+
+Phase 2 — Recovery checkpoints (Goals B+C, 12–48h):
+  12h → 24h → 36h → 48h
+```
+
+| Band | Age Window (s)  | Priority | Goal |
+| ---- | --------------- | -------- | ---- |
+| 15m  | 900 – 1800      | 80       | A    |
+| 30m  | 1800 – 2700     | 60       | A    |
+| 45m  | 2700 – 3600     | 40       | A    |
+| 1h   | 3600 – 5400     | 30       | A    |
+| 1.5h | 5400 – 7200     | 28       | A    |
+| 2h   | 7200 – 10800    | 26       | A    |
+| 3h   | 10800 – 14400   | 24       | A    |
+| 4h   | 14400 – 21600   | 22       | A    |
+| 6h   | 21600 – 28800   | 20       | A    |
+| 8h   | 28800 – 43200   | 18       | A+B  |
+| 12h  | 43200 – 86400   | 16       | B    |
+| 24h  | 86400 – 129600  | 14       | B+C  |
+| 36h  | 129600 – 172800 | 12       | C    |
+| 48h  | 172800 – 201600 | 10       | C    |
+
+### 3.0.5.3 EventID and Idempotency
+
+```
+EventID = SHA256(chain ‖ token_address ‖ band_name ‖ bucket_ts)[:16]
+bucket_ts = floor(unix_now / interval_seconds) * interval_seconds
+```
+
+The content-addressable ID guarantees idempotency: `INSERT INTO events ... ON CONFLICT (event_id) DO NOTHING`. Running the worker twice in the same interval window produces zero duplicate events.
+
+### 3.0.5.4 Eligibility (SQL-side)
+
+Eligibility is evaluated at query time in the database engine — never in worker code — to ensure determinism and prevent stale in-memory thresholds.
+
+Filters applied (non-negotiable):
+
+- `honeypot_score ≤ max_honeypot_score` (mode-adaptive)
+- `rug_score ≤ max_rug_score` (mode-adaptive)
+- `buy_tax_bps ≤ max_buy_tax_bps` (mode-adaptive)
+- Skip tokens where `skip_open_positions = true` AND token has an open position
+- Structural rejects (honeypot confirmed = true) are always excluded regardless of mode
+
+Mode thresholds adapt automatically:
+
+| Mode             | MaxHoneypot | MaxRug | MaxBuyTaxBps |
+| ---------------- | ----------- | ------ | ------------ |
+| STRICT           | 0.30        | 0.50   | 1500         |
+| BALANCED         | 0.50        | 0.65   | 3000         |
+| EXPLORATION      | 0.60        | 0.75   | 4500         |
+| VERY_EXPLORATION | 0.75        | 0.85   | 6000         |
+
+### 3.0.5.5 Transport Tag
+
+```
+MarketDataDTO.Transport = "rescan_<band_name>"
+```
+
+Examples: `"rescan_15m"`, `"rescan_8h"`, `"rescan_48h"`. Used by log-reviewer analytics and the Learning Engine to attribute edges to the rescan track.
+
+### 3.0.5.6 Key Invariants
+
+- **No new event types** — re-emits only `market_data_event` (existing type)
+- **No new DTOs** — uses `contracts.MarketDataDTO` exactly as Layer 0 produces it
+- **No RPC calls** — pure SQL read from existing `market_data` table
+- **No module coupling** — worker in `internal/workers/run_rescan.go`; no imports from `internal/modules/`
+- **Fully generic** — iterates `cfg.Rescan.Bands` at runtime; add/remove bands via `config/pipeline.yaml` only, no code changes required
+- **Configured in:** `config/pipeline.yaml` → `rescan:` block; defaults in `internal/app/config/rescan_config.go`
+- **Full design:** `docs/RESCAN_PLAN.md`
+
+---
+
 ## 3.1 Data Quality Engine (Layer 1)
 
 ### 3.1.1 Responsibilities
