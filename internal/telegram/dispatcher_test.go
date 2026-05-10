@@ -450,7 +450,7 @@ func (s *dispatcherStubAdapter) UpsertHistoricalProfile(_ context.Context, _ con
 	return nil
 }
 func (s *dispatcherStubAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
-	return nil, database.ErrNotFound
+	return nil, nil
 }
 func (s *dispatcherStubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil

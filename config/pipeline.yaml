@@ -29,10 +29,10 @@ logging:
 
 edge:
   min_velocity_score: 0.3 # minimum tx velocity score to detect edge
-  min_liquidity_score:
-    0.55 # minimum liquidity score; 0.55 blocks cold-start tokens (z=0 → score=0.5)
-    # At 15m rescan, tokens with ANY real SOL buys score ≈1.0 due to sigma-floor
-    # binary behaviour — only tokens with actual buyer activity pass
+  # Minimum liquidity score; 0.55 blocks cold-start tokens (z=0 → score=0.5).
+  # At 15m rescan, tokens with any real SOL buys score ~=1.0 due to sigma-floor.
+  # Binary behavior: only tokens with actual buyer activity pass.
+  min_liquidity_score: 0.55
   max_age_seconds: 300 # token age ceiling for NEW_LAUNCH rule (5 min)
   base_window_ms: 4000 # base opportunity window in milliseconds
   window_momentum_factor: 0.5 # scales window by edge strength
@@ -44,10 +44,9 @@ edge:
   max_creator_rug_count: 0 # reject if creator wallet has ≥N prior rugs (0=off)
   min_dev_wallet_age_seconds: 0 # reject if creator wallet age < N seconds (0=off)
   # ── F-4 fix: edge taxonomy + adaptive momentum threshold ────────────────────
-  new_launch_window_seconds:
-    7200 # pool-age ceiling for NEW_LAUNCH_EDGE (2 h)
-    # Extended so rescan tokens (15m–1h age) still use NEW_LAUNCH_EDGE
-    # instead of MOMENTUM_EDGE (which requires WashStats unavailable for pump.fun)
+  # Extended so rescan tokens (15m–1h age) still use NEW_LAUNCH_EDGE
+  # instead of MOMENTUM_EDGE (which requires WashStats unavailable for pump.fun).
+  new_launch_window_seconds: 7200 # pool-age ceiling for NEW_LAUNCH_EDGE (2 h)
   min_contract_safety: 0.0 # NEW_LAUNCH safety floor (defence-in-depth)
   new_launch_weight_liquidity: 0.4
   new_launch_weight_safety: 0.3
@@ -363,7 +362,7 @@ probes:
     max_body_bytes: 65536 # 64 KiB
 
 # Phase 10 — time-banded rescan worker (Layer 0.5).
-# Disabled by default. Set enabled: true when Phase 9 DQ sub-scores are live.
+# Enabled by default for Phase 10+ pipelines.
 # See docs/PLAN.md for full design rationale.
 rescan:
   enabled: true

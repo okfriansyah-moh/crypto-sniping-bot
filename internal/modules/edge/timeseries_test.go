@@ -149,3 +149,42 @@ func TestAnalyzeBottom_ScoreInRange(t *testing.T) {
 		}
 	}
 }
+
+// TestAnalyzeBottom_LeadingInvalidSlotsIgnored verifies the algorithm skips
+// non-positive leading slots and still analyzes the valid subsequence.
+func TestAnalyzeBottom_LeadingInvalidSlotsIgnored(t *testing.T) {
+	sig := edge.AnalyzeBottom(slots(0, -1, 1.0, 0.7, 0.8, 1.1), 20)
+	if sig.BottomDetectionScore <= 0 {
+		t.Errorf("expected positive score after valid recovery, got %f", sig.BottomDetectionScore)
+	}
+	if sig.SlotsAnalyzed != 6 {
+		t.Errorf("expected SlotsAnalyzed=6, got %d", sig.SlotsAnalyzed)
+	}
+}
+
+// TestAnalyzeBottom_AllInvalidSlots_ZeroScore verifies the algorithm returns
+// no-signal when every slot has non-positive price.
+func TestAnalyzeBottom_AllInvalidSlots_ZeroScore(t *testing.T) {
+	sig := edge.AnalyzeBottom(slots(0, -1, 0), 20)
+	if sig.BottomDetectionScore != 0 {
+		t.Errorf("expected score=0 for all invalid slots, got %f", sig.BottomDetectionScore)
+	}
+}
+
+// TestAnalyzeBottom_TrailingInvalidSlotIgnored ensures a trailing invalid
+// sample does not erase a valid recovery signal from the latest valid slot.
+func TestAnalyzeBottom_TrailingInvalidSlotIgnored(t *testing.T) {
+	sig := edge.AnalyzeBottom(slots(1.0, 0.7, 0.95, 0), 20)
+	if sig.BottomDetectionScore <= 0 {
+		t.Errorf("expected positive score with trailing invalid slot, got %f", sig.BottomDetectionScore)
+	}
+}
+
+// TestAnalyzeBottom_StillDescendingOnLastValidSlot ensures the detector treats
+// the sequence as descending when the trough is the final valid slot.
+func TestAnalyzeBottom_StillDescendingOnLastValidSlot(t *testing.T) {
+	sig := edge.AnalyzeBottom(slots(1.0, 0.8, 0.6, 0), 20)
+	if sig.BottomDetectionScore != 0 {
+		t.Errorf("expected score=0 when trough is last valid slot, got %f", sig.BottomDetectionScore)
+	}
+}

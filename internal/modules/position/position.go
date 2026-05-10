@@ -256,7 +256,21 @@ func (m *Module) PollExitWithVolume(
 
 			// P6: dynamic trailing overrides the flat TrailingStopBps when enabled.
 			if m.dynamicTrail != nil && m.dynamicTrail.Len() > 0 {
-				gainBps := int32((currentPrice-entryPrice)/entryPrice*10000.0 + 0.5)
+				gainBpsFloat := (currentPrice - entryPrice) / entryPrice * 10000.0
+				const maxBps = float64(math.MaxInt32)
+				const minBps = float64(math.MinInt32)
+				switch {
+				case gainBpsFloat > maxBps:
+					gainBpsFloat = maxBps
+				case gainBpsFloat < minBps:
+					gainBpsFloat = minBps
+				}
+
+				gainBps := int32(math.Round(gainBpsFloat))
+				if gainBpsFloat < 0 && gainBps == 0 {
+					// Preserve negative sign near zero to avoid accidental tier activation.
+					gainBps = -1
+				}
 				tieredBps := m.dynamicTrail.TrailBpsForGain(gainBps)
 
 				cfg := m.cfg
@@ -268,11 +282,6 @@ func (m *Module) PollExitWithVolume(
 					if tieredBps < activeTrailBps {
 						activeTrailBps = tieredBps
 					}
-				}
-				// Shadow: tieredBps computed above but activeTrailBps unchanged;
-				// the computed value is observable via structured logs below.
-				if tieredBps > 0 {
-					_ = tieredBps // logged below
 				}
 			}
 

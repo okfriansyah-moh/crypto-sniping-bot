@@ -71,12 +71,29 @@ func RunRescan(
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-triggerCh:
+		case _, ok := <-triggerCh:
+			if !ok {
+				// Closed trigger channel must be detached; otherwise select would
+				// spin this branch immediately and force infinite rescans.
+				triggerCh = nil
+				logger.Warn("rescan_trigger_channel_closed")
+				continue
+			}
 			// Force-triggered by operator /rescan command.
 			// Drain any additional queued triggers before running the tick
 			// so a rapid double-tap does not fire two back-to-back cycles.
-			for len(triggerCh) > 0 {
-				<-triggerCh
+		drainLoop:
+			for {
+				select {
+				case _, ok := <-triggerCh:
+					if !ok {
+						triggerCh = nil
+						logger.Warn("rescan_trigger_channel_closed")
+						break drainLoop
+					}
+				default:
+					break drainLoop
+				}
 			}
 			t := time.Now().UTC()
 			logger.Info("rescan_force_triggered")

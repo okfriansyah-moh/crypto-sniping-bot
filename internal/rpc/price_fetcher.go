@@ -119,8 +119,8 @@ type dexScreenerResponse struct {
 	} `json:"pairs"`
 }
 
-// parseDEXScreenerPrice extracts priceNative from the first pair with non-zero
-// liquidity. Falls back to the first pair if no liquidity field is present.
+// parseDEXScreenerPrice extracts the first non-empty, non-zero priceNative
+// from the pair list.
 //
 // Returns ("", nil) when no pairs are found — this is not an error; it means
 // the token has not yet been indexed by DEXScreener.
@@ -133,9 +133,8 @@ func parseDEXScreenerPrice(body []byte) (string, error) {
 		return "", nil // not indexed yet — safe non-error empty
 	}
 
-	// Prefer the pair with the highest liquidity (first non-empty priceNative).
-	// DEXScreener returns pairs ordered by liquidity descending on most chains,
-	// so taking the first valid entry is an O(1) safe approximation.
+	// Prefer the first valid priceNative entry. Pair ordering is upstream-defined,
+	// and this parser intentionally stays deterministic and allocation-free.
 	for _, pair := range r.Pairs {
 		if pair.PriceNative != "" && pair.PriceNative != "0" {
 			return pair.PriceNative, nil

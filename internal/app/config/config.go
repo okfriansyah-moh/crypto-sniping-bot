@@ -191,7 +191,8 @@ type BottomDetectionConfig struct {
 	ShadowMode bool `yaml:"shadow_mode"`
 
 	// MaxSlots is the sliding-window size (default 20).
-	// Capped at 20 by the algorithm; larger values are silently clamped.
+	// Values > 20 are accepted; the algorithm trims only when the sampled
+	// series length exceeds max_slots.
 	MaxSlots int `yaml:"max_slots"`
 
 	// MinScore is the minimum BottomDetectionScore required to pass when

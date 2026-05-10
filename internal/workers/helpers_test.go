@@ -806,7 +806,7 @@ func (s *stubAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.His
 	return nil
 }
 func (s *stubAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
-	return nil, database.ErrNotFound
+	return nil, nil
 }
 func (s *stubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil

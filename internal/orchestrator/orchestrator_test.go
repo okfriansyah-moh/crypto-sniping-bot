@@ -526,7 +526,7 @@ func (m *mockAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.His
 	return nil
 }
 func (m *mockAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
-	return nil, database.ErrNotFound
+	return nil, nil
 }
 func (m *mockAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil

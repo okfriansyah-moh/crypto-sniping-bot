@@ -868,7 +868,7 @@ func (m *memAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.Hist
 	return nil
 }
 func (m *memAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contracts.HistoricalMarketProfileDTO, error) {
-	return nil, database.ErrNotFound
+	return nil, nil
 }
 func (m *memAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil

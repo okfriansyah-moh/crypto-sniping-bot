@@ -87,23 +87,48 @@ func AnalyzeBottom(slots []PriceSlot, maxSlots int) BottomSignal {
 		return BottomSignal{SlotsAnalyzed: n}
 	}
 
-	// Locate the trough (global minimum price).
-	troughIdx := 0
-	troughPrice := slots[0].PriceUsd
-	for i := 1; i < n; i++ {
-		if slots[i].PriceUsd < troughPrice && slots[i].PriceUsd > 0 {
+	// Find the first valid slot (>0) to seed open/trough deterministically.
+	openIdx := -1
+	for i := 0; i < n; i++ {
+		if slots[i].PriceUsd > 0 {
+			openIdx = i
+			break
+		}
+	}
+	if openIdx == -1 {
+		return BottomSignal{SlotsAnalyzed: n}
+	}
+
+	// Locate the trough (global minimum valid price) from the first valid open.
+	troughIdx := openIdx
+	troughPrice := slots[openIdx].PriceUsd
+	for i := openIdx + 1; i < n; i++ {
+		if slots[i].PriceUsd > 0 && slots[i].PriceUsd < troughPrice {
 			troughPrice = slots[i].PriceUsd
 			troughIdx = i
 		}
 	}
 
+	// Use the latest valid slot as terminal point; trailing invalid values
+	// should not suppress a real recovery signal.
+	lastValidIdx := -1
+	for i := n - 1; i >= openIdx; i-- {
+		if slots[i].PriceUsd > 0 {
+			lastValidIdx = i
+			break
+		}
+	}
+	if lastValidIdx == -1 {
+		return BottomSignal{SlotsAnalyzed: n}
+	}
+
 	// The trough must not be the last slot — recovery must have started.
-	if troughIdx == n-1 {
+	if troughIdx == lastValidIdx {
 		return BottomSignal{SlotsAnalyzed: n} // still descending
 	}
 
-	openPrice := slots[0].PriceUsd
-	lastPrice := slots[n-1].PriceUsd
+	openPrice := slots[openIdx].PriceUsd
+	lastPrice := slots[lastValidIdx].PriceUsd
 
 	if openPrice <= 0 || troughPrice <= 0 {
 		return BottomSignal{SlotsAnalyzed: n}
