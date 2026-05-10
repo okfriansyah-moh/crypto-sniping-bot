@@ -24,6 +24,10 @@
    - [EVM Wallet Private Key](#33-crypto-wallet-private-key)
    - [Solana RPC Endpoints (Phase 7)](#34-solana-rpc-endpoints-phase-7)
    - [Solana Wallet Keypair (Phase 7)](#35-solana-wallet-keypair-phase-7)
+   - [BirdEye API Key (Phase 9 — optional)](#36-birdeye-api-key-phase-9--optional)
+   - [Jito Bundle Credentials (Phase 11 — optional)](#37-jito-bundle-credentials-phase-11--optional)
+   - [Solana gRPC Credentials (Phase 11 — optional)](#38-solana-grpc-transport-credentials-phase-11--optional)
+   - [Copy-Trade Alpha Wallets (Phase 9 — optional)](#39-copy-trade-alpha-wallets-phase-9--optional)
 4. [Clone the Repository](#4-clone-the-repository)
 5. [Configure the Application](#5-configure-the-application)
    - [Create .env File](#51-create-env-file--all-environment-variables)
@@ -264,16 +268,21 @@ git --version
 
 ## 3. Obtaining All Required Credentials
 
-You need up to five types of credentials:
+You need up to nine types of credentials:
 
 1. **EVM RPC endpoint URLs** — to read from and write to Ethereum and BSC
 2. **Telegram Bot Token + Chat ID** — to receive alerts and send commands
 3. **EVM Wallet private key** — to sign ETH/BSC trades
 4. **Solana RPC endpoint URLs** — to read from and write to Solana (Phase 7, required only if running Solana chain)
 5. **Solana Wallet keypair JSON file** — to sign Solana trades (Phase 7, required only if running Solana chain)
+6. **BirdEye API key** — enriches dev reputation and token metadata DQ checks (Phase 9, optional)
+7. **Jito bundle URL + tip account** — Solana MEV protection via Jito block-engine (Phase 11, optional)
+8. **Solana gRPC endpoint + auth token** — ultra-low-latency Solana ingestion via Yellowstone gRPC (Phase 11, optional)
+9. **Copy-trade alpha wallet addresses** — smart wallet tracking for copy-trade DQ signal (Phase 9, optional)
 
 > **Minimum setup:** To run the bot with only Ethereum or BSC, you only need credentials 1–3.
 > Solana credentials (4–5) are only required when you enable Solana in `config/chains.yaml`.
+> Credentials 6–9 are optional enrichments — the bot runs without them at reduced DQ coverage.
 
 ---
 
@@ -876,6 +885,215 @@ SOLANA_WALLET_KEY_1=/etc/sniper/keys/solana-wallet-1.json
 
 > **Where to buy SOL in Indonesia?** Registered exchanges: **Indodax**, **Tokocrypto**, **Pintu**.
 > All three support SOL/IDR trading pairs. Transfer SOL from exchange to your wallet address.
+
+---
+
+### 3.6 BirdEye API Key (Phase 9 — optional)
+
+> **Skip if:** You don't need dev reputation checks or token holder concentration data.
+> Without this key, the `dev_reputation` and token metadata DQ providers are disabled — the bot
+> still works, but misses serial-launcher and no-social-links risk signals.
+
+BirdEye is a Solana/EVM token analytics platform. The bot uses its API for:
+
+- **Developer reputation** — detect serial launcher wallets with prior rug history
+- **Token metadata** — verify social link presence and holder concentration
+- **Holder distribution** — surface top-holder concentration risk
+
+**Important:** BirdEye has two separate systems. The regular `birdeye.so` profile page does
+**not** have API key management. API keys are managed through the separate
+**BDS (Birdeye Data Services)** dashboard at `bds.birdeye.so`.
+
+**How to get your API key:**
+
+1. Go to [https://bds.birdeye.so/auth/sign-up](https://bds.birdeye.so/auth/sign-up) and create an account
+   (if you already have a `birdeye.so` account, the same email/password works — they share one account)
+2. Log in at [https://bds.birdeye.so/auth/sign-in](https://bds.birdeye.so/auth/sign-in)
+3. In the BDS Dashboard, click the **Security** tab in the left sidebar
+4. Click **Generate Key** and give it a name (e.g., "sniper-bot")
+5. Copy the generated key immediately — it is only shown once
+
+**Set it in your `.env` file:**
+
+```bash
+BIRDEYE_API_KEY=your_birdeye_api_key_here
+```
+
+> **Cost:** BirdEye uses a **Compute Unit (CU)** pricing model, not simple requests-per-minute.
+> The free starter package includes a limited CU budget per month. The codebase has
+> **no built-in rate limiter** for BirdEye — when CUs are exhausted or rate-limited (HTTP 429),
+> the provider returns `Degraded: true` and the pipeline continues without the score. In quiet
+> markets this is fine. In busy markets (Solana bull runs, 100+ launches/minute), BirdEye
+> degrades silently — it becomes a no-op. Keep `shadow_mode: true` in `config/data_quality.yaml`
+> while validating, and check your CU usage in the BDS Dashboard before disabling shadow mode.
+
+> **Security:** This key is read via `os.Getenv("BIRDEYE_API_KEY")` at startup — it is never
+> written to any YAML file, never logged, and never committed to Git.
+
+---
+
+### 3.7 Jito Bundle Credentials (Phase 11 — optional)
+
+> **Skip if:** You are not trading on Solana, or you are in shadow mode.
+> Jito bundle submission is enabled via `execution.solana.jito.enabled: true` in `config/execution.yaml`.
+> By default `enabled: false` and `shadow_mode: true` — no bundles are submitted until you explicitly enable it.
+
+Jito is a Solana MEV infrastructure that lets you submit transactions as **bundles** to Jito
+block-engine validators, providing priority inclusion and MEV protection. Use this when:
+
+- You are competing for new PumpFun/Raydium launches at high frequency
+- You want to tip validators for guaranteed inclusion in a specific slot
+
+The bot needs two values:
+
+| Variable           | What it is                                                   |
+| ------------------ | ------------------------------------------------------------ |
+| `JITO_BUNDLE_URL`  | The Jito block-engine bundle submission HTTPS endpoint       |
+| `JITO_TIP_ACCOUNT` | A Jito tip account address (one per region — sends lamports) |
+
+**How to get these:**
+
+1. Go to [https://jito.network](https://jito.network) — Jito infrastructure is permissionless;
+   no account or API key is required. The bundle endpoint URLs are publicly documented.
+
+2. Choose the closest regional endpoint:
+
+   | Region         | Bundle URL                                                           |
+   | -------------- | -------------------------------------------------------------------- |
+   | US East        | `https://mainnet.block-engine.jito.labs.io/api/v1/bundles`           |
+   | US West        | `https://dallas.mainnet.block-engine.jito.labs.io/api/v1/bundles`    |
+   | EU (Amsterdam) | `https://amsterdam.mainnet.block-engine.jito.labs.io/api/v1/bundles` |
+   | Asia (Tokyo)   | `https://tokyo.mainnet.block-engine.jito.labs.io/api/v1/bundles`     |
+
+   > **For Jakarta/Singapore VPS:** Use the Tokyo endpoint for lowest latency.
+
+3. Pick a Jito tip account (any of these work — rotate if you want):
+
+   ```
+   96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
+   HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe
+   Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY
+   ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1sTaC4pr870
+   ```
+
+**Set in your `.env` file:**
+
+```bash
+# For Singapore VPS users — use Tokyo as closest Jito relay
+JITO_BUNDLE_URL=https://tokyo.mainnet.block-engine.jito.labs.io/api/v1/bundles
+JITO_TIP_ACCOUNT=96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
+```
+
+> **Security:** The bot enforces HTTPS-only for `JITO_BUNDLE_URL` — any non-HTTPS URL is
+> rejected at startup (except loopback addresses used in test servers). Never use HTTP.
+> The response body is capped at 64 KiB to prevent unbounded reads.
+
+> **Cost:** Jito charges no subscription fee. You pay a **tip in lamports** per bundle
+> (configured via `execution.solana.jito.tip_lamports: 1000` in `config/execution.yaml`).
+> At 1000 lamports per bundle, this is $0.000001 per trade — effectively free.
+
+---
+
+### 3.8 Solana gRPC Transport Credentials (Phase 11 — optional)
+
+> **Skip if:** You are using the default WebSocket transport (the default `mode: rpc` in
+> `config/chains.yaml`). gRPC is only needed for ultra-low-latency sniping where WebSocket
+> latency (~50ms per event) is a bottleneck.
+
+The Phase 11 hybrid transport supports **Yellowstone gRPC** (Geyser plugin streaming), which
+delivers new slot and transaction notifications faster than WebSocket subscription. Two providers
+support this:
+
+| Provider   | gRPC Support           | Cost        | Notes                            |
+| ---------- | ---------------------- | ----------- | -------------------------------- |
+| Triton One | ✅ Native Yellowstone  | $100+/month | Dedicated node; lowest latency   |
+| Helius     | ✅ Geyser via Business | $499+/month | Business tier required           |
+| QuickNode  | ❌ Not yet             | —           | WebSocket only on standard plans |
+
+**How to get gRPC access:**
+
+**Triton One:**
+
+1. Contact [https://triton.one](https://triton.one) — email or Discord
+2. Request a Yellowstone gRPC node
+3. They provide: `endpoint: your-node.rpcpool.com:443` and a bearer token
+
+**Helius:**
+
+1. Log in at [https://www.helius.dev](https://www.helius.dev)
+2. Upgrade to the **Business** tier
+3. Go to **Geyser Plugin** → **gRPC endpoint** in dashboard
+
+**Set in your `.env` file:**
+
+```bash
+# The endpoint overrides the value in config/chains.yaml — only needed if using gRPC mode
+SOLANA_GRPC_ENDPOINT=your-node.rpcpool.com:443
+
+# Auth token — NEVER put this in YAML — env var only
+SOLANA_GRPC_TOKEN=your_bearer_token_here
+```
+
+**Enable gRPC in config:**
+
+```yaml
+# config/chains.yaml
+solana:
+  transport:
+    mode: grpc # Change from "rpc" to "grpc"
+    grpc_endpoint: "" # Leave blank — SOLANA_GRPC_ENDPOINT env var takes precedence
+    # grpc_auth_token is loaded from env var SOLANA_GRPC_TOKEN (never put in YAML)
+    fallback_on_error: true # Auto-fall back to WebSocket if gRPC fails
+    fallback_error_n: 5
+```
+
+> **Security:** `SOLANA_GRPC_TOKEN` is intentionally absent from all YAML config structs in the
+> codebase — it can only be provided via environment variable. The field `GrpcAuthToken` was
+> deliberately removed from `TransportConfig` to prevent accidental YAML serialization.
+
+---
+
+### 3.9 Copy-Trade Alpha Wallets (Phase 9 — optional)
+
+> **Skip if:** You don't have alpha wallet addresses to track. This provider adds a copy-trade
+> signal to the DQ layer — if a known smart wallet recently bought the same token, it gets a
+> positive signal. Without wallet addresses, the provider runs in degraded mode (returns no-match).
+
+Copy-trade tracking requires no external account or API key. You simply provide a list of wallet
+addresses that you consider "alpha" — wallets with a proven track record of buying tokens early
+that later pumped significantly.
+
+**How to find alpha wallets:**
+
+Common approaches:
+
+- **Cielo Finance** ([https://app.cielo.finance](https://app.cielo.finance)) — browse public
+  wallet leaderboards and see top-performing Solana wallets
+- **Birdeye Wallet** — look at "Top Traders" on tokens that pumped
+- **Dune Analytics** — query on-chain data for wallets with consistent early entries
+- **GMGN** ([https://gmgn.ai](https://gmgn.ai)) — Solana wallet analyzer, shows winrate/ROI
+
+**Set in your `.env` file:**
+
+```bash
+# Comma-separated list — no spaces around commas
+# EVM wallets: 0x-prefixed addresses
+# Solana wallets: base58 addresses
+COPY_TRADE_WALLETS=0xAlphaWallet1,0xAlphaWallet2,SolanaWalletBase58Address
+```
+
+> **How it works in the pipeline:** When the Data Quality Engine evaluates a token, the
+> `CopyTradeProvider` checks whether any wallet in `COPY_TRADE_WALLETS` has recently bought
+> that token (via DEXScreener's wallet transaction history). If a match is found, the token
+> receives a `copy_trade_alpha_match` flag and a reduced risk score — bypassing some conservative
+> DQ thresholds. If no wallets are configured, the provider logs a warning at startup and returns
+> a neutral `copy_trade_no_wallets` flag for every token (no rejection, no boost).
+
+> **Chain support:** Only `ethereum`/`eth`, `bsc`/`bnb`, `solana`/`sol`, and `base` are accepted.
+> Unknown chain identifiers are rejected (fail-closed) — no passthrough.
+
+> **Security:** Wallet addresses are never logged at INFO level. If you rotate wallets, just
+> update `COPY_TRADE_WALLETS` and restart the bot — no database changes required.
 
 ---
 

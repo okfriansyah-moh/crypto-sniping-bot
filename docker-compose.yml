@@ -9,6 +9,7 @@
 # Services:
 #   db      — PostgreSQL 16 (persistent volume)
 #   migrate — One-shot migration runner (exits 0 on success)
+#   hydrate — One-shot historical profile seeder (exits 0 on success)
 #   bot     — Main trading daemon (port 8080)
 
 services:
@@ -51,6 +52,25 @@ services:
         condition: service_healthy
     restart: on-failure
 
+  # ── Historical profile hydration (one-shot) ───────────────────────────────
+  hydrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-sniping-bot:local
+    command: ["hydrate"]
+    env_file:
+      - .env
+    environment:
+      # Overrides to use the in-compose service hostnames.
+      SNIPER_DB_HOST: db
+      SNIPER_DB_SSL_MODE: disable
+      CONFIG_PATH: /app/config/pipeline.yaml
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: on-failure
+
   # ── Trading bot ───────────────────────────────────────────────────────────────
   bot:
     build:
@@ -76,7 +96,7 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     depends_on:
-      migrate:
+      hydrate:
         condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:

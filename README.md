@@ -61,13 +61,13 @@ All common operations are wrapped in `make` targets. Run `make <target>`.
 
 ### Docker
 
-| Target              | Description                                          |
-| ------------------- | ---------------------------------------------------- |
-| `make docker-build` | Build Docker image without starting services         |
-| `make docker-up`    | Build image + start all services in detached mode    |
-| `make docker-down`  | Stop all services (data volume preserved)            |
-| `make docker-clean` | Stop all services **and delete the database volume** |
-| `make docker-logs`  | Tail live bot logs (`docker compose logs -f bot`)    |
+| Target              | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `make docker-build` | Build Docker image without starting services                             |
+| `make docker-up`    | Build image + run DB migration + hydrate historical profiles + start bot |
+| `make docker-down`  | Stop all services (data volume preserved)                                |
+| `make docker-clean` | Stop all services **and delete the database volume**                     |
+| `make docker-logs`  | Tail live bot logs (`docker compose logs -f bot`)                        |
 
 ### Log Collection & Pre-Analysis
 
