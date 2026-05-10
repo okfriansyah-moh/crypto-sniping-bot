@@ -1,4 +1,3 @@
-package edge
 package edge_test
 
 import (
@@ -89,7 +88,7 @@ func TestAnalyzeBottom_WindowTrimming(t *testing.T) {
 	prices[5] = 2.0
 	prices[6] = 1.5
 	prices[7] = 1.0
-	prices[8] = 0.5  // trough
+	prices[8] = 0.5 // trough
 	prices[9] = 0.8
 	prices[10] = 1.2
 	for i := 11; i < 25; i++ {
@@ -140,7 +139,7 @@ func TestAnalyzeBottom_ScoreInRange(t *testing.T) {
 	inputs := [][]float64{
 		{1.0, 0.5, 0.1, 0.5, 1.0},
 		{0.1, 0.05, 0.01, 0.1, 0.5, 1.0},
-		{1.0, 1.1, 1.2, 1.3},        // only ascending — trough at start
+		{1.0, 1.1, 1.2, 1.3}, // only ascending — trough at start
 		{1.0, 0.9, 0.8, 0.7, 0.8, 0.9},
 	}
 	for _, prices := range inputs {

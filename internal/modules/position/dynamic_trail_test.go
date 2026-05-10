@@ -1,4 +1,3 @@
-package position
 package position_test
 
 import (
@@ -51,8 +50,8 @@ func TestDynamicTrailCalculator_EmptyTiers_AlwaysZero(t *testing.T) {
 
 func TestDynamicTrailCalculator_InvalidTiers_Filtered(t *testing.T) {
 	calc := position.NewDynamicTrailCalculator([]position.DynamicTrailTier{
-		{TriggerBps: 10000, TrailBps: 0},  // TrailBps=0 → invalid, dropped
-		{TriggerBps: -1, TrailBps: 2000},  // negative trigger → invalid, dropped
+		{TriggerBps: 10000, TrailBps: 0},   // TrailBps=0 → invalid, dropped
+		{TriggerBps: -1, TrailBps: 2000},   // negative trigger → invalid, dropped
 		{TriggerBps: 5000, TrailBps: 1500}, // valid
 	})
 
