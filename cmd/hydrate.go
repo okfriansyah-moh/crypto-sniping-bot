@@ -34,14 +34,13 @@ import (
 // ── Seed YAML schema ─────────────────────────────────────────────────────────
 
 type seedsFile struct {
-	Version     string      `yaml:"version"`
-	GeneratedAt string      `yaml:"generated_at"`
-	CohortDefs  []cohortDef `yaml:"cohort_definitions"`
-	Tokens      []seedToken `yaml:"tokens"`
+	Version     string               `yaml:"version"`
+	GeneratedAt string               `yaml:"generated_at"`
+	CohortDefs  map[string]cohortDef `yaml:"cohort_definitions"`
+	Tokens      []seedToken          `yaml:"tokens"`
 }
 
 type cohortDef struct {
-	Key              string  `yaml:"key"`
 	PriorProbability float64 `yaml:"prior_probability"`
 	LiquidityMinUsd  float64 `yaml:"liquidity_min_usd"`
 	ATHMultipleP50   float64 `yaml:"ath_multiple_p50"`
@@ -172,11 +171,8 @@ func loadSeeds(path string) (*seedsFile, error) {
 // All arithmetic is deterministic: same input → same output (no randomness,
 // no wall-clock reads beyond a single computedAt stamp).
 func computeProfiles(seeds *seedsFile) ([]contracts.HistoricalMarketProfileDTO, error) {
-	// Index cohort definitions by key.
-	defsByKey := make(map[string]cohortDef, len(seeds.CohortDefs))
-	for _, d := range seeds.CohortDefs {
-		defsByKey[d.Key] = d
-	}
+	// Index cohort definitions by key (already keyed by cohort name in YAML).
+	defsByKey := seeds.CohortDefs
 
 	// Group tokens by cohort_key.
 	type tokenGroup struct {
