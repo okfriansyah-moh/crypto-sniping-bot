@@ -335,6 +335,7 @@ All operator interaction goes through Telegram. The bot connects via `SNIPER_TEL
 | `/rescan`            | Rescan worker config, band eligibility thresholds, last 24h emission counts by band     |
 | `/dq [hours]`        | Data quality stats: total decisions, rug reject rate, DQ funnel pass rate (default 24h) |
 | `/dlq`               | Dead-letter queue: last 10 failed events, reason breakdown, retry counts                |
+| `/executions`        | Last 20 tokens that reached execution stage (success + failed) with full CA address     |
 | `/version`           | Active strategy version ID and promotion status                                         |
 | `/help`              | Show all available commands                                                             |
 

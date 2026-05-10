@@ -14,7 +14,7 @@
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
 | **Not Started**  | 0          |
-| **Last Updated** | 2026-05-07 |
+| **Last Updated** | 2026-05-10 |
 
 ---
 
@@ -152,6 +152,7 @@ non-determinism, method on DTO); all fixed manually. Refactor agent applied 12 P
 --- **Root cause (100% ACCEPT at cold-start)**: all pump.fun creation events have identical virtualSolReserves=30 SOL → LiquidityUsd≈$4500 constant for every token → z-score=0 (sigma floored on constant baseline) → LiquidityScore=0.5 for all tokens → min_liquidity_score=0.2 always satisfied → NEW_LAUNCH_EDGE fires 100% → validation constant EV=2225 bps > ev_threshold=100 → 100% ACCEPT. DQ passes 100% because balanced.unknown_factor=0.0 means unknown honeypot/wash probes contribute zero risk. **Strategy decision**: "wait 15 minutes, first real scan at 15m" — aligns with the already-deployed rescan layer (enabled, bands: 15m/30m/45m/1h). At 15m rescan, probes re-run: solana_holder_dist succeeds (SPL mint exists), solana_pumpfun_lp returns current reserves after real buys. Sigma-floor means ANY real SOL buy produces LiquidityScore≈1.0 (binary: identical=0.5, different≈1.0) → only tokens with genuine buyer activity pass. **3 config changes (no code)**: (1) `config/pipeline.yaml: min_liquidity_score 0.2→0.55` — primary filter; cold-start score=0.5<0.55 → no_edge_detected → REJECT at creation; at 15m rescan with real buys → score≈1.0>0.55 → ACCEPT. (2) `config/pipeline.yaml: new_launch_window_seconds 300→7200` — extends NEW_LAUNCH_EDGE window to 2h so rescan tokens (15m–1h age, PoolAgeSeconds=1 due to ingestion constant) remain in NEW_LAUNCH path (MOMENTUM_EDGE blocked because WashStatsKnown=false for pump.fun always). (3) `config/data_quality.yaml: balanced.unknown_factor 0.0→0.35` — honest DQ: tokens with unknown honeypot + unknown wash now contribute risk=0.14 → RISKY_PASS path (below risky_pass_above=0.25 alone but consistent with profit-first signal quality). No code changes. Config-only. |
 | 2026-05-05 | log-reviewer R4 remediation | — | single-session | — | Root-cause closure of 2-item remediation plan from log review session. **P-1 (FIXED)**: `SolanaPumpfunLpProbe.Enrich` called `p.solUsd.SolUsd(cctx)` — the 300ms bonding-curve RPC deadline context. When the RPC fetch consumed most of the budget, the Pyth SOL/USD cache (TTL=5s) missed its context deadline and returned `ok=false`, keeping the cache perpetually cold and leaving `LiquidityUsd=0` for every token. CPMM slippage then collapsed to `base=MinReserveUsd=1.0` → constant p50=22 bps (stub-equivalent). Fix: use parent `ctx` for `SolUsd()` (one-line change in `internal/modules/probes/solana_pumpfun_lp.go`). 3 new tests pass: `TestSolanaPumpfunLpProbe_HappyPath_ComputesLiquidityUsd`, `_NoSolPrice_LeavesLpStatsUnknown`, `_SkipsRaydium`. **P-2 (FIXED — latent bug)**: Gap recovery (`gap_recovery.go`) called `NormalizePumpFunCreate`/`NormalizeRaydiumPoolInit` which set `IngestedAt=blockTimestamp(tx.BlockTime)`. When `tx.BlockTime==0`, `blockTimestamp` returned `""` — `NULLIF('','')` in the rescan SQL evaluates to NULL, making all age comparisons NULL (false) → tokens recovered via gap recovery permanently invisible to rescan. Additionally, tokens with a valid but old blockTime (e.g. created 90 min ago, recovered now) would be anchored to the on-chain creation time instead of ingestion time, skewing the rescan window. Root: `ingested_at` should record when OUR SYSTEM ingested the token, not when the block was confirmed. Fix: `gap_recovery.go` now stamps `ingestedAt=time.Now().UTC().Format(time.RFC3339)` and assigns it to `d.IngestedAt` after each normalize call (3 LOC change). `BlockTimestamp` is unchanged (still carries on-chain time for analytics). 2 new regression tests: `TestRecoverGap_IngestedAt_ZeroBlockTime` (asserts IngestedAt non-empty when BlockTime==0), `TestRecoverGap_IngestedAt_NonZeroBlockTime` (asserts IngestedAt is wall-clock now, not 30-min-old blockTime; asserts BlockTimestamp is still set). Note: `rescan_band_completed candidates=0` in log was a timing artifact (bot session too young at capture time — all tokens < 15m old); the code path is structurally correct. Full `go test ./...` — 39 packages pass. |
 | 2026-05-07 | P4/P5/P8 implementation + security hardening | P4, P5, P8 | 2 context windows | — | **P4 Multi-launchpad ingestion**: 4 Solana DEX decoders (PumpFun AMM `pAMMBay6…`, Raydium CLMM `CAMMCzo5…`, Orca Whirlpool `whirLbMiic…`, Meteora DLMM `LBUZKhRx…`); per-family dispatch in `ingestion_solana.go processNotification()`; gap recovery updated; 17 new tests in 4 test files. **P5 Yellowstone+Jito+ZeroSlot**: `Transport` interface + `BuildTransport` factory (env-var-only secrets, MED-02); `JitoClient` (shadow mode, HTTPS enforcement with loopback exemption for tests, 64 KiB body cap, 2 s timeout, LOW-03 error truncation); 8 Jito tests. **P8 Copy-trade amplifier**: `CopyTradeProvider` DEXScreener alpha-wallet detection; chain allowlist (MED-01: allowlist-only, no passthrough); `validateAddressToken` injection guard; 128 KiB body cap; 280 ms timeout; 8 tests including unknown-chain degraded path. **Security fixes**: HIGH-01 (Jito HTTPS), MED-01 (chain allowlist), MED-02 (GrpcAuthToken removed from config), LOW-03 (error truncation). `IngestionTransportConfig.GrpcAuthToken` removed from both `chains.go` struct and `config/chains.yaml`. Pre-existing worker test failure fixed (`TestAdaptive_StarvationInExploration_EmitsCriticalAlert` — corrected start state to `VERY_EXPLORATION` to match 4-mode system). Full `go test ./...` — 38 packages green. README.md and PROGRESS_REPORT.md updated. |
+| 2026-05-10 | DQ hardening + execution visibility | — | single-session | — | Post-incident DQ hardening (TRYNA VAMP bypass): 4 root-cause fixes — serial-launcher threshold 5→1, hard `launchScore=1.0`, fail-closed unknown-dev history (`DEV_UNKNOWN_HISTORY`), `isPostURL()` tweet-vs-profile gate in `social_gate.go`. New `/executions` Telegram command: `GetExecutionLog` DB adapter method + postgres impl (LATERAL join) + `buildExecutionsFn` handler + all 4 mock stubs. Test suite updated: `dev_reputation_test`, `data_quality_test` (validMarketData). `go build ./...` clean; all packages pass. |
 | 2026-05-08 | VERY_EXPLORATION mode full registration | — | single-session | — | Full system-wide registration of `VERY_EXPLORATION` as the 4th adaptive mode. **Code/config fixes (previously latent)**: (1) `validate_ranges.go` — `DefaultStartupMode` switch added `"VERY_EXPLORATION"` case; error message updated to list all 4 modes. (2) `rescan_config.go` — `validModes` map added `"VERY_EXPLORATION": true`; error message updated. (3) `config/priority.yaml` — `very_exploration:` section added: `explore_budget_pct: 8.0`, `edge_strength_min: 0.30`, `ev_threshold_bps: 30`, `max_positions: 25`. (4) 7 stale 3-mode comments fixed across `config.go`, `run_risk_controller.go`, `pipeline.yaml`, `contracts/data_quality.go`, `data_quality_runtime_config.go`, `data_quality.go`, `run_data_quality.go`. **Docs updated**: (5) `docs/architecture.md` §0.6 chain `STRICT→BALANCED→EXPLORATION→VERY_EXPLORATION`; profiles comment; profile downgrade/upgrade chain; per-market mode list; `/mode` command reference — all 6 stale references updated. §7 Operational Modes fully rewritten with dedicated subsections (§7.1 STRICT, §7.2 BALANCED, §7.3 EXPLORATION, §7.4 VERY_EXPLORATION, §7.5 Mode Transition Rules) including YAML config blocks and quant-calibrated thresholds. (6) `docs/STARTER_GUIDE.md` — `/status` table updated to show all 4 modes; `/mode very_explore` row added to operator command table. (7) `README.md` — mode config reference updated to include VERY_EXPLORATION. **Already correct (prior sessions)**: `run_risk_controller.go` full 4-mode logic, `commands.go` aliases + help text, `data_quality.yaml` very_exploration profile, `pipeline.yaml` mode multiplier block, `capital.yaml` 1.5x multiplier, `copilot-instructions.md`. **Build/test**: `go build ./..` clean; `go test ./...` — 38 packages pass (2 pre-existing syntax-error failures in `internal/modules/edge` and `internal/modules/position` unrelated to this change). |
 
 ---
@@ -233,3 +234,81 @@ Pipeline integration test `TestFeatures_ProducesAllFields` assertion updated: ch
 **Outcome:** `go test ./...` — 37 packages green, 0 failures.
 
 **PRS projection after F-4+F-1:** ~52/100 (CAUTION). Remaining to reach LAUNCH_ALLOWED (65): first ACCEPT trade flows (D7+D1), F-5 rescan unlocked, F-7 infrastructure (QuickNode upgrade).
+
+---
+
+## DQ Hardening + Execution Visibility (2026-05-10)
+
+**Trigger:** Post-incident analysis — TRYNA VAMP (CA: `ANufBJA3uCaPXKTpPE3AgskuHXrvZg5nkM5DvgiGpum`, Solana) slipped through DQ: dev had 128 prior token launches; social link was a tweet URL, not a profile.
+
+### Root-cause fixes
+
+| ID    | Severity | Area                      | File(s)                                                  | Change                                                                                                                 |
+| ----- | -------- | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| BUG-1 | CRITICAL | Serial-launcher threshold | `config/data_quality.yaml`                               | `max_creator_prev_token_count: 5 → 1` — any dev with ≥1 prior launch is rejected; only first-time launchers pass.      |
+| BUG-2 | CRITICAL | Serial-launcher score     | `internal/modules/data_quality/dev_reputation.go`        | Scaled `0.5×ratio` replaced with hard `launchScore = 1.0` — ensures score always clears reject threshold.              |
+| BUG-3 | CRITICAL | Unknown dev fail-open     | `internal/modules/data_quality/dev_reputation.go`        | Unknown dev history now returns `Score: 1.0, Flags: ["DEV_UNKNOWN_HISTORY"]` (fail-closed) instead of `Unknown: true`. |
+| BUG-4 | HIGH     | Social URL validation     | `internal/modules/data_quality/providers/social_gate.go` | `isPostURL()` helper: tweet/post URLs (`/status/`, `t.co/`) remapped to `"twitter_post"` type → scored as no-profile.  |
+
+### New feature: `/executions` Telegram command
+
+| Area          | File(s)                                  | Change                                                                                                                                                                          |
+| ------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DB interface  | `database/adapter.go`                    | Added `ExecutionLogRow` struct + `GetExecutionLog(ctx, limit int)` to `Adapter` interface.                                                                                      |
+| DB impl       | `database/engines/postgres/lifecycle.go` | `GetExecutionLog` — joins `token_lifecycle` + `market_data` (LATERAL) + `execution_results` (LATERAL); states `SELECTED` through `FAILED`; `ORDER BY updated_at DESC LIMIT $1`. |
+| Command const | `internal/telegram/commands.go`          | `CmdExecutions CommandType = "/executions"` + `ParseCommand`, `Handler`, `HandlerOptions`, `Handle()` wiring.                                                                   |
+| Handler impl  | `cmd/telegram.go`                        | `buildExecutionsFn` — HTML-formatted list: status icon (✅/❌/🎯/⏳) + full CA in `<code>` + symbol/chain/state/tx/error.                                                       |
+| Mock stubs    | 4 test files                             | `GetExecutionLog` no-op added to all mock adapters.                                                                                                                             |
+
+### Test updates
+
+- `dev_reputation_test.go`: `TestDetectDevReputation_UnknownWhenNeitherFieldKnown` updated to expect `Score: 1.0, Flags: ["DEV_UNKNOWN_HISTORY"]`.
+- `data_quality_test.go`: `validMarketData()` now sets `CreatorPrevTokenCountKnown: true, CreatorPrevTokenCount: 0, SocialLinksKnown: true, HasSocialLinks: true` (genuine first-time clean token).
+
+**Outcome:** `go build ./...` clean · `go test ./...` — all packages green.
+
+---
+
+## Gate Review DQ-Fix-1: Creator Probe + Social Profile Validation (2026-05-10)
+
+**Trigger:** Gate review of CA `8poHAR4szrPjEcTYb72mDWKmqskeAKrZJLjbfPZdpum` — scam token passed DQ with `selection_decision=1`. Three BLOCKERs identified.
+
+### BLOCKER 1 — Social URL profile validation (RESOLVED ✅)
+
+**Root cause:** `parseSocialLinks()` in `solana_metadata.go` returned `HasSocialLinks=true` for any non-empty URL string, including tweet/post URLs. A dev who set the `twitter` field to an Elon Musk tweet URL would get `HasSocialLinks=true` and evade the `DEV_NO_SOCIAL_LINKS` DQ flag.
+
+**Fix:** Added `isSocialProfileURL(socialType, rawURL string) bool` and `isTwitterProfileURL(rawURL string) bool` helpers. Rewrote `parseSocialLinks()` to validate all three lookup paths (top-level fields, `extensions` map, `links` map). Twitter/X links are rejected if they contain `/status/`, `/statuses/`, or `t.co/` — only `twitter.com/{handle}` and `x.com/{handle}` profile URLs are accepted.
+
+**Files:** `internal/modules/probes/solana_metadata.go`, `internal/modules/probes/solana_metadata_test.go` (9 new tests).
+
+### BLOCKER 2 — Creator external reputation probe (RESOLVED ✅)
+
+**Root cause (cold-start gap):** `run_data_quality.go` enriched `CreatorPrevTokenCount` exclusively from the local DB via `adapter.CountTokensByCreator`. On a cold-start DB (empty or newly deployed), this always returns `count=0` for any creator — even a dev with 21+ prior launches. The code then set `CreatorPrevTokenCountKnown=true` with `count=0`, bypassing the `DEV_UNKNOWN_HISTORY` fail-closed path and silently treating a serial scammer as a first-time launcher.
+
+**Fix (two-part):**
+
+1. **New probe** `SolanaCreatorReputationProbe` — queries the pump.fun public API (`/coins?user={addr}&limit=50`) to get the ground-truth count of tokens ever launched from a Solana creator wallet. Parses both array format (`[{...}]`) and envelope format (`{"total":N, "coins":[...]}`). Security invariants: HTTPS-only with loopback exemption, `io.LimitReader` at 128 KiB, error messages truncated to 200 chars, no API keys.
+
+2. **DQ worker cold-start fix** — `run_data_quality.go` local DB fallback now only sets `CreatorPrevTokenCountKnown=true` when `count > 0`. A `count=0` from the local DB is indistinguishable from a new creator on a cold start → leave `Known=false` → DQ applies `DEV_UNKNOWN_HISTORY` (fail-closed, score=1.0).
+
+**Wiring:** Probe registered in `buildMarketProbes()` (`cmd/server.go`) after the metadata probe — runs in the `MarketProbesWorker` stage, which executes before the DQ stage, so the DQ worker receives the already-enriched DTO.
+
+| File                                                        | Change                                                                                                                 |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `internal/modules/probes/solana_creator_reputation.go`      | New probe: pump.fun API query + HTTPS enforcement + bounded response                                                   |
+| `internal/modules/probes/solana_creator_reputation_test.go` | 13 tests: array/envelope formats, 404/500 fail-closed, disabled/non-Solana/empty-creator skip, HTTPS gate, determinism |
+| `internal/app/config/probes_config.go`                      | `SolanaCreatorReputationYAML` struct + `ProbesConfig.SolanaCreatorReputation` field                                    |
+| `internal/app/config/validate_ranges.go`                    | Range validation for `timeout_ms`, `max_body_bytes`, `page_limit`                                                      |
+| `config/pipeline.yaml`                                      | `solana_creator_reputation:` YAML block (enabled, timeout_ms=3000, base_url, max_body_bytes=131072, page_limit=50)     |
+| `cmd/server.go`                                             | `buildMarketProbes()` registers `SolanaCreatorReputationProbe` when enabled                                            |
+| `internal/workers/run_data_quality.go`                      | Local DB fallback only sets `Known=true` when `count > 0`; skips enrichment when already `Known=true` from probe       |
+
+### BLOCKER 3 — dev_reputation_test.go divergence (PRE-RESOLVED ✅)
+
+The test already asserted `Unknown=false, Score=1.0, Flags=["DEV_UNKNOWN_HISTORY"]` — matching the fail-closed behavior already implemented in `dev_reputation.go`. No changes needed.
+
+### Session History Entry
+
+| Date       | Mode                 | Phases | Duration       | Token Usage | Outcome                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | -------------------- | ------ | -------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-05-10 | gate-review DQ-Fix-1 | —      | single-session | —           | All 3 BLOCKERs resolved. Social URL profile validation (BLOCKER 1): `parseSocialLinks` now validates all three pump.fun metadata lookup paths — only `twitter.com/{handle}` and `x.com/{handle}` profiles accepted; tweet/post URLs rejected. Creator cold-start gap (BLOCKER 2): new `SolanaCreatorReputationProbe` queries pump.fun public API for ground-truth launch history; DQ worker fallback only trusts local DB when `count > 0`; 13 new tests. BLOCKER 3 pre-resolved. `go build ./...` clean · `go test ./...` — all packages green (42 tests in probes/DQ packages). |

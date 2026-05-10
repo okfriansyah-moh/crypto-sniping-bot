@@ -168,7 +168,7 @@ These rules extend the skeleton-parallel framework with the specific architectur
 
 - Modules **MUST NOT** call Telegram APIs directly
 - All user-facing events emit to `events` → dedicated **Telegram dispatcher service** reads from the bus and sends messages
-- Operator commands (`/status`, `/mode`, `/pnl`, `/positions`, `/kill`, `/resume`, `/version`) are logged and require confirmation for destructive actions
+- Operator commands (`/status`, `/mode`, `/pnl`, `/positions`, `/executions`, `/kill`, `/resume`, `/version`) are logged and require confirmation for destructive actions
 - No remote code execution via Telegram — ever
 
 ### Strategy Versioning & Replay (per `docs/architecture.md` § 4.1–4.2)

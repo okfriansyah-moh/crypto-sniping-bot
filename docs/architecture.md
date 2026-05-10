@@ -5269,6 +5269,7 @@ ingestion_dropped_events_total  (swap drops due to backpressure)
 /mode STRICT|BALANCED|EXPLORATION|VERY_EXPLORATION
 /pnl
 /positions
+/executions
 /kill
 /resume
 /version

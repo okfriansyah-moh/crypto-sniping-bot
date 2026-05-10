@@ -297,6 +297,26 @@ func (c *Config) validateRanges(logger *slog.Logger) error {
 		)
 	}
 
+	// ── probes.solana_creator_reputation ─────────────────────────────
+	if v := c.Probes.SolanaCreatorReputation.TimeoutMs; v != 0 && (v < 500 || v > 10000) {
+		return fmt.Errorf(
+			"config: probes.solana_creator_reputation.timeout_ms=%d must be in [500, 10000] (or 0 for default)",
+			v,
+		)
+	}
+	if v := c.Probes.SolanaCreatorReputation.MaxBodyBytes; v != 0 && (v < 1024 || v > 1024*1024) {
+		return fmt.Errorf(
+			"config: probes.solana_creator_reputation.max_body_bytes=%d must be in [1024, 1048576] (or 0 for default)",
+			v,
+		)
+	}
+	if v := c.Probes.SolanaCreatorReputation.PageLimit; v != 0 && (v < 1 || v > 200) {
+		return fmt.Errorf(
+			"config: probes.solana_creator_reputation.page_limit=%d must be in [1, 200] (or 0 for default 50)",
+			v,
+		)
+	}
+
 	// ── Phase 10: rescan structural invariants ─────────────────────
 	if c.Rescan.Enabled {
 		if err := validateRescanConfig(c.Rescan); err != nil {

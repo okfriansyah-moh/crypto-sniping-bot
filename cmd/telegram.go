@@ -77,6 +77,7 @@ func buildTelegramComponents(
 		RescanStatusFn:   buildRescanStatusFn(db, cfg),
 		DqFn:             buildDqFn(db),
 		DlqFn:            buildDlqFn(db),
+		ExecutionsFn:     buildExecutionsFn(db),
 		AllowedUserIDs:   allowedIDs,
 		Logger:           logger,
 	})
@@ -1021,6 +1022,72 @@ func buildDlqFn(db database.Adapter) func(ctx context.Context) (string, error) {
 		}
 
 		sb.WriteString("\n<i>Use the rescan worker or requeue mechanism to retry events.</i>\n")
+		return sb.String(), nil
+	}
+}
+
+// buildExecutionsFn returns a function that shows the last 20 tokens that
+// reached the execution stage, including failures. Full contract addresses are
+// shown so operators can investigate individual tokens.
+func buildExecutionsFn(db database.Adapter) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		rows, err := db.GetExecutionLog(ctx, 20)
+		if err != nil {
+			return "", fmt.Errorf("get execution log: %w", err)
+		}
+
+		var sb strings.Builder
+		sb.WriteString("<b>Execution Log (last 20 — success + failed)</b>\n\n")
+
+		if len(rows) == 0 {
+			sb.WriteString("No tokens have reached the execution stage yet.\n")
+			return sb.String(), nil
+		}
+
+		for _, r := range rows {
+			ts := r.UpdatedAt
+			if len(ts) > 16 {
+				ts = ts[:16] // truncate to minute
+			}
+			ticker := r.Symbol
+			if ticker == "" {
+				ticker = "—"
+			}
+			chain := r.Chain
+			if chain == "" {
+				chain = "?"
+			}
+
+			// Status indicator
+			statusIcon := "⏳"
+			switch r.LifecycleState {
+			case "EXECUTED", "POSITION_OPEN", "POSITION_CLOSED", "EVALUATED":
+				statusIcon = "✅"
+			case "FAILED":
+				statusIcon = "❌"
+			case "SELECTED":
+				statusIcon = "🎯"
+			}
+
+			sb.WriteString(fmt.Sprintf(
+				"%s <code>%s</code> [%s] %s · %s\n",
+				statusIcon,
+				html.EscapeString(r.TokenAddress),
+				html.EscapeString(ticker),
+				html.EscapeString(r.LifecycleState),
+				html.EscapeString(chain),
+			))
+
+			if r.TxHash != "" {
+				sb.WriteString(fmt.Sprintf("  tx: <code>%s</code>\n", html.EscapeString(r.TxHash)))
+			}
+			if r.ErrorCode != "" {
+				sb.WriteString(fmt.Sprintf("  err: <i>%s</i>\n", html.EscapeString(r.ErrorCode)))
+			}
+			sb.WriteString(fmt.Sprintf("  <i>%s</i>\n", html.EscapeString(ts)))
+			sb.WriteString("\n")
+		}
+
 		return sb.String(), nil
 	}
 }

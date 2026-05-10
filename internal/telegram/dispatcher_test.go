@@ -455,3 +455,7 @@ func (s *dispatcherStubAdapter) GetHistoricalProfile(_ context.Context, _ string
 func (s *dispatcherStubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil
 }
+
+func (s *dispatcherStubAdapter) GetExecutionLog(_ context.Context, _ int) ([]database.ExecutionLogRow, error) {
+	return nil, nil
+}

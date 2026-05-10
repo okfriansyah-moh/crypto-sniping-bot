@@ -200,34 +200,90 @@ type pumpMetadata struct {
 }
 
 // parseSocialLinks returns true when the metadata JSON contains at least
-// one non-empty social-link field (twitter, telegram, or website) in any
-// of the three known locations.
+// one non-empty, profile-level social-link field (twitter, telegram, or
+// website) in any of the three known locations.
+//
+// A social link only qualifies when it points to an ACCOUNT PROFILE, not a
+// post, tweet, thread, or random viral share. Specifically:
+//   - Twitter/X URLs containing "/status/" are post links → rejected.
+//   - t.co shorteners are tweet redirects → rejected.
+//   - Any non-empty telegram or website URL is accepted (profile by convention).
+//
+// This prevents the pattern where a rug-dev sets the token's "twitter" field
+// to a viral Elon Musk tweet (e.g. "https://x.com/elonmusk/status/...") to
+// falsely satisfy the HasSocialLinks check.
 func parseSocialLinks(body []byte) (bool, error) {
 	var meta pumpMetadata
 	if err := json.Unmarshal(body, &meta); err != nil {
 		return false, fmt.Errorf("unmarshal: %w", err)
 	}
 
-	// 1. Top-level keys.
-	if strings.TrimSpace(meta.Twitter) != "" ||
-		strings.TrimSpace(meta.Telegram) != "" ||
-		strings.TrimSpace(meta.Website) != "" {
+	// 1. Top-level keys — each link is validated as a real profile URL.
+	if isSocialProfileURL("twitter", meta.Twitter) ||
+		isSocialProfileURL("telegram", meta.Telegram) ||
+		isSocialProfileURL("website", meta.Website) {
 		return true, nil
 	}
 
 	// 2. extensions object.
 	for _, key := range []string{"twitter", "telegram", "website"} {
-		if v, ok := meta.Extensions[key]; ok && strings.TrimSpace(v) != "" {
-			return true, nil
+		if v, ok := meta.Extensions[key]; ok {
+			if isSocialProfileURL(key, v) {
+				return true, nil
+			}
 		}
 	}
 
-	// 3. links object (catch-all).
-	for _, v := range meta.Links {
-		if strings.TrimSpace(v) != "" {
+	// 3. links object (catch-all) — apply profile gate to all values.
+	for k, v := range meta.Links {
+		// Infer social type from key name for targeted validation.
+		if isSocialProfileURL(strings.ToLower(k), v) {
 			return true, nil
 		}
 	}
 
 	return false, nil
+}
+
+// isSocialProfileURL returns true when rawURL is a non-empty URL that points
+// to an account profile page, not a post, tweet, or short-link redirect.
+//
+// Rules by socialType:
+//   - "twitter" / "x": must not contain "/status/", "/statuses/", or be a
+//     t.co redirect. The URL must reference a profile root (e.g.
+//     "https://twitter.com/myproject" or "https://x.com/myproject").
+//   - "telegram": any non-empty t.me link is accepted (t.me links always
+//     reference channels/groups/bots, not individual posts on the public web).
+//   - "website": any non-empty HTTPS URL is accepted.
+//   - all other types: any non-empty URL is accepted as a weak signal.
+func isSocialProfileURL(socialType, rawURL string) bool {
+	u := strings.TrimSpace(rawURL)
+	if u == "" {
+		return false
+	}
+	t := strings.ToLower(socialType)
+	if t == "twitter" || t == "x" {
+		return isTwitterProfileURL(u)
+	}
+	return true
+}
+
+// isTwitterProfileURL returns true when the URL points to a Twitter/X account
+// profile, not to an individual tweet, thread, or short-link.
+func isTwitterProfileURL(rawURL string) bool {
+	u := strings.ToLower(rawURL)
+	// t.co is Twitter's own shortener — always a redirect to a tweet or link,
+	// never a profile URL.
+	if strings.Contains(u, "t.co/") {
+		return false
+	}
+	// /status/ and /statuses/ are the path segments Twitter uses for tweets.
+	if strings.Contains(u, "/status/") || strings.Contains(u, "/statuses/") {
+		return false
+	}
+	// Must actually reference twitter.com or x.com to count as Twitter.
+	if !strings.Contains(u, "twitter.com") && !strings.Contains(u, "x.com") {
+		return false
+	}
+	return true
 }

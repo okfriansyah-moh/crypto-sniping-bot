@@ -177,6 +177,128 @@ func TestSolanaMetadataProbe_Determinism(t *testing.T) {
 	}
 }
 
+// ── Profile URL validation tests ──────────────────────────────────────────────
+
+// TestParseSocialLinks_TwitterPostIsRejected verifies that a Twitter URL
+// pointing to a post/tweet (containing "/status/") is NOT counted as a valid
+// social link. This was the exact exploit vector for the "test" rug token that
+// set twitter to an Elon Musk tweet to pass the HasSocialLinks check.
+func TestParseSocialLinks_TwitterPostIsRejected(t *testing.T) {
+	// Exactly the pattern observed in the gate evidence: viral Elon tweet used
+	// as the "twitter" metadata field.
+	body := `{"twitter":"https://x.com/elonmusk/status/1920908498099810362"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false for Twitter post URL (not a profile)")
+	}
+}
+
+func TestParseSocialLinks_TwitterProfileIsAccepted(t *testing.T) {
+	body := `{"twitter":"https://twitter.com/myproject"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Fatal("want HasSocialLinks=true for valid Twitter profile URL")
+	}
+}
+
+func TestParseSocialLinks_XProfileIsAccepted(t *testing.T) {
+	body := `{"twitter":"https://x.com/myproject"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Fatal("want HasSocialLinks=true for valid X.com profile URL")
+	}
+}
+
+func TestParseSocialLinks_TcoShortlinkIsRejected(t *testing.T) {
+	body := `{"twitter":"https://t.co/abc123"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false for t.co shortlink (tweet redirect, not profile)")
+	}
+}
+
+func TestParseSocialLinks_ExtensionsTwitterPostIsRejected(t *testing.T) {
+	body := `{"extensions":{"twitter":"https://x.com/user/status/9999"}}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false when extensions.twitter is a post URL")
+	}
+}
+
+func TestParseSocialLinks_TelegramProfileIsAccepted(t *testing.T) {
+	body := `{"telegram":"https://t.me/myproject_official"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Fatal("want HasSocialLinks=true for Telegram channel link")
+	}
+}
+
+func TestParseSocialLinks_WebsiteIsAccepted(t *testing.T) {
+	body := `{"website":"https://myproject.io"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Fatal("want HasSocialLinks=true for project website")
+	}
+}
+
+func TestParseSocialLinks_AllPostURLsReturnFalse(t *testing.T) {
+	// All three fields present but ALL are post/redirect URLs — still false.
+	body := `{
+		"twitter":"https://x.com/elonmusk/status/1234",
+		"telegram":"",
+		"website":""
+	}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false when all social URLs are post links")
+	}
+}
+
+func TestIsTwitterProfileURL(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"https://twitter.com/myproject", true},
+		{"https://x.com/myproject", true},
+		{"https://x.com/elonmusk/status/1920908498099810362", false},
+		{"https://twitter.com/user/status/123456", false},
+		{"https://t.co/SomeHash", false},
+		{"", false},
+		{"https://telegram.org/something", false}, // not twitter domain
+	}
+	for _, c := range cases {
+		got := isTwitterProfileURL(c.url)
+		if got != c.want {
+			t.Errorf("isTwitterProfileURL(%q) = %v, want %v", c.url, got, c.want)
+		}
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 type capturingHTTPClient struct {

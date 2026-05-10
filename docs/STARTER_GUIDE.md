@@ -2307,6 +2307,7 @@ through the PostgreSQL event bus \u2014 modules never call Telegram directly.
 | `/rescan_status`             | Shows rescan worker enabled/disabled state and last run timestamp                   |
 | `/dq [hours]`                | Shows Data Quality rejection breakdown for the last N hours (default: 1)            |
 | `/dlq`                       | Shows Dead Letter Queue size and top error types                                    |
+| `/executions`                | Last 20 tokens that reached execution stage (success + failed) with full CA address |
 | `/version`                   | Shows current strategy version and config snapshot hash                             |
 | `/mode strict`               | Switches to STRICT mode (conservative — rug-spike safety)                           |
 | `/mode balanced`             | Switches to BALANCED mode (default)                                                 |

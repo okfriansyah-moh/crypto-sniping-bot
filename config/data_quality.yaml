@@ -70,7 +70,7 @@ data_quality:
     # wallet has launched this many prior tokens. The $RIBBIT pattern
     # (29 launches, 0 migrations) gives full serial-launcher risk.
     # 0 disables; canonical default: 5.
-    max_creator_prev_token_count: 5
+    max_creator_prev_token_count: 1
 
     # no_social_links_risk_score: fixed risk contribution [0,1] when
     # SocialLinksKnown=true and HasSocialLinks=false. Set to 0 to disable.

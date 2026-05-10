@@ -361,6 +361,19 @@ probes:
     ipfs_gateway: "https://cloudflare-ipfs.com/ipfs/"
     max_body_bytes: 65536 # 64 KiB
 
+  # Creator reputation probe — queries pump.fun public API to get the
+  # ground-truth count of tokens ever launched from a Solana creator wallet.
+  # Closes the cold-start serial-launcher gap (BLOCKER-2): local DB always
+  # returns 0 on first boot, masking a developer's full launch history.
+  # Enabled by default. On API failure the probe degrades gracefully and
+  # the DQ layer applies fail-closed scoring (DEV_UNKNOWN_HISTORY).
+  solana_creator_reputation:
+    enabled: true
+    timeout_ms: 3000
+    base_url: "https://frontend-api.pump.fun"
+    max_body_bytes: 131072 # 128 KiB
+    page_limit: 50
+
 # Phase 10 — time-banded rescan worker (Layer 0.5).
 # Enabled by default for Phase 10+ pipelines.
 # See docs/PLAN.md for full design rationale.

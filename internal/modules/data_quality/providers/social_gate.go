@@ -147,9 +147,18 @@ func (p *SocialGateProvider) Evaluate(
 	hasWebsite := false
 	for _, pair := range pairs {
 		for _, s := range pair.Info.Socials {
-			if s.Type != "" {
-				socialTypes = append(socialTypes, s.Type)
+			t := strings.ToLower(s.Type)
+			if t == "" {
+				continue
 			}
+			// A Twitter/X social that points to a post/thread (not a profile)
+			// is not evidence of a real project identity. Record it as
+			// "twitter_post" so scoreSocials does not treat it as hasTwitter.
+			if (t == "twitter" || t == "x") && isPostURL(s.URL) {
+				socialTypes = append(socialTypes, "twitter_post")
+				continue
+			}
+			socialTypes = append(socialTypes, t)
 		}
 		if len(pair.Info.Websites) > 0 {
 			hasWebsite = true
@@ -188,6 +197,16 @@ func scoreSocials(socialTypes []string, hasWebsite bool) (score float64, flags [
 		// No social links at all — unknown, treat as mildly risky.
 		return 0.50, []string{"social_gate:no_socials"}
 	}
+}
+
+// isPostURL returns true when the URL points to a tweet/thread/post rather
+// than a project's Twitter profile page. A link to a viral post is not
+// evidence of a project identity and must not satisfy the Twitter presence gate.
+func isPostURL(rawURL string) bool {
+	u := strings.ToLower(rawURL)
+	return strings.Contains(u, "/status/") ||
+		strings.Contains(u, "/statuses/") ||
+		strings.Contains(u, "t.co/")
 }
 
 // chainToDEXChainID maps internal chain keys to DEXScreener chain IDs.
