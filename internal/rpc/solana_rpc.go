@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -298,6 +299,23 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 	}
 	if err := conn.ReadJSON(&subResp); err != nil {
 		conn.Close()
+		// EOF or ErrUnexpectedEOF here means the provider sent a WebSocket close
+		// frame (or dropped the TCP connection) before responding to the subscribe
+		// request — typically a concurrent-connection cap or transient server drop.
+		// Rotate the WS endpoint so the reconnect loop retries on the fallback
+		// provider (e.g. QuickNode → Helius), identical to the rate-limit rotation.
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			newIdx := c.wsIdx.Add(1)
+			nextEntry := c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
+			c.logger.Warn("solana_ws_subscribe_eof_rotating",
+				"program", programID,
+				"provider", wsEntry.Dialect.Name(),
+				"from", wsEntry.URL,
+				"to_provider", nextEntry.Dialect.Name(),
+				"to", nextEntry.URL,
+				"total_endpoints", len(c.wsEndpoints),
+			)
+		}
 		return nil, fmt.Errorf("solana_client: read subscribe response: %w", err)
 	}
 	if subResp.Error != nil {
