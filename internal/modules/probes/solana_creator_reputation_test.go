@@ -36,8 +36,11 @@ func solanaCreatorDTO(creator string) contracts.MarketDataDTO {
 // ── Happy-path tests ──────────────────────────────────────────────────────────
 
 func TestSolanaCreatorReputation_ArrayFormat21Tokens(t *testing.T) {
-	// Simulate a dev with 21 prior tokens (the exact gate-review scenario).
-	coins := make([]map[string]string, 21)
+	// Simulate a dev with 21 prior tokens. The pump.fun API returns all tokens
+	// including the current one being evaluated, so the array has 22 entries
+	// (21 prior + 1 current). The probe subtracts 1 to match the DTO semantics
+	// (CreatorPrevTokenCount = prior launches, excluding the current token).
+	coins := make([]map[string]string, 22) // 21 prior + 1 current token
 	for i := range coins {
 		coins[i] = map[string]string{"mint": fmt.Sprintf("token%d", i)}
 	}
@@ -61,7 +64,7 @@ func TestSolanaCreatorReputation_ArrayFormat21Tokens(t *testing.T) {
 		t.Fatal("want CreatorPrevTokenCountKnown=true")
 	}
 	if out.CreatorPrevTokenCount != 21 {
-		t.Fatalf("want count=21, got %d", out.CreatorPrevTokenCount)
+		t.Fatalf("want count=21 prior tokens (22 from API minus current), got %d", out.CreatorPrevTokenCount)
 	}
 }
 
@@ -89,7 +92,9 @@ func TestSolanaCreatorReputation_ZeroTokensNewDev(t *testing.T) {
 }
 
 func TestSolanaCreatorReputation_EnvelopeFormatWithTotal(t *testing.T) {
-	// Some API versions wrap the array in {"total": N, "coins": [...]}
+	// Some API versions wrap the array in {"total": N, "coins": [...]}.
+	// total=42 means the creator has 42 tokens total (including the current one),
+	// so CreatorPrevTokenCount = 42-1 = 41 prior tokens.
 	body := `{"total":42,"coins":[{"mint":"a"},{"mint":"b"}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -103,8 +108,8 @@ func TestSolanaCreatorReputation_EnvelopeFormatWithTotal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.CreatorPrevTokenCount != 42 {
-		t.Fatalf("want count=42 (from envelope total), got %d", out.CreatorPrevTokenCount)
+	if out.CreatorPrevTokenCount != 41 {
+		t.Fatalf("want count=41 prior tokens (42 from envelope total minus current), got %d", out.CreatorPrevTokenCount)
 	}
 }
 

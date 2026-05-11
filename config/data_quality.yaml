@@ -69,7 +69,7 @@ data_quality:
     # max_creator_prev_token_count: reject contribution rises when the creator
     # wallet has launched this many prior tokens. The $RIBBIT pattern
     # (29 launches, 0 migrations) gives full serial-launcher risk.
-    # 0 disables; canonical default: 5.
+    # 0 disables; canonical default: 1.
     max_creator_prev_token_count: 1
 
     # no_social_links_risk_score: fixed risk contribution [0,1] when
@@ -109,6 +109,11 @@ data_quality:
     # a serial launcher. Without this, a 300ms RPC timeout converts a 29-token
     # serial rug developer into an approved first-timer.
     # MANDATORY criterion — must not be disabled in production.
+    # NOTE: the solana_creator_reputation probe calls frontend-api.pump.fun behind
+    # Cloudflare. Browser-compatible headers (User-Agent, Origin, Referer) are set
+    # on every request to prevent HTTP 530 bot-block responses. If 530s persist,
+    # increase probes.solana_creator_reputation.timeout_ms in pipeline.yaml or
+    # wire an alternative creator history source (e.g. Helius searchAssets).
     reject_unknown_creator_count: true
 
     # min_token_age_seconds: hard-reject tokens younger than this threshold.

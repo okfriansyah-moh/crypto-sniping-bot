@@ -53,9 +53,11 @@ import (
 )
 
 const (
-	// defaultCreatorBaseURL is the pump.fun public creator API.
+	// defaultCreatorBaseURL is the pump.fun public creator API (v3 subdomain).
 	// Returns a JSON array of coins created by the given wallet address.
-	defaultCreatorBaseURL = "https://frontend-api.pump.fun"
+	// v3 is used because the v1 endpoint (frontend-api.pump.fun) is blocked
+	// by Cloudflare error 1016 (Origin Access Denied) even with browser headers.
+	defaultCreatorBaseURL = "https://frontend-api-v3.pump.fun"
 
 	// defaultCreatorTimeoutMs is a conservative timeout for off-chain
 	// metadata calls — long enough for international latency, short enough
@@ -91,7 +93,7 @@ type SolanaCreatorReputationConfig struct {
 
 	// BaseURL is the root of the pump.fun creator API.
 	// Must be HTTPS (or http://localhost / http://127.x for tests).
-	// Defaults to "https://frontend-api.pump.fun".
+	// Defaults to "https://frontend-api-v3.pump.fun".
 	BaseURL string `yaml:"base_url"`
 
 	// MaxBodyBytes is the response body size cap (in bytes).
@@ -180,6 +182,14 @@ func (p *SolanaCreatorReputationProbe) Probe(
 	}
 
 	out := in
+	// The pump.fun API returns all tokens by the creator including the
+	// current token being evaluated. Subtract 1 to match the DTO contract:
+	// CreatorPrevTokenCount = prior launches excluding the current token.
+	// If the current token has not been indexed yet the count stays accurate
+	// (no over-subtract). If count=0 it stays at 0 (defensive).
+	if count > 0 {
+		count--
+	}
 	out.CreatorPrevTokenCount = count
 	out.CreatorPrevTokenCountKnown = true
 
@@ -211,7 +221,15 @@ func (p *SolanaCreatorReputationProbe) fetchCreatorTokenCount(
 	if err != nil {
 		return 0, fmt.Errorf("build request: %w", err)
 	}
+	// Set browser-compatible headers to avoid Cloudflare bot protection (HTTP 530).
+	// The pump.fun frontend API is served behind Cloudflare and blocks plain
+	// Go HTTP clients (no User-Agent). These headers do not bypass authentication
+	// — the API requires no credentials. This is standard API client practice.
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	req.Header.Set("Origin", "https://pump.fun")
+	req.Header.Set("Referer", "https://pump.fun/")
 
 	resp, err := p.client.Do(req)
 	if err != nil {

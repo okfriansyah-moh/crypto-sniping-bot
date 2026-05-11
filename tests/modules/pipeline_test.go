@@ -25,6 +25,14 @@ func marketDataFixture() contracts.MarketDataDTO {
 		Chain:          "eth",
 		ReserveBaseRaw: "5000000000000000000", // 5 ETH
 		VersionID:      "v1",
+		// Mark dev history as known so DetectDevReputation does not trigger the
+		// fail-closed DEV_UNKNOWN_HISTORY path (Score=1.0) that pushes riskScore
+		// to the RISKY_PASS boundary. A "good" token has a verified first-time
+		// creator with confirmed social presence.
+		CreatorPrevTokenCountKnown: true, // first-time creator
+		CreatorPrevTokenCount:      0,
+		SocialLinksKnown:           true,
+		HasSocialLinks:             true,
 	}
 }
 
