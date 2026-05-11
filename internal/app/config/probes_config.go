@@ -89,7 +89,7 @@ type SolanaCreatorReputationYAML struct {
 	Enabled bool `yaml:"enabled"`
 
 	// TimeoutMs is the HTTP deadline for the pump.fun API request.
-	// Valid range: [500, 10000]. Default: 3000.
+	// Valid range: [500, 10000]. Default: 5000.
 	TimeoutMs int `yaml:"timeout_ms"`
 
 	// BaseURL is the pump.fun creator API root. Must be HTTPS.
@@ -103,4 +103,12 @@ type SolanaCreatorReputationYAML struct {
 	// PageLimit is the ?limit= parameter sent to pump.fun (max coins per
 	// page). Valid range: [1, 200]. Default: 50.
 	PageLimit int `yaml:"page_limit"`
+
+	// HeliusRPCURL is NOT read from YAML (yaml:"-"). It is populated
+	// programmatically in cmd/server.go from the first Helius HTTP
+	// endpoint found in cfg.Solana.RPCEndpoints. The URL embeds the
+	// Helius API key as a query parameter (sourced from SOLANA_RPC_HTTP_2
+	// env var). Empty string disables the Helius DAS fallback.
+	// NEVER set this field directly in pipeline.yaml — it contains an API key.
+	HeliusRPCURL string `yaml:"-"`
 }

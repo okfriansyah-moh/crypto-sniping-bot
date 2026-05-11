@@ -14,12 +14,12 @@ data_quality:
   # ── Detector enable flags ─────────────────────────────────────
   # Disabled detectors are skipped entirely (cost-saving for non-applicable chains).
   detectors:
-    honeypot_simulation: true # eth_call buy→sell round trip
+    honeypot_simulation: false # EVM-only (eth_call buy→sell) — not applicable to Solana; re-enable when EVM chains are added
     tax_anomaly: true # decode Transfer logs in simulated tx
     lp_lock: true # Unicrypt / Team Finance / PinkLock
     wash_trading: true # unique-sender ratio over recent Swaps
     rug_authority: true # ABI selectors (EVM) / mint authority (Solana)
-    contract_verified: true # Etherscan / BscScan v2 source-code lookup
+    contract_verified: false # EVM-only (Etherscan/BscScan) — not applicable to Solana; re-enable when EVM chains are added
     # dev_reputation: serial-launcher + no-social-links filter.
     # Requires solana_creator_reputation probe to populate
     # CreatorPrevTokenCount / SocialLinksKnown on MarketDataDTO.

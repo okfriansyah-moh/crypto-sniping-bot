@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -527,10 +528,38 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 			BaseURL:      cfg.Probes.SolanaCreatorReputation.BaseURL,
 			MaxBodyBytes: cfg.Probes.SolanaCreatorReputation.MaxBodyBytes,
 			PageLimit:    cfg.Probes.SolanaCreatorReputation.PageLimit,
+			// HeliusRPCURL enables the Helius DAS circuit-breaker fallback when
+			// pump.fun is unreachable. The URL embeds the API key from the
+			// SOLANA_RPC_HTTP_2 env var — never hardcoded in config files.
+			HeliusRPCURL: findHelliusHTTPURL(cfg.Solana.RPCEndpoints),
 		}, logger))
 	}
 
 	return out
+}
+
+// findHelliusHTTPURL scans cfg.Solana.RPCEndpoints for the first Helius HTTP
+// endpoint and returns its URL (which embeds the API key as ?api-key=...).
+// This URL is passed to the creator-reputation probe as the Helius DAS
+// circuit-breaker fallback. Returns "" when no Helius HTTP endpoint is found.
+//
+// Provider detection: explicit Provider=="helius" field takes precedence;
+// falls back to URL substring matching ("helius-rpc.com", "helius.dev").
+func findHelliusHTTPURL(endpoints []config.SolanaRPCEndpoint) string {
+	for _, ep := range endpoints {
+		if ep.Kind != "http" || ep.URL == "" {
+			continue
+		}
+		provider := strings.ToLower(ep.Provider)
+		urlLower := strings.ToLower(ep.URL)
+		isHelius := provider == "helius" ||
+			strings.Contains(urlLower, "helius-rpc.com") ||
+			strings.Contains(urlLower, "helius.dev")
+		if isHelius {
+			return ep.URL
+		}
+	}
+	return ""
 }
 
 // solanaProbeRPCAdapter adapts *rpc.SolanaClient → probes.SolanaProbeRPCClient.

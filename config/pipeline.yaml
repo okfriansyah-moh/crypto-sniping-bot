@@ -329,20 +329,20 @@ probes:
   # FreezeAuthorityRenounced, SolanaAuthoritiesKnown.
   solana_authorities:
     enabled: true
-    timeout_ms: 300
+    timeout_ms: 1000 # increased from 300ms — Helius RPC needs headroom under load
     commitment: confirmed
   # Pump.fun bonding-curve reserve probe — replaces the virtual reserve
   # estimate with live (virtual+real) reserves and a USD liquidity figure
   # derived from the live SOL/USD feed.
   solana_pumpfun_lp:
     enabled: true
-    timeout_ms: 300
+    timeout_ms: 1000 # increased from 300ms — Helius RPC needs headroom under load
     commitment: confirmed
   # SPL holder-concentration probe — sets HolderCount, Top5HolderPct,
   # HolderDistKnown via getTokenLargestAccounts.
   solana_holder_dist:
     enabled: true
-    timeout_ms: 300
+    timeout_ms: 1000 # increased from 300ms — Helius RPC needs headroom under load
     commitment: confirmed
     top_k: 5
   # Uniswap-V2 getReserves probe — replaces ingestion-time per-swap flow
@@ -369,7 +369,7 @@ probes:
   # the DQ layer applies fail-closed scoring (DEV_UNKNOWN_HISTORY).
   solana_creator_reputation:
     enabled: true
-    timeout_ms: 3000
+    timeout_ms: 5000 # increased from 3000ms — allows pump.fun + Helius DAS fallback
     base_url: "https://frontend-api.pump.fun"
     max_body_bytes: 131072 # 128 KiB
     page_limit: 50

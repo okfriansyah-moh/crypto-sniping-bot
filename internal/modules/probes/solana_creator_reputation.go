@@ -39,6 +39,7 @@ package probes
 //     (fail-closed for cold-start — DQ treats unknown as max risk).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,6 +48,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"crypto-sniping-bot/contracts"
@@ -73,6 +75,15 @@ const (
 	// items, the real count is ≥ 50 — still a hard serial-launcher signal
 	// far above any configured threshold.
 	defaultCreatorPageLimit = 50
+
+	// defaultCircuitFailureThreshold is the number of consecutive 5xx/network
+	// failures from pump.fun before the circuit opens and routes traffic to
+	// the Helius DAS fallback.
+	defaultCircuitFailureThreshold = 5
+
+	// defaultCircuitHalfOpenSec is how long (seconds) to keep the circuit
+	// OPEN before transitioning to HALF_OPEN and re-testing pump.fun.
+	defaultCircuitHalfOpenSec = 120
 )
 
 // SolanaCreatorReputationHTTPClient is the minimal HTTP interface the probe
@@ -103,15 +114,99 @@ type SolanaCreatorReputationConfig struct {
 	// PageLimit is the ?limit= parameter sent to the API.
 	// Defaults to 50. Values outside [1, 200] are clamped.
 	PageLimit int `yaml:"page_limit"`
+
+	// HeliusRPCURL is the full Helius HTTP RPC endpoint URL (including the
+	// ?api-key=... query parameter). Used as a fallback when the pump.fun
+	// creator API fails consecutively (circuit breaker opens). Populated
+	// programmatically from cfg.Solana.RPCEndpoints in cmd/server.go —
+	// NEVER set directly in YAML (it embeds an API key). Empty disables
+	// the Helius DAS fallback, causing fail-closed on pump.fun outage.
+	HeliusRPCURL string `yaml:"-"`
+}
+
+// circuitState tracks the pump.fun circuit breaker state machine:
+//
+//	CLOSED  ──(5 consecutive failures)──▶  OPEN
+//	  ▲                                      │
+//	  │                                  (120 s)
+//	  │                                      ▼
+//	  └────────(1 success)────────────  HALF_OPEN
+//
+// When OPEN or HALF_OPEN, all requests are forwarded to Helius DAS.
+// A single pump.fun success from HALF_OPEN resets the circuit to CLOSED.
+type circuitState int
+
+const (
+	circuitClosed   circuitState = 0 // normal operation — pump.fun is healthy
+	circuitOpen     circuitState = 1 // pump.fun is down — use Helius DAS exclusively
+	circuitHalfOpen circuitState = 2 // cooldown elapsed — re-test pump.fun once
+)
+
+// circuitBreaker is a thread-safe, in-memory circuit breaker for the
+// pump.fun creator API. It is not persisted across restarts — a fresh
+// process always starts in the CLOSED state and requires another
+// burst of failures to open again.
+type circuitBreaker struct {
+	mu                  sync.Mutex
+	state               circuitState
+	consecutiveFailures int
+	openedAt            time.Time
+	failureThreshold    int // open after N consecutive failures
+	halfOpenAfterSec    int // re-test after N seconds
+}
+
+// shouldUseFallback returns true when the circuit is OPEN or transitions
+// from OPEN to HALF_OPEN (if the cooldown has elapsed). Callers that
+// receive true must route to Helius DAS; pump.fun must not be called.
+func (cb *circuitBreaker) shouldUseFallback() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	switch cb.state {
+	case circuitOpen:
+		if time.Since(cb.openedAt) >= time.Duration(cb.halfOpenAfterSec)*time.Second {
+			cb.state = circuitHalfOpen
+			return true // route to Helius but allow a pump.fun re-test next turn
+		}
+		return true
+	case circuitHalfOpen:
+		return true
+	default: // circuitClosed
+		return false
+	}
+}
+
+// recordFailure increments the consecutive failure counter and opens the
+// circuit when the threshold is reached. Returns true if the circuit just
+// transitioned to OPEN (so the caller can emit a log line).
+func (cb *circuitBreaker) recordFailure() (justOpened bool) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.consecutiveFailures++
+	if cb.state == circuitClosed && cb.consecutiveFailures >= cb.failureThreshold {
+		cb.state = circuitOpen
+		cb.openedAt = time.Now()
+		return true
+	}
+	return false
+}
+
+// recordSuccess resets the failure counter and closes the circuit.
+// Must be called after any successful pump.fun response.
+func (cb *circuitBreaker) recordSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.consecutiveFailures = 0
+	cb.state = circuitClosed
 }
 
 // SolanaCreatorReputationProbe queries the pump.fun creator API to determine
 // how many tokens a wallet has previously launched. It enriches the DTO's
 // CreatorPrevTokenCount and CreatorPrevTokenCountKnown fields.
 type SolanaCreatorReputationProbe struct {
-	client SolanaCreatorReputationHTTPClient
-	cfg    SolanaCreatorReputationConfig
-	logger *slog.Logger
+	client  SolanaCreatorReputationHTTPClient
+	cfg     SolanaCreatorReputationConfig
+	logger  *slog.Logger
+	breaker *circuitBreaker // pump.fun API circuit breaker; nil when HeliusRPCURL is empty
 }
 
 // NewSolanaCreatorReputationProbe constructs the probe with defaults applied
@@ -136,10 +231,21 @@ func NewSolanaCreatorReputationProbe(
 	if cfg.PageLimit <= 0 || cfg.PageLimit > 200 {
 		cfg.PageLimit = defaultCreatorPageLimit
 	}
+
+	// Only arm the circuit breaker when a Helius fallback URL is provided.
+	// With no fallback, pump.fun failures remain fail-closed (no breaker needed).
+	var cb *circuitBreaker
+	if cfg.HeliusRPCURL != "" {
+		cb = &circuitBreaker{
+			failureThreshold: defaultCircuitFailureThreshold,
+			halfOpenAfterSec: defaultCircuitHalfOpenSec,
+		}
+	}
 	return &SolanaCreatorReputationProbe{
-		client: client,
-		cfg:    cfg,
-		logger: logger,
+		client:  client,
+		cfg:     cfg,
+		logger:  logger,
+		breaker: cb,
 	}
 }
 
@@ -151,6 +257,17 @@ func (p *SolanaCreatorReputationProbe) Name() string { return "solana_creator_re
 // disabled, the DTO is not a Solana token, or the creator address is absent.
 // Returns (in, err) with CreatorPrevTokenCountKnown=false on any fetch or
 // parse error (fail-closed).
+//
+// Circuit breaker behaviour (only active when HeliusRPCURL is configured):
+//
+//  1. If the circuit is OPEN (pump.fun has failed ≥ 5 consecutive times),
+//     route directly to Helius DAS — skip pump.fun entirely.
+//  2. Otherwise try pump.fun first. On failure:
+//     a. Increment the consecutive-failure counter; open the circuit if
+//     the threshold is reached.
+//     b. If Helius DAS is configured, fall back to it for this token.
+//     c. If Helius DAS is not configured, return fail-closed.
+//  3. On pump.fun success: reset the circuit to CLOSED.
 func (p *SolanaCreatorReputationProbe) Probe(
 	ctx context.Context,
 	in contracts.MarketDataDTO,
@@ -170,15 +287,68 @@ func (p *SolanaCreatorReputationProbe) Probe(
 		return in, fmt.Errorf("solana_creator_reputation: insecure base_url: %w", err)
 	}
 
-	count, err := p.fetchCreatorTokenCount(ctx, in.CreatorAddress)
-	if err != nil {
-		p.logger.Warn("solana_creator_reputation_fetch_failed",
+	var count int32
+	var fetchErr error
+
+	if p.breaker != nil && p.breaker.shouldUseFallback() {
+		// Circuit is OPEN/HALF_OPEN — route to Helius DAS directly.
+		p.logger.Info("creator_probe_circuit_open_using_helius",
 			"creator", in.CreatorAddress,
 			"token", in.TokenAddress,
-			"error", truncateMsg(err.Error(), 200),
 		)
-		// Fail-closed: caller must leave CreatorPrevTokenCountKnown=false.
-		return in, err
+		count, fetchErr = p.fetchViaHelliusDAS(ctx, in.CreatorAddress)
+		if fetchErr != nil {
+			p.logger.Warn("creator_probe_helius_failed",
+				"creator", in.CreatorAddress,
+				"token", in.TokenAddress,
+				"error", truncateMsg(fetchErr.Error(), 200),
+			)
+			return in, fetchErr
+		}
+		// Helius succeeded from HALF_OPEN — do not reset the circuit yet;
+		// only a successful pump.fun call should close it.
+	} else {
+		// Circuit is CLOSED — try pump.fun first.
+		count, fetchErr = p.fetchCreatorTokenCount(ctx, in.CreatorAddress)
+		if fetchErr != nil {
+			p.logger.Warn("creator_probe_pumpfun_failed",
+				"creator", in.CreatorAddress,
+				"token", in.TokenAddress,
+				"error", truncateMsg(fetchErr.Error(), 200),
+			)
+			if p.breaker != nil {
+				if opened := p.breaker.recordFailure(); opened {
+					p.logger.Warn("creator_probe_circuit_opened",
+						"consecutive_failures", defaultCircuitFailureThreshold,
+						"fallback", "helius_das",
+					)
+				}
+			}
+			// Attempt Helius DAS fallback.
+			if p.cfg.HeliusRPCURL != "" {
+				var heliusErr error
+				count, heliusErr = p.fetchViaHelliusDAS(ctx, in.CreatorAddress)
+				if heliusErr != nil {
+					p.logger.Warn("creator_probe_helius_failed",
+						"creator", in.CreatorAddress,
+						"token", in.TokenAddress,
+						"error", truncateMsg(heliusErr.Error(), 200),
+					)
+					return in, heliusErr // both sources failed — fail-closed
+				}
+				p.logger.Info("creator_probe_helius_fallback_used",
+					"creator", in.CreatorAddress,
+					"token", in.TokenAddress,
+					"count", count,
+				)
+			} else {
+				return in, fetchErr // no fallback configured — fail-closed
+			}
+		} else {
+			if p.breaker != nil {
+				p.breaker.recordSuccess()
+			}
+		}
 	}
 
 	out := in
@@ -284,6 +454,138 @@ func parseCreatorCoinCount(body []byte) (int32, error) {
 	}
 
 	return 0, fmt.Errorf("unrecognised response format (len=%d)", len(body))
+}
+
+// fetchViaHelliusDAS queries the Helius DAS API (searchAssets) to count the
+// number of fungible tokens previously created by the given wallet address.
+// It uses the creatorAddress filter which matches Metaplex metadata creators
+// array \u2014 pump.fun tokens include the creator wallet in this field.
+//
+// Security:
+//   - HeliusRPCURL is sourced from env var (via chains.yaml) \u2014 never YAML-hardcoded.
+//   - HeliusRPCURL must be HTTPS (API key is embedded as ?api-key= query param).
+//     Loopback addresses (127.x, localhost) allowed for test servers.
+//   - Response body is bounded to MaxBodyBytes via io.LimitReader.
+//   - RPC error messages are truncated to 200 chars before surfacing.
+func (p *SolanaCreatorReputationProbe) fetchViaHelliusDAS(
+	ctx context.Context,
+	creatorAddress string,
+) (int32, error) {
+	// Enforce HTTPS for the Helius URL — it embeds an API key as ?api-key=.
+	if err := p.validateBaseURL(p.cfg.HeliusRPCURL); err != nil {
+		return 0, fmt.Errorf("helius_das: insecure helius_rpc_url: %w", err)
+	}
+	type searchParams struct {
+		CreatorAddress  string `json:"creatorAddress"`
+		CreatorVerified bool   `json:"creatorVerified"`
+		TokenType       string `json:"tokenType"`
+		Page            int    `json:"page"`
+		Limit           int    `json:"limit"`
+	}
+	type rpcRequest struct {
+		JSONRPC string       `json:"jsonrpc"`
+		ID      string       `json:"id"`
+		Method  string       `json:"method"`
+		Params  searchParams `json:"params"`
+	}
+
+	payload := rpcRequest{
+		JSONRPC: "2.0",
+		ID:      "creator-rep",
+		Method:  "searchAssets",
+		Params: searchParams{
+			CreatorAddress:  creatorAddress,
+			CreatorVerified: false, // pump.fun does not verify the creator field
+			TokenType:       "fungible",
+			Page:            1,
+			Limit:           p.cfg.PageLimit,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("helius_das: marshal request: %w", err)
+	}
+
+	deadline := time.Duration(p.cfg.timeoutMs()) * time.Millisecond
+	reqCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, p.cfg.HeliusRPCURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return 0, fmt.Errorf("helius_das: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("helius_das: http do: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("helius_das: unexpected status %d", resp.StatusCode)
+	}
+
+	lr := io.LimitReader(resp.Body, p.cfg.MaxBodyBytes)
+	respBody, err := io.ReadAll(lr)
+	if err != nil {
+		return 0, fmt.Errorf("helius_das: read body: %w", err)
+	}
+
+	count, err := parseHelliusDASCount(respBody)
+	if err != nil {
+		return 0, fmt.Errorf("helius_das: parse response: %w", err)
+	}
+	return count, nil
+}
+
+// parseHelliusDASCount parses the Helius DAS searchAssets JSON-RPC response
+// and returns the count of fungible tokens found for the creator address.
+//
+// Helius DAS response shape:
+//
+//	{
+//	  "jsonrpc": "2.0",
+//	  "result": {
+//	    "total": 3,
+//	    "limit": 50,
+//	    "page":  1,
+//	    "items": [...]
+//	  }
+//	}
+//
+// On a JSON-RPC error:
+//
+//	{
+//	  "jsonrpc": "2.0",
+//	  "error": { "code": -32600, "message": "..." }
+//	}
+func parseHelliusDASCount(body []byte) (int32, error) {
+	var rpcResp struct {
+		Result *struct {
+			Total int32             `json:"total"`
+			Items []json.RawMessage `json:"items"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		return 0, fmt.Errorf("json decode: %w", err)
+	}
+	if rpcResp.Error != nil {
+		return 0, fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, truncateMsg(rpcResp.Error.Message, 200))
+	}
+	if rpcResp.Result == nil {
+		return 0, fmt.Errorf("missing result field in response (len=%d)", len(body))
+	}
+	if rpcResp.Result.Total > 0 {
+		return rpcResp.Result.Total, nil
+	}
+	return int32(len(rpcResp.Result.Items)), nil //nolint:gosec
 }
 
 // validateBaseURL enforces the HTTPS-only security invariant.

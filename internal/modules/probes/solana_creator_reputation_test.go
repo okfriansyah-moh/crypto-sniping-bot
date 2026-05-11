@@ -310,3 +310,200 @@ func TestParseCreatorCoinCount_InvalidJSON(t *testing.T) {
 		t.Fatal("want error for invalid JSON")
 	}
 }
+
+// ── Circuit breaker + Helius DAS fallback tests ───────────────────────────────
+
+// defaultCreatorCfgWithHelius returns a config that points pump.fun at
+// pumpfunURL and Helius DAS at heliusURL (both local httptest servers).
+func defaultCreatorCfgWithHelius(pumpfunURL, heliusURL string) SolanaCreatorReputationConfig {
+	return SolanaCreatorReputationConfig{
+		Enabled:      true,
+		TimeoutMs:    500,
+		BaseURL:      pumpfunURL,
+		MaxBodyBytes: defaultCreatorMaxBodyBytes,
+		PageLimit:    50,
+		HeliusRPCURL: heliusURL,
+	}
+}
+
+// heliusDASBody builds a minimal Helius DAS searchAssets response body.
+func heliusDASBody(total int32) []byte {
+	items := make([]map[string]string, 0)
+	body, _ := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"result": map[string]interface{}{
+			"total": total,
+			"limit": 50,
+			"page":  1,
+			"items": items,
+		},
+	})
+	return body
+}
+
+// TestCreatorProbe_PumpFunFailsFallsBackToHelius verifies that when pump.fun
+// returns a 503, the probe immediately falls back to Helius DAS and returns
+// the count from Helius without error.
+func TestCreatorProbe_PumpFunFailsFallsBackToHelius(t *testing.T) {
+	pumpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable) // pump.fun is down
+	}))
+	defer pumpSrv.Close()
+
+	// Helius returns total=6 (5 prior + 1 current → probe subtracts 1 → 5).
+	heliusSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(heliusDASBody(6))
+	}))
+	defer heliusSrv.Close()
+
+	cfg := defaultCreatorCfgWithHelius(pumpSrv.URL, heliusSrv.URL)
+	p := NewSolanaCreatorReputationProbe(pumpSrv.Client(), cfg, nil)
+	out, err := p.Probe(context.Background(), solanaCreatorDTO("serialdev"))
+
+	if err != nil {
+		t.Fatalf("want nil error (Helius fallback succeeded), got: %v", err)
+	}
+	if !out.CreatorPrevTokenCountKnown {
+		t.Fatal("want CreatorPrevTokenCountKnown=true (Helius succeeded)")
+	}
+	if out.CreatorPrevTokenCount != 5 {
+		t.Fatalf("want count=5 (6 from Helius minus current token), got %d", out.CreatorPrevTokenCount)
+	}
+}
+
+// TestCreatorProbe_BothSourcesFailClosed verifies that when both pump.fun
+// and Helius DAS fail, the probe returns an error and leaves
+// CreatorPrevTokenCountKnown=false (double fail-closed).
+func TestCreatorProbe_BothSourcesFailClosed(t *testing.T) {
+	pumpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer pumpSrv.Close()
+
+	heliusSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer heliusSrv.Close()
+
+	cfg := defaultCreatorCfgWithHelius(pumpSrv.URL, heliusSrv.URL)
+	p := NewSolanaCreatorReputationProbe(pumpSrv.Client(), cfg, nil)
+	out, err := p.Probe(context.Background(), solanaCreatorDTO("somedev"))
+
+	if err == nil {
+		t.Fatal("want error when both sources fail")
+	}
+	if out.CreatorPrevTokenCountKnown {
+		t.Fatal("want CreatorPrevTokenCountKnown=false when both sources fail (fail-closed)")
+	}
+}
+
+// TestCreatorProbe_CircuitOpensAfterThresholdFailures verifies that after
+// defaultCircuitFailureThreshold consecutive pump.fun failures the circuit
+// breaker opens and subsequent probes route directly to Helius DAS.
+func TestCreatorProbe_CircuitOpensAfterThresholdFailures(t *testing.T) {
+	pumpCallCount := 0
+	pumpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pumpCallCount++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer pumpSrv.Close()
+
+	heliusSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(heliusDASBody(3))
+	}))
+	defer heliusSrv.Close()
+
+	cfg := defaultCreatorCfgWithHelius(pumpSrv.URL, heliusSrv.URL)
+	p := NewSolanaCreatorReputationProbe(pumpSrv.Client(), cfg, nil)
+	in := solanaCreatorDTO("somedev")
+
+	// Exhaust the failure threshold — each call fails pump.fun + falls back to Helius.
+	for i := 0; i < defaultCircuitFailureThreshold; i++ {
+		_, _ = p.Probe(context.Background(), in)
+	}
+	pumpBeforeOpen := pumpCallCount
+
+	// Circuit should now be OPEN. This call must NOT hit pump.fun.
+	out, err := p.Probe(context.Background(), in)
+
+	if err != nil {
+		t.Fatalf("want nil error after circuit opened (Helius handles it), got: %v", err)
+	}
+	if out.CreatorPrevTokenCount != 2 { // 3 - 1 (subtract current token)
+		t.Fatalf("want count=2 from Helius after circuit opened, got %d", out.CreatorPrevTokenCount)
+	}
+	// pump.fun must not have been called again after the circuit opened.
+	if pumpCallCount != pumpBeforeOpen {
+		t.Fatalf("circuit is OPEN but pump.fun was called again (count=%d, expected %d)",
+			pumpCallCount, pumpBeforeOpen)
+	}
+}
+
+// TestCreatorProbe_InsecureHeliusURLRejected verifies that a non-HTTPS
+// HeliusRPCURL (not loopback) is rejected before any HTTP call is made.
+func TestCreatorProbe_InsecureHeliusURLRejected(t *testing.T) {
+	pumpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable) // pump.fun is down
+	}))
+	defer pumpSrv.Close()
+
+	cfg := defaultCreatorCfgWithHelius(
+		pumpSrv.URL,
+		"http://evil-rpc.example.com?api-key=SECRET", // non-HTTPS, non-loopback
+	)
+	p := NewSolanaCreatorReputationProbe(pumpSrv.Client(), cfg, nil)
+	_, err := p.Probe(context.Background(), solanaCreatorDTO("somedev"))
+
+	if err == nil {
+		t.Fatal("want error: non-HTTPS HeliusRPCURL must be rejected (API key protection)")
+	}
+	if !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("expected HTTPS error for insecure Helius URL, got: %v", err)
+	}
+}
+
+// ── parseHelliusDASCount unit tests ──────────────────────────────────────────
+
+func TestParseHelliusDASCount_ValidResponse(t *testing.T) {
+	body := heliusDASBody(7)
+	count, err := parseHelliusDASCount(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 7 {
+		t.Fatalf("want 7, got %d", count)
+	}
+}
+
+func TestParseHelliusDASCount_RPCErrorBody(t *testing.T) {
+	body := []byte(`{"jsonrpc":"2.0","error":{"code":-32600,"message":"invalid request"}}`)
+	_, err := parseHelliusDASCount(body)
+	if err == nil {
+		t.Fatal("want error for RPC error response")
+	}
+	if !strings.Contains(err.Error(), "-32600") {
+		t.Fatalf("want error code in message, got: %v", err)
+	}
+}
+
+func TestParseHelliusDASCount_MissingResult(t *testing.T) {
+	body := []byte(`{"jsonrpc":"2.0"}`)
+	_, err := parseHelliusDASCount(body)
+	if err == nil {
+		t.Fatal("want error when result field is missing")
+	}
+}
+
+func TestParseHelliusDASCount_ZeroTotalFallsBackToItems(t *testing.T) {
+	// When total=0 (API returned no total), count falls back to len(items).
+	body := []byte(`{"jsonrpc":"2.0","result":{"total":0,"items":[{"id":"a"},{"id":"b"}]}}`)
+	count, err := parseHelliusDASCount(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("want count=2 from items len, got %d", count)
+	}
+}
