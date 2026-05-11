@@ -326,6 +326,11 @@ func (p *SolanaCreatorReputationProbe) Probe(
 			}
 			// Attempt Helius DAS fallback.
 			if p.cfg.HeliusRPCURL != "" {
+				p.logger.Info("creator_probe_helius_attempting",
+					"creator", in.CreatorAddress,
+					"token", in.TokenAddress,
+					"reason", "pumpfun_failed",
+				)
 				var heliusErr error
 				count, heliusErr = p.fetchViaHelliusDAS(ctx, in.CreatorAddress)
 				if heliusErr != nil {
@@ -456,10 +461,12 @@ func parseCreatorCoinCount(body []byte) (int32, error) {
 	return 0, fmt.Errorf("unrecognised response format (len=%d)", len(body))
 }
 
-// fetchViaHelliusDAS queries the Helius DAS API (searchAssets) to count the
-// number of fungible tokens previously created by the given wallet address.
+// fetchViaHelliusDAS queries the Helius DAS API (getAssetsByCreator) to count
+// the number of assets previously created by the given wallet address.
 // It uses the creatorAddress filter which matches Metaplex metadata creators
-// array \u2014 pump.fun tokens include the creator wallet in this field.
+// array — pump.fun tokens include the creator wallet in this field.
+// Note: searchAssets with tokenType requires owner_address and is not suitable
+// for creator-based queries; getAssetsByCreator is the correct endpoint.
 //
 // Security:
 //   - HeliusRPCURL is sourced from env var (via chains.yaml) \u2014 never YAML-hardcoded.
@@ -475,30 +482,28 @@ func (p *SolanaCreatorReputationProbe) fetchViaHelliusDAS(
 	if err := p.validateBaseURL(p.cfg.HeliusRPCURL); err != nil {
 		return 0, fmt.Errorf("helius_das: insecure helius_rpc_url: %w", err)
 	}
-	type searchParams struct {
-		CreatorAddress  string `json:"creatorAddress"`
-		CreatorVerified bool   `json:"creatorVerified"`
-		TokenType       string `json:"tokenType"`
-		Page            int    `json:"page"`
-		Limit           int    `json:"limit"`
+	type creatorParams struct {
+		CreatorAddress string `json:"creatorAddress"`
+		OnlyVerified   bool   `json:"onlyVerified"`
+		Page           int    `json:"page"`
+		Limit          int    `json:"limit"`
 	}
 	type rpcRequest struct {
-		JSONRPC string       `json:"jsonrpc"`
-		ID      string       `json:"id"`
-		Method  string       `json:"method"`
-		Params  searchParams `json:"params"`
+		JSONRPC string        `json:"jsonrpc"`
+		ID      string        `json:"id"`
+		Method  string        `json:"method"`
+		Params  creatorParams `json:"params"`
 	}
 
 	payload := rpcRequest{
 		JSONRPC: "2.0",
 		ID:      "creator-rep",
-		Method:  "searchAssets",
-		Params: searchParams{
-			CreatorAddress:  creatorAddress,
-			CreatorVerified: false, // pump.fun does not verify the creator field
-			TokenType:       "fungible",
-			Page:            1,
-			Limit:           p.cfg.PageLimit,
+		Method:  "getAssetsByCreator",
+		Params: creatorParams{
+			CreatorAddress: creatorAddress,
+			OnlyVerified:   false, // pump.fun does not verify the creator field
+			Page:           1,
+			Limit:          p.cfg.PageLimit,
 		},
 	}
 
@@ -508,7 +513,13 @@ func (p *SolanaCreatorReputationProbe) fetchViaHelliusDAS(
 	}
 
 	deadline := time.Duration(p.cfg.timeoutMs()) * time.Millisecond
-	reqCtx, cancel := context.WithTimeout(ctx, deadline)
+	// Strip the parent's deadline so a slow pump.fun call cannot consume
+	// the Helius budget. context.WithoutCancel gives Helius a fresh full
+	// deadline independent of how much time pump.fun consumed.
+	// NOTE: parent cancellation is NOT propagated — on graceful shutdown
+	// this call runs until its own TimeoutMs (default 3 s) expires.
+	// This is acceptable because the timeout is short and bounded.
+	reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, p.cfg.HeliusRPCURL, bytes.NewReader(bodyBytes))
@@ -541,8 +552,8 @@ func (p *SolanaCreatorReputationProbe) fetchViaHelliusDAS(
 	return count, nil
 }
 
-// parseHelliusDASCount parses the Helius DAS searchAssets JSON-RPC response
-// and returns the count of fungible tokens found for the creator address.
+// parseHelliusDASCount parses the Helius DAS getAssetsByCreator JSON-RPC response
+// and returns the count of assets found for the creator address.
 //
 // Helius DAS response shape:
 //

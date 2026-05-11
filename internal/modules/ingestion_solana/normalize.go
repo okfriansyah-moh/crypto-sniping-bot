@@ -19,10 +19,33 @@ package ingestion_solana
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"crypto-sniping-bot/contracts"
 )
+
+// sanitizeMetadataString cleans an untrusted on-chain string (name, symbol) before
+// it enters the DTO. It strips ASCII control characters (0x00–0x1F and 0x7F) to
+// prevent log injection — e.g. tokens named `rm -rf ...` or containing newlines
+// that break structured log parsers. Truncates to maxLen runes.
+// Clean strings (normal token names) pass through unchanged.
+func sanitizeMetadataString(s string, maxLen int) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		// Keep printable non-DEL characters; drop control chars and DEL.
+		if r >= 0x20 && r != 0x7F {
+			b.WriteRune(r)
+		}
+	}
+	result := b.String()
+	runes := []rune(result)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen])
+	}
+	return result
+}
 
 // solanaEventID derives the content-addressable EventID for a Solana instruction.
 // EventID = SHA256("solana|" + signature + "|" + instrIndex)[:16]
@@ -103,8 +126,8 @@ func NormalizePumpFunCreate(tx *TransactionResult, instr InstructionData, versio
 		Reorged:           false,
 		ExpiresAt:         "",
 		Priority:          0,
-		Symbol:            event.Symbol,
-		Name:              event.Name,
+		Symbol:            sanitizeMetadataString(event.Symbol, 32),
+		Name:              sanitizeMetadataString(event.Name, 64),
 	}
 	return dto, nil
 }
@@ -283,8 +306,8 @@ func NormalizePumpFunCreateFromLogs(
 		Reorged:           false,
 		ExpiresAt:         "",
 		Priority:          0,
-		Symbol:            event.Symbol,
-		Name:              event.Name,
+		Symbol:            sanitizeMetadataString(event.Symbol, 32),
+		Name:              sanitizeMetadataString(event.Name, 64),
 		// CreatorAddress is the pump.fun `user` field — the wallet that
 		// initiated the create transaction. Populated here at Layer 0 so
 		// the solana_creator_reputation probe can query DB history without

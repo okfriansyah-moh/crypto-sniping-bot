@@ -118,6 +118,11 @@ func (p *SolanaMetadataProbe) Probe(ctx context.Context, in contracts.MarketData
 
 	// No URI on-chain → definitely no social links.
 	if strings.TrimSpace(in.MetadataURI) == "" {
+		p.logger.Info("solana_metadata_probe_no_uri",
+			"token", in.TokenAddress,
+			"social_links_known", true,
+			"has_social_links", false,
+		)
 		out := in
 		out.SocialLinksKnown = true
 		out.HasSocialLinks = false
@@ -160,9 +165,10 @@ func (p *SolanaMetadataProbe) Probe(ctx context.Context, in contracts.MarketData
 		return in, fmt.Errorf("probes/solana_metadata: parse %q: %w", url, err)
 	}
 
-	p.logger.Debug("solana_metadata_probe",
+	p.logger.Info("solana_metadata_probe",
 		"token", in.TokenAddress,
 		"uri", in.MetadataURI,
+		"social_links_known", true,
 		"has_social_links", hasLinks,
 	)
 

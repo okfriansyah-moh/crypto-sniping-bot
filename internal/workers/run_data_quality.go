@@ -165,6 +165,7 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		"decision", dqDTO.Decision,
 		"risk_score", dqDTO.RiskScore,
 		"profile", dqDTO.Profile,
+		"reject_reasons", dqDTO.RejectReasons,
 		"flags", dqDTO.Flags,
 		"trace_id", dqDTO.TraceID,
 		"version_id", dqDTO.VersionID,

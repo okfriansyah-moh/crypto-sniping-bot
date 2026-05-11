@@ -117,6 +117,10 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		"version_id", evt.VersionID,
 		"probe_count", len(w.probes),
 		"honeypot_sim_known", enriched.HoneypotSimKnown,
+		"social_links_known", enriched.SocialLinksKnown,
+		"has_social_links", enriched.HasSocialLinks,
+		"creator_count_known", enriched.CreatorPrevTokenCountKnown,
+		"total_supply_known", enriched.TotalSupplyKnown,
 	)
 	for _, r := range results {
 		probeAttrs = append(probeAttrs,
