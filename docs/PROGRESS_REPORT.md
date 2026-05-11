@@ -322,6 +322,7 @@ The test already asserted `Unknown=false, Score=1.0, Flags=["DEV_UNKNOWN_HISTORY
 ### Root Cause
 
 For a new PumpFunCreate event in BALANCED mode (`UnknownFactor=0.0`):
+
 - Honeypot: Unknown → contributes 0
 - Rug: Unknown → contributes 0
 - Wash: Unknown → contributes 0
@@ -334,12 +335,14 @@ A serial dev with 382 tokens and no social links could only produce `risk_score=
 ### Fixes Applied
 
 **BLOCKER A — Serial launcher hard-reject**
+
 - **File:** `internal/modules/data_quality/data_quality.go` — added structural reject block for `serial_launcher`
 - **Condition:** `MaxCreatorPrevTokenCount > 0 AND CreatorPrevTokenCountKnown=true AND count >= threshold`
 - **Effect:** Immediately adds `serial_launcher` to `rejectReasons` → `Decision=REJECT` regardless of aggregate score
 - **Safety:** Only fires when `CreatorPrevTokenCountKnown=true` (probe ran). Unknown count falls through to scoring path
 
 **BLOCKER B — No social links hard-reject**
+
 - **File:** `internal/app/config/data_quality_runtime_config.go` — added `RejectNoSocialLinks bool` field
 - **File:** `config/data_quality.yaml` — added `reject_no_social_links: true`
 - **File:** `internal/modules/data_quality/data_quality.go` — added structural reject block for `no_social_links`
@@ -348,14 +351,17 @@ A serial dev with 382 tokens and no social links could only produce `risk_score=
 - **Safety:** Only fires when `SocialLinksKnown=true` (metadata probe ran and confirmed absence). Unknown state (probe failed) is NOT hard-rejected
 
 **BLOCKER C — Token supply (pre-existing)**
+
 - Config `max_total_supply: 1000000000` (1B) already existed. Structural reject `high_total_supply` fires when `TotalSupplyKnown=true` AND `TotalSupply > 1B`. LP probe sets `TotalSupplyKnown` for pump.fun tokens. No code change required — existing behavior is correct.
 
 ### Tests
+
 - New file: `internal/modules/data_quality/structural_enforce_test.go` — 10 tests
 - Covers: serial-launcher REJECT (count=382), threshold-exact (count=1), zero-count passes, unknown-count not rejected, threshold=0 disabled, no-social REJECT, with-social passes, social-unknown not rejected, flag-disabled, TTTT combined pattern
 - All 36 DQ tests green
 
 ### Verification
+
 - `go build ./...` ✅ clean
 - `go vet ./...` ✅ clean
 - `go test ./internal/modules/data_quality/... -count=1` ✅ all pass
@@ -363,6 +369,6 @@ A serial dev with 382 tokens and no social links could only produce `risk_score=
 
 ### Session History Entry
 
-| Date       | Mode                 | Phases | Duration       | Token Usage | Outcome                                                                                                                                                                                                                |
-| ---------- | -------------------- | ------ | -------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date       | Mode                 | Phases | Duration       | Token Usage | Outcome                                                                                                                                                                                                                  |
+| ---------- | -------------------- | ------ | -------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 2026-05-11 | gate-review DQ-Fix-2 | —      | single-session | —           | Promoted serial_launcher and no_social_links from scoring signals to structural hard-rejects. Root cause: BALANCED mode's 0.50 threshold unreachable by dev-reputation weight alone (max 0.25). 10 new regression tests. |

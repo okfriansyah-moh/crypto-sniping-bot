@@ -14,7 +14,7 @@ import (
 func runtimeWithEnforcement() *config.DataQualityRuntimeConfig {
 	rt := runtimeWithProfiles()
 	rt.Detectors.DevReputation = true
-	rt.Thresholds.MaxCreatorPrevTokenCount = 1  // any prior launch → reject
+	rt.Thresholds.MaxCreatorPrevTokenCount = 1 // any prior launch → reject
 	rt.Thresholds.NoSocialLinksRiskScore = 0.40
 	rt.Thresholds.RejectNoSocialLinks = true
 	rt.Thresholds.MaxTotalSupply = 1_000_000_000 // 1B — mirrors YAML
