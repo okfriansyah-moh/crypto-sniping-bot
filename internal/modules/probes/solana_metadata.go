@@ -254,8 +254,9 @@ func parseSocialLinks(body []byte) (bool, error) {
 //     "https://twitter.com/myproject" or "https://x.com/myproject").
 //   - "telegram": any non-empty t.me link is accepted (t.me links always
 //     reference channels/groups/bots, not individual posts on the public web).
-//   - "website": any non-empty HTTPS URL is accepted.
-//   - all other types: any non-empty URL is accepted as a weak signal.
+//   - "website": must be a real external project website — not a DEX, scanner,
+//     launcher, or blockchain explorer. See blockedWebsiteDomains.
+//   - all other types: any non-empty URL that is not a blocked domain.
 func isSocialProfileURL(socialType, rawURL string) bool {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
@@ -265,7 +266,54 @@ func isSocialProfileURL(socialType, rawURL string) bool {
 	if t == "twitter" || t == "x" {
 		return isTwitterProfileURL(u)
 	}
+	// Website and other link types: reject known launcher/explorer/DEX domains
+	// that are not a real project presence (e.g. "website: https://pump.fun").
+	if isBlockedWebsiteDomain(u) {
+		return false
+	}
 	return true
+}
+
+// blockedWebsiteDomains is the list of domains whose URLs are NOT accepted as
+// a real project website, even when present in the metadata "website" field.
+// Developers frequently copy-paste pump.fun token pages, Solscan explorer
+// links, or DEX aggregator pages as their "website" — these are not project
+// profiles and must not satisfy the HasSocialLinks requirement.
+var blockedWebsiteDomains = []string{
+	"pump.fun",
+	"solscan.io",
+	"birdeye.so",
+	"dexscreener.com",
+	"raydium.io",
+	"jup.ag",
+	"jupiter.ag",
+	"orca.so",
+	"solanabeach.io",
+	"explorer.solana.com",
+	"solana.fm",
+	"bubblemaps.io",
+	"defined.fi",
+	"geckoterminal.com",
+	"coinmarketcap.com",
+	"coingecko.com",
+	"dextools.io",
+	"ave.ai",
+	"axiom.trade",
+	"photon-sol.trycourier.app",
+	"bullx.io",
+}
+
+// isBlockedWebsiteDomain returns true when rawURL's host matches any entry in
+// the blockedWebsiteDomains list (exact suffix match, so subdomains included).
+func isBlockedWebsiteDomain(rawURL string) bool {
+	u := strings.ToLower(rawURL)
+	for _, domain := range blockedWebsiteDomains {
+		// Match "domain" or "subdomain.domain" by checking suffix after "://".
+		if strings.Contains(u, domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // isTwitterProfileURL returns true when the URL points to a Twitter/X account

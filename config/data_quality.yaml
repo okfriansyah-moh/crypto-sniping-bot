@@ -84,14 +84,32 @@ data_quality:
     # (fail-closed) rather than silently passing with an unchecked supply.
     # Set to false only on chains where supply is legitimately not fetchable
     # (or set max_total_supply: 0 to disable the supply check entirely).
+    # MANDATORY criterion — must not be disabled in production.
     reject_unknown_total_supply: true
 
     # reject_no_social_links: when true, a confirmed absence of social links
     # (SocialLinksKnown=true AND HasSocialLinks=false) becomes a structural
-    # hard-reject rather than a risk-score contribution. Enabled by default
-    # because pump.fun serial-launch rugs consistently have no social presence.
-    # Set to false if you want soft scoring only (pre-launch grace period).
+    # hard-reject. Social links must represent real profile pages (Twitter/X
+    # profile, Telegram channel, or real project website) — not DEX pages,
+    # scanner links, or pump.fun launcher URLs.
+    # MANDATORY criterion — must not be disabled in production.
     reject_no_social_links: true
+
+    # reject_unknown_social_links: when true, SocialLinksKnown=false (metadata
+    # probe timed out, fetch error, or probe disabled) is a structural hard-reject.
+    # Closes the probe-failure gap: a token whose social presence cannot be
+    # verified is treated the same as a token with no social links.
+    # MANDATORY criterion — must not be disabled in production.
+    reject_unknown_social_links: true
+
+    # reject_unknown_creator_count: when true, CreatorPrevTokenCountKnown=false
+    # (creator reputation probe timed out, API error, or not run) is a structural
+    # hard-reject when max_creator_prev_token_count > 0. Closes the probe-failure
+    # gap: a creator whose launch history cannot be verified must be assumed to be
+    # a serial launcher. Without this, a 300ms RPC timeout converts a 29-token
+    # serial rug developer into an approved first-timer.
+    # MANDATORY criterion — must not be disabled in production.
+    reject_unknown_creator_count: true
 
     # min_token_age_seconds: hard-reject tokens younger than this threshold.
     # Tokens under this age have incomplete data — holder distribution is not

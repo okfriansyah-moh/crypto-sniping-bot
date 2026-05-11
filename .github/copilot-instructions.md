@@ -216,6 +216,12 @@ All adaptive updates are non-negotiably:
 - **API keys never in YAML** — all external API keys (`BIRDEYE_API_KEY`, `TWITTER_BEARER_TOKEN`, `COPY_TRADE_WALLETS`, `JITO_BUNDLE_URL`, `JITO_TIP_ACCOUNT`, etc.) are read via `os.Getenv` at constructor only. Never log, never config-file.
 - **Response bodies are bounded** — Jito HTTP response: 64 KiB cap. DEXScreener copy-trade: 128 KiB cap. Never use `io.ReadAll` without a `LimitReader`.
 - **RPC error messages are truncated** — `truncate(msg, 200)` before surfacing in returned errors or logs. Never expose raw RPC error strings of arbitrary length.
+- **Mandatory DQ hard-rejects (fail-closed, never relax)** — Layer 1 enforces three mandatory structural hard-rejects that cannot be bypassed by any operational mode, starvation condition, or profit argument:
+  1. **Serial launcher dev** — any creator wallet with ≥ `max_creator_prev_token_count` prior launches is REJECTED via `serial_launcher`. When the creator reputation probe fails (`CreatorPrevTokenCountKnown=false`), reject via `unknown_creator_count` (fail-closed). Config: `reject_unknown_creator_count: true`.
+  2. **No real social profile / website** — tokens with no profile-level Twitter/X (profile URL, not tweet link) or Telegram and no real project website are REJECTED via `no_social_links`. Websites pointing to DEX scanners, pump.fun pages, or known non-project domains (dexscreener.com, birdeye.so, solscan.io, raydium.io, jup.ag, etc.) are not accepted. When the metadata probe fails (`SocialLinksKnown=false`), reject via `unknown_social_links` (fail-closed). Config: `reject_unknown_social_links: true`.
+  3. **Excessive total supply** — tokens with supply > `max_total_supply` (1B canonical) are REJECTED via `high_total_supply`. When the LP probe fails (`TotalSupplyKnown=false`), reject via `unknown_total_supply` (fail-closed). Config: `reject_unknown_total_supply: true`.
+
+  **Never add conditional logic that bypasses these three rejects.** The canonical implementation is in `internal/modules/data_quality/data_quality.go` (`ProcessForMode`) and `internal/modules/probes/solana_metadata.go` (`isSocialProfileURL`, `isBlockedWebsiteDomain`). See `docs/architecture.md` § 3.1.11 for the canonical specification.
 
 ### DTO Contract Rules (per `docs/architecture.md` § 2.1, § 4.5)
 

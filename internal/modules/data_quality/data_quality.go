@@ -165,29 +165,48 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 			)
 		}
 	}
-	// Structural reject: serial launcher.
+	// Structural reject: serial launcher (mandatory criterion).
 	// When CreatorPrevTokenCountKnown=true (populated by the
 	// solana_creator_reputation probe) and the count meets or exceeds the
-	// threshold, we reject immediately rather than contributing to risk score.
-	// This prevents a high-volume serial dev (382 tokens in the TTTT case)
-	// from passing in BALANCED mode where the dev-reputation weight alone
-	// (0.25) cannot push a 5-detector aggregate score over the 0.50 barrier.
+	// threshold, reject immediately — the dev-reputation weight alone (0.25)
+	// cannot push the aggregate over the BALANCED 0.50 barrier.
 	if m.runtime != nil &&
 		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
 		in.CreatorPrevTokenCountKnown &&
 		in.CreatorPrevTokenCount >= m.runtime.Thresholds.MaxCreatorPrevTokenCount {
 		rejectReasons = append(rejectReasons, "serial_launcher")
 	}
-	// Structural reject: confirmed no social links.
+	// Structural reject: unknown creator history (mandatory fail-closed).
+	// When CreatorPrevTokenCountKnown=false (probe timed out, API error, or
+	// probe not yet run) and RejectUnknownCreatorCount=true, reject rather than
+	// silently treating the creator as a first-time launcher. In BALANCED mode
+	// UnknownFactor=0 means an unknown creator contributes 0 risk — a serial
+	// developer with 382 tokens becomes indistinguishable from a first-timer.
+	// This is the critical fail-closed gap: probe failure must not equal approval.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
+		m.runtime.Thresholds.RejectUnknownCreatorCount &&
+		!in.CreatorPrevTokenCountKnown {
+		rejectReasons = append(rejectReasons, "unknown_creator_count")
+	}
+	// Structural reject: confirmed no social links (mandatory criterion).
 	// When SocialLinksKnown=true (metadata probe ran) and HasSocialLinks=false
-	// (no Twitter/Telegram/website found) and the operator enabled hard-reject,
-	// we reject immediately. When SocialLinksKnown=false (probe failed or no
-	// MetadataURI), this block is NOT entered — DEV_UNKNOWN_HISTORY scoring
-	// handles that case via the dev-reputation detector.
+	// (no profile-level Twitter/Telegram/website found) and RejectNoSocialLinks=true,
+	// reject immediately.
 	if m.runtime != nil &&
 		m.runtime.Thresholds.RejectNoSocialLinks &&
 		in.SocialLinksKnown && !in.HasSocialLinks {
 		rejectReasons = append(rejectReasons, "no_social_links")
+	}
+	// Structural reject: unknown social link status (mandatory fail-closed).
+	// When SocialLinksKnown=false (metadata probe timed out, fetch error, or
+	// probe disabled) and RejectUnknownSocialLinks=true, reject rather than
+	// allowing the token to pass with unverified social presence. A token
+	// whose social links cannot be validated is as dangerous as one with none.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.RejectUnknownSocialLinks &&
+		!in.SocialLinksKnown {
+		rejectReasons = append(rejectReasons, "unknown_social_links")
 	}
 	if m.runtime != nil && m.runtime.Thresholds.MinTokenAgeSeconds > 0 {
 		// Hard-reject tokens younger than the minimum age. Tokens under this

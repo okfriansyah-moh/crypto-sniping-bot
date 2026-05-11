@@ -9,15 +9,17 @@ import (
 )
 
 // runtimeWithEnforcement returns a runtime config that mirrors production
-// data_quality.yaml settings for serial-launcher, social-link, and supply
-// enforcement (all structural hard-rejects enabled).
+// data_quality.yaml settings for all mandatory structural hard-rejects:
+// serial-launcher, unknown-creator, social-link, unknown-social, and supply.
 func runtimeWithEnforcement() *config.DataQualityRuntimeConfig {
 	rt := runtimeWithProfiles()
 	rt.Detectors.DevReputation = true
 	rt.Thresholds.MaxCreatorPrevTokenCount = 1 // any prior launch → reject
 	rt.Thresholds.NoSocialLinksRiskScore = 0.40
 	rt.Thresholds.RejectNoSocialLinks = true
-	rt.Thresholds.MaxTotalSupply = 1_000_000_000 // 1B — mirrors YAML
+	rt.Thresholds.RejectUnknownSocialLinks = true  // mandatory fail-closed
+	rt.Thresholds.RejectUnknownCreatorCount = true // mandatory fail-closed
+	rt.Thresholds.MaxTotalSupply = 1_000_000_000   // 1B — mirrors YAML
 	rt.Thresholds.RejectUnknownTotalSupply = true
 	rt.RiskWeights.DevReputation = 0.25
 	return rt
@@ -115,23 +117,50 @@ func TestStructuralReject_SerialLauncher_ZeroCountPasses(t *testing.T) {
 	}
 }
 
-// TestStructuralReject_SerialLauncher_UnknownCountNotRejected ensures that
-// when CreatorPrevTokenCountKnown=false (probe not run yet), the structural
-// reject is NOT triggered — the scoring path handles it.
-func TestStructuralReject_SerialLauncher_UnknownCountNotRejected(t *testing.T) {
-	rt := runtimeWithEnforcement()
+// TestStructuralReject_SerialLauncher_UnknownCountRejectsWhenFlagEnabled verifies
+// that when CreatorPrevTokenCountKnown=false (probe timed out, API error, or not
+// yet run) and RejectUnknownCreatorCount=true, the token is structurally rejected
+// via "unknown_creator_count". This is the mandatory fail-closed gap: probe
+// failure must not silently convert a serial rug developer into a first-timer.
+func TestStructuralReject_SerialLauncher_UnknownCountRejectsWhenFlagEnabled(t *testing.T) {
+	rt := runtimeWithEnforcement() // RejectUnknownCreatorCount=true
 	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
 
 	in := baseNewLaunch()
-	in.CreatorPrevTokenCountKnown = false // probe hasn't run
-	in.CreatorPrevTokenCount = 0          // zero (db cold-start)
+	in.CreatorPrevTokenCountKnown = false // probe timed out or API error
+	in.CreatorPrevTokenCount = 0          // zero value (not populated)
 
 	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if containsString(out.RejectReasons, "serial_launcher") {
-		t.Errorf("unknown count must not trigger serial_launcher; got %v", out.RejectReasons)
+	if out.Decision != "REJECT" {
+		t.Errorf("expected REJECT for unknown creator count (fail-closed), got %q (reasons=%v)",
+			out.Decision, out.RejectReasons)
+	}
+	if !containsString(out.RejectReasons, "unknown_creator_count") {
+		t.Errorf("expected unknown_creator_count in RejectReasons, got %v", out.RejectReasons)
+	}
+}
+
+// TestStructuralReject_SerialLauncher_UnknownCountPassesWhenFlagDisabled verifies
+// that when RejectUnknownCreatorCount=false, an unknown creator count does NOT
+// produce a structural reject (soft-scoring path applies instead).
+func TestStructuralReject_SerialLauncher_UnknownCountPassesWhenFlagDisabled(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.RejectUnknownCreatorCount = false // operator opt-out
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.CreatorPrevTokenCountKnown = false
+	in.CreatorPrevTokenCount = 0
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsString(out.RejectReasons, "unknown_creator_count") {
+		t.Errorf("disabled flag must not produce unknown_creator_count reason; got %v", out.RejectReasons)
 	}
 }
 
@@ -201,23 +230,50 @@ func TestStructuralReject_NoSocialLinks_WithSocialLinksPasses(t *testing.T) {
 	}
 }
 
-// TestStructuralReject_NoSocialLinks_UnknownNotRejected verifies that when
-// SocialLinksKnown=false (metadata probe not run), the structural reject is
-// NOT triggered — the DEV_UNKNOWN_HISTORY scoring path applies instead.
-func TestStructuralReject_NoSocialLinks_UnknownNotRejected(t *testing.T) {
-	rt := runtimeWithEnforcement()
+// TestStructuralReject_NoSocialLinks_UnknownRejectsWhenFlagEnabled verifies that
+// when SocialLinksKnown=false (metadata probe timed out or fetch error) and
+// RejectUnknownSocialLinks=true, the token is structurally rejected via
+// "unknown_social_links". A token whose social presence cannot be verified
+// must not pass — probe failure must not equal approval.
+func TestStructuralReject_NoSocialLinks_UnknownRejectsWhenFlagEnabled(t *testing.T) {
+	rt := runtimeWithEnforcement() // RejectUnknownSocialLinks=true
 	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
 
 	in := baseNewLaunch()
-	in.SocialLinksKnown = false // probe hasn't run
+	in.SocialLinksKnown = false // metadata probe timed out or errored
 	in.HasSocialLinks = false
 
 	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if containsString(out.RejectReasons, "no_social_links") {
-		t.Errorf("unknown social links must not trigger structural reject; got %v", out.RejectReasons)
+	if out.Decision != "REJECT" {
+		t.Errorf("expected REJECT for unknown social links (fail-closed), got %q (reasons=%v)",
+			out.Decision, out.RejectReasons)
+	}
+	if !containsString(out.RejectReasons, "unknown_social_links") {
+		t.Errorf("expected unknown_social_links in RejectReasons, got %v", out.RejectReasons)
+	}
+}
+
+// TestStructuralReject_NoSocialLinks_UnknownPassesWhenFlagDisabled verifies that
+// when RejectUnknownSocialLinks=false, an unknown social link status does NOT
+// produce a structural reject (soft-scoring path applies instead).
+func TestStructuralReject_NoSocialLinks_UnknownPassesWhenFlagDisabled(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.RejectUnknownSocialLinks = false // operator opt-out
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.SocialLinksKnown = false
+	in.HasSocialLinks = false
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsString(out.RejectReasons, "unknown_social_links") {
+		t.Errorf("disabled flag must not produce unknown_social_links reason; got %v", out.RejectReasons)
 	}
 }
 

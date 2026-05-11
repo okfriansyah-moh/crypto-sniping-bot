@@ -262,6 +262,72 @@ func TestParseSocialLinks_WebsiteIsAccepted(t *testing.T) {
 	}
 }
 
+// TestParseSocialLinks_PumpFunWebsiteIsRejected verifies that a "website" field
+// pointing to the pump.fun launcher (a common pattern in rug tokens that use
+// their own pump.fun token page as their "project website") is NOT counted as
+// a valid social link. This closes the fake-website exploit vector observed in
+// the pussy/pussycoin token (7a7Kukc9mnsjvt5RwuRTG2WX4kXvhmnBNQRNF7AYpum).
+func TestParseSocialLinks_PumpFunWebsiteIsRejected(t *testing.T) {
+	body := `{"website":"https://pump.fun/coin/7a7Kukc9mnsjvt5RwuRTG2WX4kXvhmnBNQRNF7AYpum"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false when website is a pump.fun token page (not a project)")
+	}
+}
+
+func TestParseSocialLinks_DEXScreenerWebsiteIsRejected(t *testing.T) {
+	body := `{"website":"https://dexscreener.com/solana/ABCDEF"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false when website is a DEX scanner page")
+	}
+}
+
+func TestParseSocialLinks_BirdeyeWebsiteIsRejected(t *testing.T) {
+	body := `{"website":"https://birdeye.so/token/ABCDEF"}`
+	has, err := parseSocialLinks([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Fatal("want HasSocialLinks=false when website is birdeye.so scanner link")
+	}
+}
+
+func TestIsBlockedWebsiteDomain(t *testing.T) {
+	cases := []struct {
+		url   string
+		want  bool
+		label string
+	}{
+		{"https://pump.fun/coin/abc", true, "pump.fun token page"},
+		{"https://dexscreener.com/solana/abc", true, "dexscreener"},
+		{"https://birdeye.so/token/abc", true, "birdeye"},
+		{"https://solscan.io/token/abc", true, "solscan explorer"},
+		{"https://raydium.io/swap", true, "raydium DEX"},
+		{"https://jup.ag/swap", true, "jupiter aggregator"},
+		{"https://geckoterminal.com/sol/pools/abc", true, "geckoterminal"},
+		{"https://axiom.trade/t/abc", true, "axiom trade"},
+		{"https://myproject.io", false, "real project site"},
+		{"https://projectname.xyz/token", false, "custom project domain"},
+		{"https://github.com/myproject", false, "github project"},
+		{"https://t.me/myproject", false, "telegram link (not a website type)"},
+		{"", false, "empty URL"},
+	}
+	for _, c := range cases {
+		got := isBlockedWebsiteDomain(c.url)
+		if got != c.want {
+			t.Errorf("isBlockedWebsiteDomain(%q) [%s] = %v, want %v", c.url, c.label, got, c.want)
+		}
+	}
+}
+
 func TestParseSocialLinks_AllPostURLsReturnFalse(t *testing.T) {
 	// All three fields present but ALL are post/redirect URLs — still false.
 	body := `{

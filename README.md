@@ -203,6 +203,24 @@ MarketData  DataQuality  FeatureDTO  EdgeDTO  Prob/Slip/Lat  ValidatedEdge  Sele
 | 9     | Position Engine                  | TP1/TP2/SL/TIME exits, adaptive per cohort                        |
 | 10    | Learning Engine                  | FP/FN analysis, cohort updates, bounded adaptive learning         |
 
+### Layer 1: Mandatory Structural Hard-Rejects
+
+Layer 1 (Data Quality Engine) enforces three **mandatory rejection criteria** that cannot be bypassed by any mode (STRICT / BALANCED / EXPLORATION) or profit condition. All three are **fail-closed**: if the underlying probe fails to run, the token is rejected.
+
+| Criterion                                       | Reject Reason (probe ran) | Reject Reason (probe failed) | Config Flag                                                             |
+| ----------------------------------------------- | ------------------------- | ---------------------------- | ----------------------------------------------------------------------- |
+| **No real social profile / website**            | `no_social_links`         | `unknown_social_links`       | `reject_no_social_links: true`, `reject_unknown_social_links: true`     |
+| **Excessive total supply** (>1B)                | `high_total_supply`       | `unknown_total_supply`       | `max_total_supply: 1000000000`, `reject_unknown_total_supply: true`     |
+| **Serial launcher developer** (≥1 prior launch) | `serial_launcher`         | `unknown_creator_count`      | `max_creator_prev_token_count: 1`, `reject_unknown_creator_count: true` |
+
+**Social link validation rules:**
+
+- Twitter/X: must be a profile URL — tweet links (`/status/`), `t.co` shortlinks, and retweet redirects are rejected.
+- Telegram: any `t.me/` channel link is accepted.
+- Website: real project domains only — pump.fun pages, DEX scanner pages (dexscreener.com, birdeye.so, solscan.io, raydium.io, jup.ag, geckoterminal.com, axiom.trade, etc.) are **not** accepted as project websites.
+
+Probe failure always means rejection — a `*Known=false` field with the matching `reject_unknown_*: true` flag triggers an immediate structural reject before any detector runs.
+
 ### Pipeline Stage Log Keys
 
 Every stage emits a structured JSON log line. Use these `msg` field values with `make log-collect` to monitor pipeline health per the PRS dimensions above:
