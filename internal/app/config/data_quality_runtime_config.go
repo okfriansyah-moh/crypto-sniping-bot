@@ -112,6 +112,20 @@ type DataQualityDetectorThresholds struct {
 	// Canonical default: 0.40 (meaningful contribution without hard-reject).
 	MaxCreatorPrevTokenCount int32   `yaml:"max_creator_prev_token_count"`
 	NoSocialLinksRiskScore   float64 `yaml:"no_social_links_risk_score"`
+	// RejectNoSocialLinks, when true, treats missing social links as a
+	// structural hard-reject rather than a risk-score contribution. Applies
+	// only when SocialLinksKnown=true AND HasSocialLinks=false (i.e. the
+	// metadata probe ran and confirmed there are no social URLs). When
+	// SocialLinksKnown=false (metadata probe not run or failed) this flag
+	// is NOT triggered — the scoring path's DEV_UNKNOWN_HISTORY handles that.
+	RejectNoSocialLinks bool `yaml:"reject_no_social_links"`
+	// RejectUnknownTotalSupply, when true, treats TotalSupplyKnown=false as a
+	// structural hard-reject when MaxTotalSupply > 0. This closes the LP-probe
+	// failure gap: if the probe is unhealthy the token is rejected rather than
+	// silently passed with an unknown supply. Only set this false on chains
+	// where supply is legitimately not fetchable (set MaxTotalSupply=0 instead
+	// to fully disable the supply check for that chain).
+	RejectUnknownTotalSupply bool `yaml:"reject_unknown_total_supply"`
 
 	// MinTokenAgeSeconds — hard-reject tokens younger than this threshold.
 	// Tokens under this age have incomplete data: holder distribution is not

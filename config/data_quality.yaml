@@ -78,6 +78,21 @@ data_quality:
     # tokens over the REJECT threshold. Alone it is a soft signal only.
     no_social_links_risk_score: 0.40
 
+    # reject_unknown_total_supply: when true, a token whose TotalSupplyKnown=false
+    # is structurally rejected when max_total_supply > 0. This closes the
+    # LP-probe failure gap — if the probe is unhealthy the token is rejected
+    # (fail-closed) rather than silently passing with an unchecked supply.
+    # Set to false only on chains where supply is legitimately not fetchable
+    # (or set max_total_supply: 0 to disable the supply check entirely).
+    reject_unknown_total_supply: true
+
+    # reject_no_social_links: when true, a confirmed absence of social links
+    # (SocialLinksKnown=true AND HasSocialLinks=false) becomes a structural
+    # hard-reject rather than a risk-score contribution. Enabled by default
+    # because pump.fun serial-launch rugs consistently have no social presence.
+    # Set to false if you want soft scoring only (pre-launch grace period).
+    reject_no_social_links: true
+
     # min_token_age_seconds: hard-reject tokens younger than this threshold.
     # Tokens under this age have incomplete data — holder distribution is not
     # settled, wash patterns are not yet visible, and metadata probes may not

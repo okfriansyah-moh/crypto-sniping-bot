@@ -150,13 +150,44 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	if m.runtime != nil &&
 		m.runtime.Thresholds.MaxTotalSupply > 0 &&
 		!in.TotalSupplyKnown {
-		// Threshold is configured but ingestion did not populate TotalSupply.
-		// The check is intentionally skipped to avoid false rejections, but log
-		// so operators can detect missing upstream supply data.
-		m.logger.Debug("dq_total_supply_unknown",
-			"token_address", in.TokenAddress,
-			"max_total_supply_threshold", m.runtime.Thresholds.MaxTotalSupply,
-		)
+		if m.runtime.Thresholds.RejectUnknownTotalSupply {
+			// Fail-closed: LP probe didn't run (RPC unhealthy, bonding-curve
+			// unreadable, etc.). Reject rather than pass a token whose supply
+			// may exceed the configured limit. Use reject_unknown_total_supply=false
+			// on chains where supply is legitimately unfetchable.
+			rejectReasons = append(rejectReasons, "unknown_total_supply")
+		} else {
+			// Soft path: log and continue. Operators should monitor this
+			// event to detect LP-probe failures before they accumulate.
+			m.logger.Warn("dq_total_supply_unknown",
+				"token_address", in.TokenAddress,
+				"max_total_supply_threshold", m.runtime.Thresholds.MaxTotalSupply,
+			)
+		}
+	}
+	// Structural reject: serial launcher.
+	// When CreatorPrevTokenCountKnown=true (populated by the
+	// solana_creator_reputation probe) and the count meets or exceeds the
+	// threshold, we reject immediately rather than contributing to risk score.
+	// This prevents a high-volume serial dev (382 tokens in the TTTT case)
+	// from passing in BALANCED mode where the dev-reputation weight alone
+	// (0.25) cannot push a 5-detector aggregate score over the 0.50 barrier.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
+		in.CreatorPrevTokenCountKnown &&
+		in.CreatorPrevTokenCount >= m.runtime.Thresholds.MaxCreatorPrevTokenCount {
+		rejectReasons = append(rejectReasons, "serial_launcher")
+	}
+	// Structural reject: confirmed no social links.
+	// When SocialLinksKnown=true (metadata probe ran) and HasSocialLinks=false
+	// (no Twitter/Telegram/website found) and the operator enabled hard-reject,
+	// we reject immediately. When SocialLinksKnown=false (probe failed or no
+	// MetadataURI), this block is NOT entered — DEV_UNKNOWN_HISTORY scoring
+	// handles that case via the dev-reputation detector.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.RejectNoSocialLinks &&
+		in.SocialLinksKnown && !in.HasSocialLinks {
+		rejectReasons = append(rejectReasons, "no_social_links")
 	}
 	if m.runtime != nil && m.runtime.Thresholds.MinTokenAgeSeconds > 0 {
 		// Hard-reject tokens younger than the minimum age. Tokens under this
