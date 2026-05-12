@@ -27,6 +27,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -371,6 +372,22 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 
 	conn, err := dialWS(wsEntry.URL, solanaWSConnectTimeout)
 	if err != nil {
+		// HTTP 429 at the WebSocket upgrade means the provider is rate-limiting
+		// new connections.  Rotate immediately to the next endpoint so the
+		// reconnect loop's next attempt hits a different provider.
+		// We treat this the same as a JSON-RPC rate-limit error (instant rotate,
+		// not counted toward the consecutive-failure threshold).
+		if strings.Contains(err.Error(), "HTTP 429") {
+			newIdx := c.wsIdx.Add(1)
+			nextEntry := c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
+			c.logger.Warn("solana_ws_connect_rate_limited_rotating",
+				"program", programID,
+				"provider", wsEntry.Dialect.Name(),
+				"from", wsEntry.URL,
+				"to_provider", nextEntry.Dialect.Name(),
+				"to", nextEntry.URL,
+			)
+		}
 		return nil, fmt.Errorf("solana_client: ws connect: %w", err)
 	}
 

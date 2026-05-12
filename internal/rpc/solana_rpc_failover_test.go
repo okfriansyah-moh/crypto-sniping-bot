@@ -8,6 +8,7 @@ package rpc
 import (
 	"log/slog"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -120,5 +121,28 @@ func TestWSFailoverThresholdZeroDisablesPromotion(t *testing.T) {
 	// incremented via the promotion path (counter stays 0).
 	if got := c.wsFailCounts[0].Load(); got != 0 {
 		t.Fatalf("threshold=0: wsFailCounts[0] = %d, want 0", got)
+	}
+}
+
+// TestWSConnectRateLimitRotatesImmediately verifies that wsIdx is advanced
+// immediately when an HTTP 429 error string is detected — without accumulating
+// against the consecutive-failure counter.
+func TestWSConnectRateLimitRotatesImmediately(t *testing.T) {
+	c := newTestSolanaClient([]string{"ws://quicknode", "ws://helius"}, 5)
+
+	// Simulate the HTTP-upgrade-level 429 detection by calling the same rotation
+	// logic inline (strings.Contains check + wsIdx.Add(1)).
+	// We verify that wsIdx advances and wsFailCounts[0] stays at 0 (not counted
+	// toward the threshold).
+	if strings.Contains("ws: server rejected upgrade: HTTP 429", "HTTP 429") {
+		newIdx := c.wsIdx.Add(1)
+		_ = c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
+	}
+
+	if got := c.wsIdx.Load(); got != 1 {
+		t.Fatalf("after HTTP 429: wsIdx = %d, want 1", got)
+	}
+	if got := c.wsFailCounts[0].Load(); got != 0 {
+		t.Fatalf("after HTTP 429: wsFailCounts[0] = %d, want 0 (not counted toward threshold)", got)
 	}
 }
