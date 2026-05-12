@@ -8,9 +8,9 @@ package rpc
 import (
 	"log/slog"
 	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // newTestSolanaClient builds a minimal SolanaClient with the given endpoint URLs
@@ -23,10 +23,12 @@ func newTestSolanaClient(wsURLs []string, threshold int64) *SolanaClient {
 	}
 	failCounts := make([]atomic.Int64, len(eps))
 	return &SolanaClient{
-		wsEndpoints:     eps,
-		wsFailCounts:    failCounts,
-		wsFailThreshold: threshold,
-		logger:          slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		wsEndpoints:         eps,
+		wsFailCounts:        failCounts,
+		wsFailThreshold:     threshold,
+		wsCooldownUntil:     make([]atomic.Int64, len(eps)),
+		wsRateLimitCooldown: defaultWSRateLimitCooldown,
+		logger:              slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	}
 }
 
@@ -124,25 +126,73 @@ func TestWSFailoverThresholdZeroDisablesPromotion(t *testing.T) {
 	}
 }
 
-// TestWSConnectRateLimitRotatesImmediately verifies that wsIdx is advanced
-// immediately when an HTTP 429 error string is detected — without accumulating
-// against the consecutive-failure counter.
-func TestWSConnectRateLimitRotatesImmediately(t *testing.T) {
+// TestWSConnectRateLimitCooldown verifies that markWSRateLimited sets a cooldown
+// on the endpoint and activeWSEntry skips it in favour of the other provider.
+// It also checks that wsIdx is NOT mutated (no oscillation).
+func TestWSConnectRateLimitCooldown(t *testing.T) {
 	c := newTestSolanaClient([]string{"ws://quicknode", "ws://helius"}, 5)
 
-	// Simulate the HTTP-upgrade-level 429 detection by calling the same rotation
-	// logic inline (strings.Contains check + wsIdx.Add(1)).
-	// We verify that wsIdx advances and wsFailCounts[0] stays at 0 (not counted
-	// toward the threshold).
-	if strings.Contains("ws: server rejected upgrade: HTTP 429", "HTTP 429") {
-		newIdx := c.wsIdx.Add(1)
-		_ = c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
+	// Sanity: before any rate-limit, activeWSEntry returns index 0 (wsIdx=0).
+	_, idx := c.activeWSEntry()
+	if idx != 0 {
+		t.Fatalf("initial activeWSEntry: idx=%d, want 0", idx)
 	}
 
-	if got := c.wsIdx.Load(); got != 1 {
-		t.Fatalf("after HTTP 429: wsIdx = %d, want 1", got)
+	// Mark endpoint 0 (quicknode) as rate-limited.
+	c.markWSRateLimited(0, c.wsEndpoints[0], "test-program")
+
+	// wsIdx must NOT have been mutated (no oscillation).
+	if got := c.wsIdx.Load(); got != 0 {
+		t.Fatalf("wsIdx after markWSRateLimited: got %d, want 0 (no mutation)", got)
 	}
-	if got := c.wsFailCounts[0].Load(); got != 0 {
-		t.Fatalf("after HTTP 429: wsFailCounts[0] = %d, want 0 (not counted toward threshold)", got)
+
+	// activeWSEntry should now return index 1 (helius) because 0 is in cooldown.
+	entry, idx2 := c.activeWSEntry()
+	if idx2 != 1 {
+		t.Fatalf("activeWSEntry after cooldown on 0: idx=%d, want 1", idx2)
+	}
+	if entry.URL != "ws://helius" {
+		t.Fatalf("activeWSEntry URL: got %q, want ws://helius", entry.URL)
+	}
+
+	// When ALL endpoints are in cooldown, activeWSEntry returns the soonest-
+	// expiring one without panicking.
+	c.markWSRateLimited(1, c.wsEndpoints[1], "test-program")
+	_, idx3 := c.activeWSEntry()
+	if idx3 != 0 && idx3 != 1 {
+		t.Fatalf("all-cooled activeWSEntry: idx=%d, want 0 or 1", idx3)
+	}
+
+	// After the cooldown expires, activeWSEntry should return to index 0.
+	c.wsCooldownUntil[0].Store(0)
+	c.wsCooldownUntil[1].Store(0)
+	_, idxAfter := c.activeWSEntry()
+	if idxAfter != 0 {
+		t.Fatalf("after cooldown expiry: idx=%d, want 0", idxAfter)
+	}
+}
+
+// TestWSConnectRateLimitNoOscillation verifies that when both providers are
+// rate-limited and multiple goroutines call markWSRateLimited concurrently,
+// wsIdx remains stable (no spinning).
+func TestWSConnectRateLimitNoOscillation(t *testing.T) {
+	c := newTestSolanaClient([]string{"ws://quicknode", "ws://helius"}, 5)
+	c.wsRateLimitCooldown = 50 * time.Millisecond // short cooldown for test speed
+
+	// Six goroutines all 429 at once (simulates 6 program subscribers).
+	done := make(chan struct{})
+	for i := 0; i < 6; i++ {
+		go func(slot int) {
+			c.markWSRateLimited(slot%2, c.wsEndpoints[slot%2], "prog")
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 6; i++ {
+		<-done
+	}
+
+	// wsIdx must be unchanged — all rotation happened via cooldowns only.
+	if got := c.wsIdx.Load(); got != 0 {
+		t.Fatalf("wsIdx after 6 concurrent rate-limits: got %d, want 0", got)
 	}
 }

@@ -43,8 +43,11 @@ type quicknodeDialect struct{}
 
 func (quicknodeDialect) Name() string { return "quicknode" }
 
-// IsRateLimited detects QuickNode's -32003 daily-quota exhaustion error.
-func (quicknodeDialect) IsRateLimited(code int) bool { return code == -32003 }
+// IsRateLimited detects QuickNode quota errors:
+//
+//	-32003 = daily plan limit reached (hard cap)
+//	-32007 = per-second rate limit (15/s on free tier)
+func (quicknodeDialect) IsRateLimited(code int) bool { return code == -32003 || code == -32007 }
 
 // WSPingInterval returns QuickNode's safe ping cadence (20 s).
 func (quicknodeDialect) WSPingInterval() time.Duration { return 20 * time.Second }
