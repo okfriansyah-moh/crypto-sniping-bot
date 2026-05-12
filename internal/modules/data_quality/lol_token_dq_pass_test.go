@@ -14,6 +14,7 @@ package data_quality
 import (
 	"context"
 	"testing"
+	"time"
 
 	"crypto-sniping-bot/contracts"
 )
@@ -252,11 +253,11 @@ func TestDQ_LOLToken_TooYoung(t *testing.T) {
 
 	dto := lolTokenDTO()
 	// Set timestamps so the token appears 60 seconds old (well under 900s).
-	// Use a fixed past time to keep the test deterministic.
-	ingestedAt := "2026-05-11T20:00:00Z"
-	blockTime := "2026-05-11T19:59:00Z" // 60 seconds before ingest
-	dto.BlockTimestamp = blockTime
-	dto.IngestedAt = ingestedAt
+	// Use wall-clock relative timestamps so the test stays valid regardless of
+	// when it runs (tokenAgeSeconds uses time.Since internally).
+	now := time.Now().UTC()
+	dto.IngestedAt = now.Format(time.RFC3339)
+	dto.BlockTimestamp = now.Add(-60 * time.Second).Format(time.RFC3339)
 
 	out, err := m.ProcessForMode(context.Background(), dto, "BALANCED")
 	if err != nil {

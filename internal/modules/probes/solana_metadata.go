@@ -47,6 +47,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func (p *SolanaMetadataProbe) Probe(ctx context.Context, in contracts.MarketData
 		return in, fmt.Errorf("probes/solana_metadata: read body for %q: %w", url, err)
 	}
 
-	hasLinks, err := parseSocialLinks(body)
+	hasLinks, err := parseSocialLinks(body, in.Name, in.Symbol)
 	if err != nil {
 		return in, fmt.Errorf("probes/solana_metadata: parse %q: %w", url, err)
 	}
@@ -209,32 +210,33 @@ type pumpMetadata struct {
 // one non-empty, profile-level social-link field (twitter, telegram, or
 // website) in any of the three known locations.
 //
-// A social link only qualifies when it points to an ACCOUNT PROFILE, not a
-// post, tweet, thread, or random viral share. Specifically:
-//   - Twitter/X URLs containing "/status/" are post links → rejected.
-//   - t.co shorteners are tweet redirects → rejected.
-//   - Any non-empty telegram or website URL is accepted (profile by convention).
+// A social link only qualifies when it points to an ACCOUNT PROFILE that is
+// genuinely associated with this specific token. Two conditions must both hold:
+//  1. The URL points to a real profile page (structural validation).
+//  2. The profile handle/path contains the token name or symbol as a substring
+//     (association validation). This rejects hijacked accounts (e.g. @baseapp
+//     on a COOKING token) where a real company's profile is copied.
 //
-// This prevents the pattern where a rug-dev sets the token's "twitter" field
-// to a viral Elon Musk tweet (e.g. "https://x.com/elonmusk/status/...") to
-// falsely satisfy the HasSocialLinks check.
-func parseSocialLinks(body []byte) (bool, error) {
+// tokenName and tokenSymbol are used only for the association check. When
+// both are empty or too short (< 3 chars after normalisation) the association
+// check is skipped to avoid false rejections on tokens with no name set.
+func parseSocialLinks(body []byte, tokenName, tokenSymbol string) (bool, error) {
 	var meta pumpMetadata
 	if err := json.Unmarshal(body, &meta); err != nil {
 		return false, fmt.Errorf("unmarshal: %w", err)
 	}
 
 	// 1. Top-level keys — each link is validated as a real profile URL.
-	if isSocialProfileURL("twitter", meta.Twitter) ||
-		isSocialProfileURL("telegram", meta.Telegram) ||
-		isSocialProfileURL("website", meta.Website) {
+	if isSocialProfileURL("twitter", meta.Twitter, tokenName, tokenSymbol) ||
+		isSocialProfileURL("telegram", meta.Telegram, tokenName, tokenSymbol) ||
+		isSocialProfileURL("website", meta.Website, tokenName, tokenSymbol) {
 		return true, nil
 	}
 
 	// 2. extensions object.
 	for _, key := range []string{"twitter", "telegram", "website"} {
 		if v, ok := meta.Extensions[key]; ok {
-			if isSocialProfileURL(key, v) {
+			if isSocialProfileURL(key, v, tokenName, tokenSymbol) {
 				return true, nil
 			}
 		}
@@ -243,7 +245,7 @@ func parseSocialLinks(body []byte) (bool, error) {
 	// 3. links object (catch-all) — apply profile gate to all values.
 	for k, v := range meta.Links {
 		// Infer social type from key name for targeted validation.
-		if isSocialProfileURL(strings.ToLower(k), v) {
+		if isSocialProfileURL(strings.ToLower(k), v, tokenName, tokenSymbol) {
 			return true, nil
 		}
 	}
@@ -252,39 +254,94 @@ func parseSocialLinks(body []byte) (bool, error) {
 }
 
 // isSocialProfileURL returns true when rawURL is a non-empty URL that points
-// to an account profile page, not a post, tweet, or short-link redirect.
+// to an account profile page genuinely associated with this token.
 //
 // Rules by socialType:
-//   - "twitter" / "x": must not contain "/status/", "/statuses/", or be a
-//     t.co redirect. The URL must reference a profile root (e.g.
-//     "https://twitter.com/myproject" or "https://x.com/myproject").
+//   - "twitter" / "x": must have exactly one path segment (the username) on
+//     twitter.com or x.com. Rejects posts (/status/), internal paths (/i/),
+//     search (/search), intents (/intent/), and all other non-profile paths.
 //   - "telegram": any non-empty t.me link is accepted (t.me links always
 //     reference channels/groups/bots, not individual posts on the public web).
 //   - "website": must be a real external project website — not a DEX, scanner,
-//     launcher, or blockchain explorer. See blockedWebsiteDomains.
+//     launcher, blockchain explorer, template-hosting platform, OR a social
+//     media platform.
 //   - all other types: any non-empty URL that is not a blocked domain.
-func isSocialProfileURL(socialType, rawURL string) bool {
+//
+// Association check: when tokenName or tokenSymbol is non-empty (≥ 3 chars
+// normalised), the URL path/handle must contain the normalised token name as
+// a substring. This rejects hijacked accounts from other projects/companies.
+func isSocialProfileURL(socialType, rawURL, tokenName, tokenSymbol string) bool {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
 		return false
 	}
 	t := strings.ToLower(socialType)
 	if t == "twitter" || t == "x" {
-		return isTwitterProfileURL(u)
+		if !isTwitterProfileURL(u) {
+			return false
+		}
+		return profileAssociatedWithToken(u, tokenName, tokenSymbol)
 	}
-	// Website and other link types: reject known launcher/explorer/DEX domains
-	// that are not a real project presence (e.g. "website: https://pump.fun").
+	// All non-twitter types: reject DEX/scanner/launcher domains.
 	if isBlockedWebsiteDomain(u) {
+		return false
+	}
+	// For the "website" metadata field: additionally reject social media and
+	// messaging platform URLs. A token's project website must be its own domain,
+	// not a Twitter profile, Telegram channel, or Discord server that duplicates
+	// (or substitutes for) the dedicated twitter/telegram social fields.
+	if t == "website" && isSocialMediaWebsiteDomain(u) {
 		return false
 	}
 	return true
 }
 
-// blockedWebsiteDomains is the list of domains whose URLs are NOT accepted as
-// a real project website, even when present in the metadata "website" field.
-// Developers frequently copy-paste pump.fun token pages, Solscan explorer
-// links, or DEX aggregator pages as their "website" — these are not project
-// profiles and must not satisfy the HasSocialLinks requirement.
+// profileAssociatedWithToken returns true when the URL path/handle contains
+// the normalised token name or symbol as a substring, confirming the social
+// account belongs to this token and not a hijacked unrelated profile.
+//
+// Normalisation: lowercase, remove non-alphanumeric characters.
+// Skip check when both identifiers normalise to fewer than 3 characters.
+func profileAssociatedWithToken(rawURL, tokenName, tokenSymbol string) bool {
+	normName := normaliseTokenIdentifier(tokenName)
+	normSymbol := normaliseTokenIdentifier(tokenSymbol)
+
+	// Skip association check if neither identifier is long enough — avoids
+	// false rejections on tokens with very short or empty names/symbols.
+	if len(normName) < 3 && len(normSymbol) < 3 {
+		return true
+	}
+
+	// Extract the meaningful part of the URL to search: the path (handle).
+	uLower := strings.ToLower(rawURL)
+
+	if len(normName) >= 3 && strings.Contains(uLower, normName) {
+		return true
+	}
+	if len(normSymbol) >= 3 && strings.Contains(uLower, normSymbol) {
+		return true
+	}
+	return false
+}
+
+// normaliseTokenIdentifier lowercases and strips non-alphanumeric characters
+// from a token name or symbol for fuzzy substring matching against URLs.
+func normaliseTokenIdentifier(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// blockedWebsiteDomains lists DEX, scanner, launcher, explorer, and
+// no-code website-builder domains that are never accepted as a real project
+// website. Developers frequently copy-paste pump.fun token pages, Solscan
+// links, DEX aggregator pages, or spin up generic Webflow/Carrd landing
+// pages — these are not real project sites and must not satisfy the
+// HasSocialLinks requirement.
 var blockedWebsiteDomains = []string{
 	"pump.fun",
 	"solscan.io",
@@ -307,14 +364,22 @@ var blockedWebsiteDomains = []string{
 	"axiom.trade",
 	"photon-sol.trycourier.app",
 	"bullx.io",
+	// No-code / template-hosting platforms: these host generic landing pages,
+	// not real project websites. A webflow.io subdomain is a template, not a
+	// team's own domain.
+	"webflow.io",
+	"carrd.co",
+	"framer.app",
+	"super.so",
+	"notion.so",
+	"my.canva.site",
 }
 
 // isBlockedWebsiteDomain returns true when rawURL's host matches any entry in
-// the blockedWebsiteDomains list (exact suffix match, so subdomains included).
+// the blockedWebsiteDomains list (substring match covers subdomains too).
 func isBlockedWebsiteDomain(rawURL string) bool {
 	u := strings.ToLower(rawURL)
 	for _, domain := range blockedWebsiteDomains {
-		// Match "domain" or "subdomain.domain" by checking suffix after "://".
 		if strings.Contains(u, domain) {
 			return true
 		}
@@ -322,22 +387,126 @@ func isBlockedWebsiteDomain(rawURL string) bool {
 	return false
 }
 
-// isTwitterProfileURL returns true when the URL points to a Twitter/X account
-// profile, not to an individual tweet, thread, or short-link.
-func isTwitterProfileURL(rawURL string) bool {
+// socialMediaWebsiteDomains lists social-media and messaging-platform domains
+// that are NOT acceptable as a token's project website. Developers sometimes
+// place a Twitter profile or Telegram channel in the "website" metadata field
+// instead of their actual project site. These must be rejected for the
+// "website" type so that a real project URL is required.
+//
+// Note: Twitter/X is handled via isTwitterProfileURL for the "twitter" social
+// type; this list is applied only when the metadata field type is "website".
+var socialMediaWebsiteDomains = []string{
+	"twitter.com",
+	"x.com",
+	"t.me",
+	"telegram.me",
+	"telegram.org",
+	"discord.com",
+	"discord.gg",
+	"discordapp.com",
+	"facebook.com",
+	"fb.com",
+	"instagram.com",
+	"tiktok.com",
+	"youtube.com",
+	"youtu.be",
+	"medium.com",
+	"linktr.ee",
+	"reddit.com",
+	"bio.link",
+}
+
+// isSocialMediaWebsiteDomain returns true when rawURL references a known
+// social media or messaging platform — blocking it from satisfying the
+// "website" metadata requirement.
+func isSocialMediaWebsiteDomain(rawURL string) bool {
 	u := strings.ToLower(rawURL)
-	// t.co is Twitter's own shortener — always a redirect to a tweet or link,
-	// never a profile URL.
-	if strings.Contains(u, "t.co/") {
+	for _, domain := range socialMediaWebsiteDomains {
+		if strings.Contains(u, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTwitterProfileURL returns true when rawURL points to a Twitter/X account
+// profile page — exactly one path segment (the username) on a recognised
+// Twitter/X host, not a tweet, search result, or internal redirect.
+//
+// Accepted:
+//
+//	https://twitter.com/myproject
+//	https://x.com/myproject
+//	https://www.twitter.com/myproject
+//
+// Rejected (examples):
+//
+//	https://x.com/elonmusk/status/1234          — tweet (two path segments)
+//	https://twitter.com/search?q=bitcoin         — search results
+//	https://x.com/i/web/status/123              — internal web-app redirect
+//	https://x.com/intent/tweet?text=hello        — tweet compose intent
+//	https://t.co/SomeHash                        — t.co short-link redirect
+//	https://twitter.com/                         — root domain, no username
+func isTwitterProfileURL(rawURL string) bool {
+	u := strings.TrimSpace(rawURL)
+	if u == "" {
 		return false
 	}
-	// /status/ and /statuses/ are the path segments Twitter uses for tweets.
-	if strings.Contains(u, "/status/") || strings.Contains(u, "/statuses/") {
+
+	parsed, err := url.Parse(u)
+	if err != nil {
 		return false
 	}
-	// Must actually reference twitter.com or x.com to count as Twitter.
-	if !strings.Contains(u, "twitter.com") && !strings.Contains(u, "x.com") {
+
+	host := strings.ToLower(parsed.Hostname())
+
+	// t.co is Twitter's own URL shortener — always a redirect to a tweet or
+	// external link, never a profile page.
+	if host == "t.co" {
 		return false
 	}
+
+	// Must be twitter.com or x.com (accept www. prefix).
+	if host != "twitter.com" && host != "www.twitter.com" &&
+		host != "x.com" && host != "www.x.com" {
+		return false
+	}
+
+	// Non-standard ports (e.g. :8080) are never valid Twitter profile URLs.
+	// A rug-dev could set twitter="https://twitter.com:9090/fakehandle" to pass
+	// host validation while the URL resolves to nothing on Twitter's network.
+	if parsed.Port() != "" {
+		return false
+	}
+
+	// Normalise path: strip the leading and trailing slashes.
+	path := strings.Trim(parsed.Path, "/")
+	if path == "" {
+		// Root domain with no username — not a profile.
+		return false
+	}
+
+	// A valid profile URL has EXACTLY one path segment (the username).
+	// Multiple segments mean a tweet (/username/status/…), an internal path
+	// (/i/web/…), or any other non-profile sub-path.
+	if strings.Contains(path, "/") {
+		return false
+	}
+
+	// Reject well-known reserved Twitter top-level paths that are not usernames.
+	switch strings.ToLower(path) {
+	case "i", "search", "intent", "explore", "hashtag", "home",
+		"settings", "notifications", "messages", "help",
+		"login", "signup", "logout", "about", "privacy", "tos":
+		return false
+	}
+
+	// Twitter usernames never contain "@". A path like "fakeuser@evil.com"
+	// has no slash so it passes the segment check, but "@" in the path
+	// indicates a malformed or adversarial URL that is not a real profile.
+	if strings.Contains(path, "@") {
+		return false
+	}
+
 	return true
 }

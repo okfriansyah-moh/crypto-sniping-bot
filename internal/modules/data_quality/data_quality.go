@@ -208,6 +208,17 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		!in.SocialLinksKnown {
 		rejectReasons = append(rejectReasons, "unknown_social_links")
 	}
+	// Structural reject: insufficient confirmed holder count.
+	// Brand-new launches (PumpFunCreate events) are exempt — holder distribution
+	// takes time to settle and would produce false rejections at the moment of
+	// token creation.
+	if !isNewLaunch && m.runtime != nil && m.runtime.Thresholds.MinHolderCount > 0 {
+		if in.HolderDistKnown && in.HolderCount < m.runtime.Thresholds.MinHolderCount {
+			rejectReasons = append(rejectReasons, "insufficient_holders")
+		} else if !in.HolderDistKnown && m.runtime.Thresholds.RejectUnknownHolderCount {
+			rejectReasons = append(rejectReasons, "unknown_holder_count")
+		}
+	}
 	if m.runtime != nil && m.runtime.Thresholds.MinTokenAgeSeconds > 0 {
 		// Hard-reject tokens younger than the minimum age. Tokens under this
 		// threshold have incomplete data: holder distribution is not settled,

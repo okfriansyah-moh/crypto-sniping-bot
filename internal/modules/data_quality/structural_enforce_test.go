@@ -449,3 +449,116 @@ func TestStructuralReject_UnknownSupply_DisabledByZeroMaxSupply(t *testing.T) {
 		t.Errorf("MaxTotalSupply=0 must disable supply checks; got %v", out.RejectReasons)
 	}
 }
+
+// ── Holder count structural rejects ──────────────────────────────────────────
+
+// TestStructuralReject_InsufficientHolders_Rejects confirms that a rescan
+// token (non-new-launch) with HolderCount below MinHolderCount is rejected.
+// Root cause: COOKING token had 1 holder after 7 hours — DQ never checked it.
+func TestStructuralReject_InsufficientHolders_Rejects(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.MinHolderCount = 50
+	rt.Thresholds.RejectUnknownHolderCount = false
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.EventTopic = "rescan_8h" // NOT a new launch — holder check applies
+	in.HolderDistKnown = true
+	in.HolderCount = 1 // COOKING had 1 holder after 7 hours
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsString(out.RejectReasons, "insufficient_holders") {
+		t.Errorf("expected insufficient_holders in RejectReasons, got %v", out.RejectReasons)
+	}
+}
+
+// TestStructuralReject_InsufficientHolders_SkippedForNewLaunch confirms the
+// brand-new-launch exemption: PumpFunCreate events bypass the holder check
+// because holder distribution has not yet settled at creation time.
+func TestStructuralReject_InsufficientHolders_SkippedForNewLaunch(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.MinHolderCount = 50
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.EventTopic = "PumpFunCreate" // new launch — holder check must be skipped
+	in.HolderDistKnown = true
+	in.HolderCount = 1
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsString(out.RejectReasons, "insufficient_holders") {
+		t.Errorf("new launch must not produce insufficient_holders; got %v", out.RejectReasons)
+	}
+}
+
+// TestStructuralReject_UnknownHolderCount_RejectsWhenFlagEnabled confirms that
+// HolderDistKnown=false triggers unknown_holder_count when the flag is set.
+func TestStructuralReject_UnknownHolderCount_RejectsWhenFlagEnabled(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.MinHolderCount = 50
+	rt.Thresholds.RejectUnknownHolderCount = true
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.EventTopic = "rescan_4h"
+	in.HolderDistKnown = false // probe failed
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsString(out.RejectReasons, "unknown_holder_count") {
+		t.Errorf("expected unknown_holder_count in RejectReasons, got %v", out.RejectReasons)
+	}
+}
+
+// TestStructuralReject_UnknownHolderCount_SkippedWhenFlagDisabled confirms
+// that HolderDistKnown=false is silent when RejectUnknownHolderCount=false.
+func TestStructuralReject_UnknownHolderCount_SkippedWhenFlagDisabled(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.MinHolderCount = 50
+	rt.Thresholds.RejectUnknownHolderCount = false
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.EventTopic = "rescan_4h"
+	in.HolderDistKnown = false
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsString(out.RejectReasons, "unknown_holder_count") {
+		t.Errorf("disabled flag must not produce unknown_holder_count; got %v", out.RejectReasons)
+	}
+}
+
+// TestStructuralReject_HolderCountAboveThreshold_Passes confirms a token with
+// sufficient holders passes the check without triggering any holder reject.
+func TestStructuralReject_HolderCountAboveThreshold_Passes(t *testing.T) {
+	rt := runtimeWithEnforcement()
+	rt.Thresholds.MinHolderCount = 50
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := baseNewLaunch()
+	in.EventTopic = "rescan_1h"
+	in.HolderDistKnown = true
+	in.HolderCount = 120 // above threshold
+
+	out, err := m.ProcessForMode(context.Background(), in, "BALANCED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsString(out.RejectReasons, "insufficient_holders") {
+		t.Errorf("token with sufficient holders must not be rejected; got %v", out.RejectReasons)
+	}
+	if containsString(out.RejectReasons, "unknown_holder_count") {
+		t.Errorf("known holder count must not produce unknown_holder_count; got %v", out.RejectReasons)
+	}
+}

@@ -128,6 +128,22 @@ data_quality:
     # distribution and wash patterns to become observable.
     min_token_age_seconds: 900 # 15 minutes
 
+    # min_holder_count: structural hard-reject when confirmed unique holder
+    # count is below this floor. A token with fewer than 50 holders after
+    # launch is either entirely dev-owned (like COOKING with 1 holder) or has
+    # no real community traction. Skipped automatically for brand-new launches
+    # (PumpFunCreate events) to avoid false rejections at creation time.
+    # Canonical values: STRICT=100, BALANCED=50, EXPLORATION=10.
+    # 0 disables the check entirely.
+    min_holder_count: 50
+
+    # reject_unknown_holder_count: when true, HolderDistKnown=false (holder
+    # distribution probe timed out or not run) is a structural hard-reject when
+    # min_holder_count > 0. Does NOT apply to brand-new launches.
+    # Set false initially until probe reliability is confirmed in production;
+    # flip to true once the solana_holder_dist probe has a stable track record.
+    reject_unknown_holder_count: false
+
     # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
     rug_dangerous_selectors:
       - "mint"

@@ -145,6 +145,17 @@ type DataQualityDetectorThresholds struct {
 	// old enough. Age is measured from BlockTimestamp (on-chain creation),
 	// falling back to IngestedAt. 0 disables. Canonical default: 900 (15 min).
 	MinTokenAgeSeconds int32 `yaml:"min_token_age_seconds"`
+
+	// MinHolderCount — structural hard-reject when the confirmed unique holder
+	// count is below this floor. A token with 1–5 holders after several hours
+	// of trading is either a stealth launch owned entirely by the dev, or has
+	// no real community traction. Skipped for brand-new launches (isNewLaunch)
+	// since holder distribution takes time to settle. 0 disables. Canonical: 50.
+	MinHolderCount int32 `yaml:"min_holder_count"`
+	// RejectUnknownHolderCount, when true, treats HolderDistKnown=false (the
+	// holder distribution probe timed out or was not run) as a structural
+	// hard-reject when MinHolderCount > 0. Does NOT apply to brand-new launches.
+	RejectUnknownHolderCount bool `yaml:"reject_unknown_holder_count"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.
