@@ -176,7 +176,7 @@ solana:
     latency_normalizer_ms: 1000
     latency_failover_threshold_ms: 3000
     error_rate_failover_threshold: 0.1
-    consecutive_ws_failures_threshold: 3
+    consecutive_ws_failures_threshold: 5
     circuit_open_cooldown_ms: 30000
   # Phase 11 (Reference-Repo R2 — INGEST) — pluggable transport.
   # Mode: "rpc" (default WS), "grpc" (Yellowstone/Geyser), or "hybrid"
