@@ -169,11 +169,19 @@ func (m *Module) Start(ctx context.Context) error {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for _, prog := range m.cfg.Programs {
+	for i, prog := range m.cfg.Programs {
 		prog := prog // capture
+		stagger := time.Duration(i) * time.Duration(m.cfg.WsSubscribeStaggerMs) * time.Millisecond
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if stagger > 0 {
+				select {
+				case <-time.After(stagger):
+				case <-innerCtx.Done():
+					return
+				}
+			}
 			m.runProgramLoop(innerCtx, prog)
 		}()
 	}

@@ -91,11 +91,14 @@ solana:
       kind: http
       region: us-east
       provider: quicknode # primary: QuickNode
-    - url: "${SOLANA_WS_1}"
-      priority: 1
-      kind: ws
-      region: us-east
-      provider: quicknode
+    # QuickNode WS disabled — free tier limits logsSubscribe to 1 concurrent
+    # connection; 3 programs require 3 slots which exceeds the plan quota (-32003).
+    # Re-enable once upgraded to a plan with ≥3 logsSubscribe slots.
+    #- url: "${SOLANA_WS_1}"
+    #  priority: 1
+    #  kind: ws
+    #  region: us-east
+    #  provider: quicknode
     - url: "${SOLANA_RPC_HTTP_2}"
       priority: 2
       kind: http
@@ -122,15 +125,17 @@ solana:
     # P4: PumpFun AMM (graduation events — token migrates from bonding curve to AMM)
     - program_id: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
       family: pumpfun-amm
-    # P4: Raydium CLMM (concentrated liquidity pool creation)
-    - program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
-      family: raydium-clmm
-    # P4: Orca Whirlpool (concentrated liquidity, high Solana volume)
-    - program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
-      family: orca-whirlpool
-    # P4: Meteora DLMM (dynamic liquidity market maker)
-    - program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
-      family: meteora-dlmm
+    # P4: Raydium CLMM / Orca Whirlpool / Meteora DLMM disabled — these are
+    # established AMMs where new pool creation is rare and does not fit the
+    # new-launch edge profile.  Disabled to stay within QuickNode's concurrent
+    # logsSubscribe limit (3 active programs → 3 WS slots needed vs 6).
+    # Re-enable once a higher-tier RPC plan is in place.
+    #- program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+    #  family: raydium-clmm
+    #- program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+    #  family: orca-whirlpool
+    #- program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
+    #  family: meteora-dlmm
   # getTransaction HTTP rate cap — must be ≤ RPC provider account limit.
   # QuickNode free tier = 15 req/s; lowered to 2 to stay within daily quota.
   # At 2 req/s the daily usage is ~172k calls — well under free-tier daily caps.
@@ -167,6 +172,11 @@ solana:
   pyth_sol_usd_account: "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
   pyth_cache_ttl_seconds: 5
   pyth_stale_after_seconds: 60
+  # ws_subscribe_stagger_ms: delay between each program's first logsSubscribe
+  # attempt at startup.  Spreads the connection burst across time so all 3
+  # programs don't hammer the sole WS endpoint simultaneously.
+  # With 3 programs and 3000ms stagger: program 0 at t=0, 1 at t=3s, 2 at t=6s.
+  ws_subscribe_stagger_ms: 10000
   ingestion_backoff:
     initial_ms: 200
     max_ms: 30000

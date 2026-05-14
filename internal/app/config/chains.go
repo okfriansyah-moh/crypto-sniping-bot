@@ -86,6 +86,12 @@ type SolanaConfig struct {
 	// RateLimitBackoffMs is how long (ms) to suppress getTransaction calls
 	// after receiving an RPC -32003 daily-quota error. Default: 60000 (60s).
 	RateLimitBackoffMs int `yaml:"rate_limit_backoff_ms"`
+	// WsSubscribeStaggerMs is the per-program startup delay (ms) applied before
+	// the first logsSubscribe attempt for each program. Staggering prevents all
+	// programs from connecting simultaneously and triggering a burst 429.
+	// Program i waits i*WsSubscribeStaggerMs before its first attempt.
+	// 0 disables staggering (all connect immediately).
+	WsSubscribeStaggerMs int `yaml:"ws_subscribe_stagger_ms"`
 	// ProcessingWorkers controls how many concurrent goroutines may process
 	// notifications per program (calling getTransaction + normalize + emit).
 	// 0 or negative falls back to a safe default. Pump.fun in log-decode mode
