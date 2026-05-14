@@ -580,6 +580,12 @@ type Adapter interface {
 	// ordered by cohort_key ASC. Returns an empty (non-nil) slice when
 	// no rows exist.
 	ListHistoricalProfiles(ctx context.Context) ([]contracts.HistoricalMarketProfileDTO, error)
+
+	// GetExecutionLog returns the last `limit` tokens that reached SELECTED
+	// or further (including FAILED ones), ordered by updated_at DESC.
+	// Includes full token address, symbol, chain, lifecycle state, execution
+	// status, error code, and tx hash. Used by the /executions Telegram command.
+	GetExecutionLog(ctx context.Context, limit int) ([]ExecutionLogRow, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────
@@ -683,6 +689,20 @@ type RecentToken struct {
 	State        string // current lifecycle state
 	Chain        string
 	DetectedAt   string // ISO 8601
+}
+
+// ExecutionLogRow is one entry in the operator /executions log.
+// It covers every token that reached the SELECTED stage or further,
+// including those that FAILED during or after execution.
+type ExecutionLogRow struct {
+	TokenAddress   string // full contract address
+	Symbol         string // empty when not available
+	Chain          string // e.g. "solana", "eth"
+	LifecycleState string // e.g. "EXECUTED", "FAILED", "POSITION_OPEN"
+	Status         string // "confirmed", "failed", "simulated", or "" when not yet executed
+	ErrorCode      string // execution_results.error_code or token_lifecycle.terminal_reason
+	TxHash         string // empty when execution never reached chain
+	UpdatedAt      string // ISO 8601 — when the lifecycle last changed
 }
 
 // Config holds database connection parameters.

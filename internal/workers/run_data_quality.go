@@ -129,16 +129,30 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 
 	// Enrich DTO with creator token count before the pure module call.
 	// The DQ module is a pure function — DB lookups happen here in the worker.
-	if dto.CreatorAddress != "" {
+	//
+	// Priority: the MarketProbesWorker runs BEFORE the DQ worker and populates
+	// CreatorPrevTokenCountKnown=true via SolanaCreatorReputationProbe (which
+	// queries the pump.fun API for ground-truth launch history). Only fall back
+	// to the local DB if the probe did not run or failed.
+	//
+	// Cold-start safety: if neither the external probe NOR the local DB has
+	// seen this creator (both return 0), leave CreatorPrevTokenCountKnown=false.
+	// This triggers DEV_UNKNOWN_HISTORY (Score=1.0, fail-closed) in the DQ
+	// module instead of silently treating an unknown creator as "new dev".
+	if !dto.CreatorPrevTokenCountKnown && dto.CreatorAddress != "" {
 		count, countErr := w.adapter.CountTokensByCreator(ctx, dto.CreatorAddress, dto.TokenAddress)
 		if countErr != nil {
 			w.logger.Warn("dq_worker_creator_count_failed",
 				"creator", dto.CreatorAddress, "error", countErr)
 			// Leave CreatorPrevTokenCountKnown=false; DQ degrades per profile.
-		} else {
+		} else if count > 0 {
+			// Only trust the local DB count when we have actually seen this
+			// creator before. count=0 on a cold DB is indistinguishable from
+			// a new creator — leave Known=false so DQ fails closed.
 			dto.CreatorPrevTokenCount = count
 			dto.CreatorPrevTokenCountKnown = true
 		}
+		// count==0: leave CreatorPrevTokenCountKnown=false (fail-closed).
 	}
 
 	dqDTO, err := w.mod.ProcessForMode(ctx, dto, sysMode)
@@ -151,6 +165,7 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		"decision", dqDTO.Decision,
 		"risk_score", dqDTO.RiskScore,
 		"profile", dqDTO.Profile,
+		"reject_reasons", dqDTO.RejectReasons,
 		"flags", dqDTO.Flags,
 		"trace_id", dqDTO.TraceID,
 		"version_id", dqDTO.VersionID,

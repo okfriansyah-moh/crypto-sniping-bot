@@ -28,6 +28,12 @@ type ProbesConfig struct {
 	// SocialLinksKnown + HasSocialLinks. No RPC client required.
 	SolanaMetadata SolanaMetadataYAML `yaml:"solana_metadata"`
 
+	// SolanaCreatorReputation configures the pump.fun creator history probe.
+	// Queries the pump.fun public API to set CreatorPrevTokenCountKnown and
+	// CreatorPrevTokenCount with ground-truth data. Closes the cold-start
+	// serial-launcher gap (BLOCKER-2 from gate review 2026-05-10).
+	SolanaCreatorReputation SolanaCreatorReputationYAML `yaml:"solana_creator_reputation"`
+
 	// EVMPairReserves configures the Uniswap-V2 getReserves probe.
 	EVMPairReserves EVMPairReservesYAML `yaml:"evm_pair_reserves"`
 }
@@ -71,4 +77,40 @@ type SolanaMetadataYAML struct {
 	TimeoutMs    int    `yaml:"timeout_ms"`
 	IPFSGateway  string `yaml:"ipfs_gateway"`
 	MaxBodyBytes int64  `yaml:"max_body_bytes"`
+}
+
+// SolanaCreatorReputationYAML configures the pump.fun creator history probe.
+// The probe queries the pump.fun public API to determine how many tokens
+// a Solana wallet has previously launched. This provides ground-truth creator
+// history that is not available in the local database at cold start.
+type SolanaCreatorReputationYAML struct {
+	// Enabled toggles the probe. Default true (enabled by default so that
+	// the cold-start serial-launcher gap is closed from the first run).
+	Enabled bool `yaml:"enabled"`
+
+	// TimeoutMs is the HTTP deadline for the pump.fun API request.
+	// Valid range: [500, 10000]. Probe internal default: 3000.
+	// (config/pipeline.yaml ships an explicit 5000ms override to accommodate
+	// the pump.fun + Helius DAS fallback path.)
+	TimeoutMs int `yaml:"timeout_ms"`
+
+	// BaseURL is the pump.fun creator API root. Must be HTTPS.
+	// Default: "https://frontend-api-v3.pump.fun".
+	BaseURL string `yaml:"base_url"`
+
+	// MaxBodyBytes caps the API response body (bytes).
+	// Valid range: [1024, 1048576]. Default: 131072 (128 KiB).
+	MaxBodyBytes int64 `yaml:"max_body_bytes"`
+
+	// PageLimit is the ?limit= parameter sent to pump.fun (max coins per
+	// page). Valid range: [1, 200]. Default: 50.
+	PageLimit int `yaml:"page_limit"`
+
+	// HeliusRPCURL is NOT read from YAML (yaml:"-"). It is populated
+	// programmatically in cmd/server.go from the first Helius HTTP
+	// endpoint found in cfg.Solana.RPCEndpoints. The URL embeds the
+	// Helius API key as a query parameter (sourced from SOLANA_RPC_HTTP_2
+	// env var). Empty string disables the Helius DAS fallback.
+	// NEVER set this field directly in pipeline.yaml — it contains an API key.
+	HeliusRPCURL string `yaml:"-"`
 }

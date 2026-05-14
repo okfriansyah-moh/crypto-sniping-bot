@@ -898,6 +898,25 @@ ArchiveEvents(ctx context.Context, olderThan time.Time, batchSize int) (archived
 
 GetEventsByTraceIncludeArchive(ctx context.Context, traceID string) ([]contracts.EventEnvelope, error)
 // Union of events + events_archive. Used by replay and audit.
+
+// --- Execution log (Telegram /executions command) ---
+// ExecutionLogRow is a read-only projection joining token_lifecycle,
+// market_data, and execution_results for operator visibility.
+type ExecutionLogRow struct {
+    TokenAddress   string
+    Symbol         string
+    Chain          string
+    LifecycleState string
+    Status         string
+    ErrorCode      string
+    TxHash         string
+    UpdatedAt      string // ISO 8601
+}
+GetExecutionLog(ctx context.Context, limit int) ([]ExecutionLogRow, error)
+// Returns up to `limit` rows for lifecycle states:
+//   SELECTED, EXECUTED, POSITION_OPEN, POSITION_CLOSED, EVALUATED, FAILED
+// Ordered by updated_at DESC.
+// Implemented via LATERAL joins in postgres/lifecycle.go.
 ```
 
 ---

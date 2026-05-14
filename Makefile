@@ -154,6 +154,15 @@ docker-build:
 docker-up:
 	docker compose up --build -d
 
+# Start PostgreSQL only (persistent volume, no bot).
+.PHONY: postgres
+postgres:
+	docker compose up -d db
+
+# Alias: explicit name for Postgres-only startup.
+.PHONY: docker-up-postgres
+docker-up-postgres: postgres
+
 # Stop all services (data volume is preserved).
 .PHONY: docker-down
 docker-down:
@@ -162,12 +171,61 @@ docker-down:
 # Stop all services and delete the database volume.
 .PHONY: docker-clean
 docker-clean:
+	docker compose down
+
+# Stop all services and delete the database volume (destructive).
+.PHONY: docker-clean-all
+docker-clean-all:
 	docker compose down -v
 
 # Tail bot logs.
 .PHONY: docker-logs
 docker-logs:
 	docker compose logs -f bot
+
+# ── Postgres backup / restore (local + VPS sync) ─────────────────────────────
+
+BACKUP_DIR ?= backups
+BACKUP_FILE ?= $(BACKUP_DIR)/sniper_$(shell date +%Y%m%d_%H%M%S).dump
+FILE ?=
+VPS_HOST ?=
+VPS_USER ?= root
+VPS_APP_DIR ?= /opt/crypto-sniping-bot
+
+# Create a compressed PostgreSQL dump from local Docker DB.
+.PHONY: db-backup
+db-backup:
+	@mkdir -p "$(BACKUP_DIR)"
+	docker compose exec -T db pg_dump -U sniper -d sniper -Fc > "$(BACKUP_FILE)"
+	@echo "Backup created: $(BACKUP_FILE)"
+
+# Restore a local dump into local Docker DB.
+# Usage: make db-restore FILE=backups/sniper_YYYYMMDD_HHMMSS.dump
+.PHONY: db-restore
+db-restore:
+	@[[ -n "$(FILE)" ]] || (echo "Usage: make db-restore FILE=backups/sniper_YYYYMMDD_HHMMSS.dump" && exit 1)
+	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
+	cat "$(FILE)" | docker compose exec -T db pg_restore -U sniper -d sniper --clean --if-exists --no-owner --no-privileges
+	@echo "Restore completed from: $(FILE)"
+
+# Stream a VPS Docker DB dump directly to local backup file.
+# Usage: make db-backup-vps VPS_HOST=1.2.3.4 [VPS_USER=root] [VPS_APP_DIR=/opt/crypto-sniping-bot]
+.PHONY: db-backup-vps
+db-backup-vps:
+	@[[ -n "$(VPS_HOST)" ]] || (echo "Usage: make db-backup-vps VPS_HOST=1.2.3.4" && exit 1)
+	@mkdir -p "$(BACKUP_DIR)"
+	ssh "$(VPS_USER)@$(VPS_HOST)" "cd $(VPS_APP_DIR) && docker compose exec -T db pg_dump -U sniper -d sniper -Fc" > "$(BACKUP_FILE)"
+	@echo "VPS backup downloaded to: $(BACKUP_FILE)"
+
+# Stream a local dump directly into VPS Docker DB.
+# Usage: make db-restore-vps VPS_HOST=1.2.3.4 FILE=backups/sniper_YYYYMMDD_HHMMSS.dump
+.PHONY: db-restore-vps
+db-restore-vps:
+	@[[ -n "$(VPS_HOST)" ]] || (echo "Usage: make db-restore-vps VPS_HOST=1.2.3.4 FILE=backups/....dump" && exit 1)
+	@[[ -n "$(FILE)" ]] || (echo "Usage: make db-restore-vps VPS_HOST=1.2.3.4 FILE=backups/....dump" && exit 1)
+	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
+	cat "$(FILE)" | ssh "$(VPS_USER)@$(VPS_HOST)" "cd $(VPS_APP_DIR) && docker compose exec -T db pg_restore -U sniper -d sniper --clean --if-exists --no-owner --no-privileges"
+	@echo "VPS restore completed from: $(FILE)"
 
 # All quality gates
 .PHONY: quality

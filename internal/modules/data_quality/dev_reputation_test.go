@@ -11,17 +11,15 @@ func TestDetectDevReputation_UnknownWhenNeitherFieldKnown(t *testing.T) {
 		// Neither CreatorPrevTokenCountKnown nor SocialLinksKnown set.
 	}
 	got := DetectDevReputation(in, 5, 0.40)
-	if !got.Unknown {
-		t.Fatalf("want Unknown=true, got %+v", got)
+	// Fail-closed: unknown dev history is max risk (Score=1.0).
+	if got.Unknown {
+		t.Fatalf("want Unknown=false (fail-closed), got Unknown=true: %+v", got)
 	}
-	if got.Score != 0 {
-		t.Fatalf("want Score=0 when unknown, got %v", got.Score)
+	if got.Score != 1.0 {
+		t.Fatalf("want Score=1.0 for unknown dev (fail-closed), got %v", got.Score)
 	}
-	if got.UnknownFlag != "dq_unknown_dev_reputation" {
-		t.Fatalf("want UnknownFlag='dq_unknown_dev_reputation', got %q", got.UnknownFlag)
-	}
-	if len(got.Flags) != 0 {
-		t.Fatalf("want no flags when unknown, got %v", got.Flags)
+	if !contains(got.Flags, "DEV_UNKNOWN_HISTORY") {
+		t.Fatalf("want DEV_UNKNOWN_HISTORY flag, got %v", got.Flags)
 	}
 }
 

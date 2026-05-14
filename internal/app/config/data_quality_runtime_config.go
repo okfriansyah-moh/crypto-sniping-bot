@@ -112,6 +112,31 @@ type DataQualityDetectorThresholds struct {
 	// Canonical default: 0.40 (meaningful contribution without hard-reject).
 	MaxCreatorPrevTokenCount int32   `yaml:"max_creator_prev_token_count"`
 	NoSocialLinksRiskScore   float64 `yaml:"no_social_links_risk_score"`
+	// RejectNoSocialLinks, when true, treats missing social links as a
+	// structural hard-reject rather than a risk-score contribution. Applies
+	// only when SocialLinksKnown=true AND HasSocialLinks=false (i.e. the
+	// metadata probe ran and confirmed there are no profile-level social URLs).
+	// Mandatory criterion: must remain true in all production modes.
+	RejectNoSocialLinks bool `yaml:"reject_no_social_links"`
+	// RejectUnknownSocialLinks, when true, treats SocialLinksKnown=false (metadata
+	// probe not run, timed out, or returned an error) as a structural hard-reject.
+	// Closes the probe-failure gap: a token whose social presence cannot be
+	// verified is as dangerous as one with no social links. Mandatory criterion.
+	RejectUnknownSocialLinks bool `yaml:"reject_unknown_social_links"`
+	// RejectUnknownTotalSupply, when true, treats TotalSupplyKnown=false as a
+	// structural hard-reject when MaxTotalSupply > 0. This closes the LP-probe
+	// failure gap: if the probe is unhealthy the token is rejected rather than
+	// silently passed with an unknown supply. Only set this false on chains
+	// where supply is legitimately not fetchable (set MaxTotalSupply=0 instead
+	// to fully disable the supply check for that chain). Mandatory criterion.
+	RejectUnknownTotalSupply bool `yaml:"reject_unknown_total_supply"`
+	// RejectUnknownCreatorCount, when true, treats CreatorPrevTokenCountKnown=false
+	// (creator reputation probe not run, timed out, or API error) as a structural
+	// hard-reject when MaxCreatorPrevTokenCount > 0. Closes the probe-failure gap:
+	// a creator whose launch history cannot be verified must be treated as a
+	// serial launcher. Without this flag, a probe timeout silently converts a
+	// 382-token serial dev into a first-time launcher in BALANCED mode. Mandatory.
+	RejectUnknownCreatorCount bool `yaml:"reject_unknown_creator_count"`
 
 	// MinTokenAgeSeconds — hard-reject tokens younger than this threshold.
 	// Tokens under this age have incomplete data: holder distribution is not
@@ -120,6 +145,17 @@ type DataQualityDetectorThresholds struct {
 	// old enough. Age is measured from BlockTimestamp (on-chain creation),
 	// falling back to IngestedAt. 0 disables. Canonical default: 900 (15 min).
 	MinTokenAgeSeconds int32 `yaml:"min_token_age_seconds"`
+
+	// MinHolderCount — structural hard-reject when the confirmed unique holder
+	// count is below this floor. A token with 1–5 holders after several hours
+	// of trading is either a stealth launch owned entirely by the dev, or has
+	// no real community traction. Skipped for brand-new launches (isNewLaunch)
+	// since holder distribution takes time to settle. 0 disables. Canonical: 50.
+	MinHolderCount int32 `yaml:"min_holder_count"`
+	// RejectUnknownHolderCount, when true, treats HolderDistKnown=false (the
+	// holder distribution probe timed out or was not run) as a structural
+	// hard-reject when MinHolderCount > 0. Does NOT apply to brand-new launches.
+	RejectUnknownHolderCount bool `yaml:"reject_unknown_holder_count"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.

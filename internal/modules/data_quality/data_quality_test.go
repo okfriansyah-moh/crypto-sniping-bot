@@ -26,6 +26,11 @@ func validMarketData() contracts.MarketDataDTO {
 		Chain:          "eth",
 		ReserveBaseRaw: "2000000000000000", // above minimum
 		Reorged:        false,
+		// Dev is a first-time launcher with social links — genuinely clean.
+		CreatorPrevTokenCountKnown: true,
+		CreatorPrevTokenCount:      0,
+		SocialLinksKnown:           true,
+		HasSocialLinks:             true,
 	}
 }
 

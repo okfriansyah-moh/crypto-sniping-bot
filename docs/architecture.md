@@ -2122,7 +2122,58 @@ if FalsePositiveRate ↑ or RugLossRate ↑:
 
 ---
 
-### 3.1.11 Learning Signals (Precise Labeling)
+### 3.1.11 Mandatory Structural Hard-Rejects
+
+These three criteria are **mandatory invariants** that enforce hard-reject decisions before any detector or risk score is evaluated. They are **not relaxable by mode** (STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION) and cannot be bypassed by any profit or starvation condition. All three enforce **fail-closed** semantics: if the underlying probe fails, the token is rejected rather than passed.
+
+#### 3.1.11.1 No Real Social Profile / Website
+
+A token must have at least one **profile-level** social link:
+
+- **Twitter/X**: must be a user profile URL (e.g. `https://x.com/myproject`) — tweet links (`/status/`) and `t.co` shortlinks are rejected.
+- **Telegram**: any `t.me/` channel link is accepted.
+- **Website**: must be a real external project domain — known DEX, scanner, launcher, and explorer domains (pump.fun, dexscreener.com, birdeye.so, solscan.io, raydium.io, jup.ag, geckoterminal.com, etc.) are rejected as they are not project websites.
+
+**Reject reasons:**
+
+- `no_social_links` — `SocialLinksKnown=true` AND `HasSocialLinks=false` (probe ran, confirmed absent)
+- `unknown_social_links` — `SocialLinksKnown=false` (metadata probe timed out or failed — fail-closed)
+
+**Config**: `reject_no_social_links: true`, `reject_unknown_social_links: true` in `config/data_quality.yaml`. Neither flag may be disabled in production.
+
+#### 3.1.11.2 Excessive Total Supply
+
+Tokens with total supply exceeding `max_total_supply` (canonical: 1,000,000,000 = 1B) are rejected regardless of any other signal. This eliminates low-scarcity meme tokens and supply inflation schemes.
+
+**Reject reasons:**
+
+- `high_total_supply` — `TotalSupplyKnown=true` AND `TotalSupply > max_total_supply`
+- `unknown_total_supply` — `TotalSupplyKnown=false` (LP probe timed out or failed — fail-closed)
+
+**Config**: `max_total_supply: 1000000000`, `reject_unknown_total_supply: true` in `config/data_quality.yaml`.
+
+#### 3.1.11.3 Serial Launcher Developer
+
+Any creator wallet that has previously launched tokens (≥ `max_creator_prev_token_count`, canonical: 1) is rejected. Serial launchers are the dominant pattern in pump-and-dump rug sequences — a developer with multiple launches has demonstrated a rug-and-redeploy strategy.
+
+**Reject reasons:**
+
+- `serial_launcher` — `CreatorPrevTokenCountKnown=true` AND `count >= max_creator_prev_token_count`
+- `unknown_creator_count` — `CreatorPrevTokenCountKnown=false` (creator reputation probe timed out or API error — fail-closed)
+
+**Config**: `max_creator_prev_token_count: 1`, `reject_unknown_creator_count: true` in `config/data_quality.yaml`.
+
+#### 3.1.11.4 Fail-Closed Enforcement Rule
+
+> **Probe failure = reject.** If a probe responsible for verifying any mandatory criterion cannot complete successfully (RPC timeout, HTTP error, API rate limit), the token is rejected as if the criterion failed. `*Known=false` on any mandatory field with the corresponding `reject_unknown_*: true` flag produces an immediate structural reject — no scoring, no mode override, no retry grace.
+
+These are pre-score structural rejects. `len(rejectReasons) > 0` forces `Decision = "REJECT"` before any detector runs. The decision is immutable — mode, score, and edge signals cannot override it.
+
+---
+
+### 3.1.12 Learning Signals (Precise Labeling)
+
+> _(Renumbered from 3.1.11 — section 3.1.11 now documents Mandatory Structural Hard-Rejects)_
 
 **A. False Positive (FP)**
 
@@ -2164,7 +2215,7 @@ Used to adjust detector weights `W_*` and specific thresholds.
 
 ---
 
-### 3.1.12 Metrics (must be tracked)
+### 3.1.13 Metrics (must be tracked)
 
 ```
 pass_rate
@@ -5269,6 +5320,7 @@ ingestion_dropped_events_total  (swap drops due to backpressure)
 /mode STRICT|BALANCED|EXPLORATION|VERY_EXPLORATION
 /pnl
 /positions
+/executions
 /kill
 /resume
 /version

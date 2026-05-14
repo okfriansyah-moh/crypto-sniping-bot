@@ -811,3 +811,7 @@ func (s *stubAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contra
 func (s *stubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil
 }
+
+func (s *stubAdapter) GetExecutionLog(_ context.Context, _ int) ([]database.ExecutionLogRow, error) {
+	return nil, nil
+}

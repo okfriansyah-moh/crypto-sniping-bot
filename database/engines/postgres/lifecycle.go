@@ -570,3 +570,72 @@ LIMIT 10`
 
 	return stats, nil
 }
+
+// GetExecutionLog returns the last `limit` tokens that reached SELECTED or
+// further in the pipeline (including those that FAILED). Results are ordered
+// by lifecycle.updated_at DESC so the most recent activity appears first.
+// Full token address, symbol, chain, lifecycle state, execution status, error
+// code, and tx hash are returned.
+func (d *DB) GetExecutionLog(ctx context.Context, limit int) ([]database.ExecutionLogRow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	const q = `
+SELECT
+    tl.token_address,
+    COALESCE(md.symbol,       '') AS symbol,
+    COALESCE(md.chain,        '') AS chain,
+    tl.current_state,
+    COALESCE(er.status,       '') AS exec_status,
+    -- er.error_code and tl.terminal_reason are TEXT NOT NULL DEFAULT ''.
+    -- COALESCE only treats NULL as missing, so we wrap each TEXT field in
+    -- NULLIF(.., '') to make an empty string fall through to the next source.
+    COALESCE(NULLIF(er.error_code, ''), NULLIF(tl.terminal_reason, ''), '') AS error_code,
+    COALESCE(er.tx_hash,      '') AS tx_hash,
+    tl.updated_at
+FROM token_lifecycle tl
+LEFT JOIN LATERAL (
+    SELECT symbol, name, chain
+    FROM   market_data
+    WHERE  token_address = tl.token_address
+    ORDER  BY block_number DESC
+    LIMIT  1
+) md ON TRUE
+LEFT JOIN LATERAL (
+    SELECT status, error_code, tx_hash
+    FROM   execution_results
+    WHERE  token_lifecycle_id = tl.token_lifecycle_id
+    ORDER  BY completed_at DESC
+    LIMIT  1
+) er ON TRUE
+WHERE tl.current_state IN (
+    'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED'
+)
+ORDER BY tl.updated_at DESC
+LIMIT $1`
+
+	rows, err := d.pool.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get execution log: %w", err)
+	}
+	defer rows.Close()
+
+	var out []database.ExecutionLogRow
+	for rows.Next() {
+		var r database.ExecutionLogRow
+		var updatedAt time.Time
+		if err := rows.Scan(
+			&r.TokenAddress, &r.Symbol, &r.Chain,
+			&r.LifecycleState, &r.Status, &r.ErrorCode,
+			&r.TxHash, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("get execution log scan: %w", err)
+		}
+		r.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get execution log rows: %w", err)
+	}
+	return out, nil
+}

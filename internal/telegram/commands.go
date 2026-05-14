@@ -33,6 +33,7 @@ const (
 	CmdRescanStatus   CommandType = "/rescan_status"
 	CmdDq             CommandType = "/dq"
 	CmdDlq            CommandType = "/dlq"
+	CmdExecutions     CommandType = "/executions"
 	CmdHelp           CommandType = "/help"
 )
 
@@ -69,7 +70,7 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	case CmdStatus, CmdPnl, CmdPositions, CmdPosition, CmdHealth,
 		CmdForceClose, CmdEnableTrading,
 		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdRescanPipeline,
-		CmdRescan, CmdRescanStatus, CmdDq, CmdDlq, CmdHelp:
+		CmdRescan, CmdRescanStatus, CmdDq, CmdDlq, CmdExecutions, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
 			Args:     parts[1:],
@@ -101,6 +102,7 @@ type Handler struct {
 	rescanStatusFn   func(ctx context.Context) (string, error)
 	dqFn             func(ctx context.Context, hours int) (string, error)
 	dlqFn            func(ctx context.Context) (string, error)
+	executionsFn     func(ctx context.Context) (string, error)
 	allowedUserIDs   map[string]struct{} // nil means unconfigured
 	logger           *slog.Logger
 }
@@ -124,6 +126,7 @@ type HandlerOptions struct {
 	RescanStatusFn   func(ctx context.Context) (string, error)
 	DqFn             func(ctx context.Context, hours int) (string, error)
 	DlqFn            func(ctx context.Context) (string, error)
+	ExecutionsFn     func(ctx context.Context) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -160,6 +163,7 @@ func NewHandler(opts HandlerOptions) *Handler {
 		rescanStatusFn:   opts.RescanStatusFn,
 		dqFn:             opts.DqFn,
 		dlqFn:            opts.DlqFn,
+		executionsFn:     opts.ExecutionsFn,
 		allowedUserIDs:   allowedSet(opts.AllowedUserIDs),
 		logger:           logger,
 	}
@@ -421,6 +425,16 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 		}
 		return &CommandResult{Text: text}, nil
 
+	case CmdExecutions:
+		if h.executionsFn == nil {
+			return &CommandResult{Text: "executions: not configured"}, nil
+		}
+		text, err := h.executionsFn(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commands: executions: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
 	case CmdHelp:
 		return &CommandResult{Text: helpText()}, nil
 	}
@@ -442,6 +456,7 @@ func helpText() string {
 		"/rescan_status — Rescan worker config, band eligibility, last 24h emission counts\n" +
 		"/dq [hours] — Data quality decision stats: total, rug rate, pass rate\n" +
 		"/dlq — Dead-letter queue: failed events, reason breakdown\n" +
+		"/executions — Last 20 tokens that reached execution (success + failed) with full CA\n" +
 		"/version — Active strategy version ID and status\n\n" +
 		"<b>⚙️ Operational</b>\n" +
 		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +

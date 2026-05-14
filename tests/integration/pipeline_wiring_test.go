@@ -873,3 +873,7 @@ func (m *memAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contrac
 func (m *memAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil
 }
+
+func (m *memAdapter) GetExecutionLog(_ context.Context, _ int) ([]database.ExecutionLogRow, error) {
+	return nil, nil
+}

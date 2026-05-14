@@ -150,13 +150,74 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	if m.runtime != nil &&
 		m.runtime.Thresholds.MaxTotalSupply > 0 &&
 		!in.TotalSupplyKnown {
-		// Threshold is configured but ingestion did not populate TotalSupply.
-		// The check is intentionally skipped to avoid false rejections, but log
-		// so operators can detect missing upstream supply data.
-		m.logger.Debug("dq_total_supply_unknown",
-			"token_address", in.TokenAddress,
-			"max_total_supply_threshold", m.runtime.Thresholds.MaxTotalSupply,
-		)
+		if m.runtime.Thresholds.RejectUnknownTotalSupply {
+			// Fail-closed: LP probe didn't run (RPC unhealthy, bonding-curve
+			// unreadable, etc.). Reject rather than pass a token whose supply
+			// may exceed the configured limit. Use reject_unknown_total_supply=false
+			// on chains where supply is legitimately unfetchable.
+			rejectReasons = append(rejectReasons, "unknown_total_supply")
+		} else {
+			// Soft path: log and continue. Operators should monitor this
+			// event to detect LP-probe failures before they accumulate.
+			m.logger.Warn("dq_total_supply_unknown",
+				"token_address", in.TokenAddress,
+				"max_total_supply_threshold", m.runtime.Thresholds.MaxTotalSupply,
+			)
+		}
+	}
+	// Structural reject: serial launcher (mandatory criterion).
+	// When CreatorPrevTokenCountKnown=true (populated by the
+	// solana_creator_reputation probe) and the count meets or exceeds the
+	// threshold, reject immediately — the dev-reputation weight alone (0.25)
+	// cannot push the aggregate over the BALANCED 0.50 barrier.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
+		in.CreatorPrevTokenCountKnown &&
+		in.CreatorPrevTokenCount >= m.runtime.Thresholds.MaxCreatorPrevTokenCount {
+		rejectReasons = append(rejectReasons, "serial_launcher")
+	}
+	// Structural reject: unknown creator history (mandatory fail-closed).
+	// When CreatorPrevTokenCountKnown=false (probe timed out, API error, or
+	// probe not yet run) and RejectUnknownCreatorCount=true, reject rather than
+	// silently treating the creator as a first-time launcher. In BALANCED mode
+	// UnknownFactor=0 means an unknown creator contributes 0 risk — a serial
+	// developer with 382 tokens becomes indistinguishable from a first-timer.
+	// This is the critical fail-closed gap: probe failure must not equal approval.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
+		m.runtime.Thresholds.RejectUnknownCreatorCount &&
+		!in.CreatorPrevTokenCountKnown {
+		rejectReasons = append(rejectReasons, "unknown_creator_count")
+	}
+	// Structural reject: confirmed no social links (mandatory criterion).
+	// When SocialLinksKnown=true (metadata probe ran) and HasSocialLinks=false
+	// (no profile-level Twitter/Telegram/website found) and RejectNoSocialLinks=true,
+	// reject immediately.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.RejectNoSocialLinks &&
+		in.SocialLinksKnown && !in.HasSocialLinks {
+		rejectReasons = append(rejectReasons, "no_social_links")
+	}
+	// Structural reject: unknown social link status (mandatory fail-closed).
+	// When SocialLinksKnown=false (metadata probe timed out, fetch error, or
+	// probe disabled) and RejectUnknownSocialLinks=true, reject rather than
+	// allowing the token to pass with unverified social presence. A token
+	// whose social links cannot be validated is as dangerous as one with none.
+	if m.runtime != nil &&
+		m.runtime.Thresholds.RejectUnknownSocialLinks &&
+		!in.SocialLinksKnown {
+		rejectReasons = append(rejectReasons, "unknown_social_links")
+	}
+	// Structural reject: insufficient confirmed holder count.
+	// Brand-new launches (PumpFunCreate events) are exempt — holder distribution
+	// takes time to settle and would produce false rejections at the moment of
+	// token creation.
+	if !isNewLaunch && m.runtime != nil && m.runtime.Thresholds.MinHolderCount > 0 {
+		if in.HolderDistKnown && in.HolderCount < m.runtime.Thresholds.MinHolderCount {
+			rejectReasons = append(rejectReasons, "insufficient_holders")
+		} else if !in.HolderDistKnown && m.runtime.Thresholds.RejectUnknownHolderCount {
+			rejectReasons = append(rejectReasons, "unknown_holder_count")
+		}
 	}
 	if m.runtime != nil && m.runtime.Thresholds.MinTokenAgeSeconds > 0 {
 		// Hard-reject tokens younger than the minimum age. Tokens under this

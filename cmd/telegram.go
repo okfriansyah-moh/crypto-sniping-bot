@@ -77,6 +77,7 @@ func buildTelegramComponents(
 		RescanStatusFn:   buildRescanStatusFn(db, cfg),
 		DqFn:             buildDqFn(db),
 		DlqFn:            buildDlqFn(db),
+		ExecutionsFn:     buildExecutionsFn(db),
 		AllowedUserIDs:   allowedIDs,
 		Logger:           logger,
 	})
@@ -1021,6 +1022,96 @@ func buildDlqFn(db database.Adapter) func(ctx context.Context) (string, error) {
 		}
 
 		sb.WriteString("\n<i>Use the rescan worker or requeue mechanism to retry events.</i>\n")
+		return sb.String(), nil
+	}
+}
+
+// buildExecutionsFn returns a function that shows the last 20 tokens that
+// reached the execution stage, including failures. Full contract addresses are
+// shown so operators can investigate individual tokens.
+func buildExecutionsFn(db database.Adapter) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		rows, err := db.GetExecutionLog(ctx, 20)
+		if err != nil {
+			return "", fmt.Errorf("get execution log: %w", err)
+		}
+
+		var sb strings.Builder
+		sb.WriteString("<b>Execution Log (last 20 — success + failed)</b>\n\n")
+
+		if len(rows) == 0 {
+			sb.WriteString("No tokens have reached the execution stage yet.\n")
+			return sb.String(), nil
+		}
+
+		// Telegram caps a single sendMessage payload at 4096 chars. We leave
+		// ~256 chars of safety margin (HTML overhead, footer line) and stop
+		// emitting rows once we exceed maxOutputChars.
+		const maxOutputChars = 3800
+		const maxTxHashChars = 24    // first 24 chars is enough to identify a tx
+		const maxErrorCodeChars = 80 // bound long error strings
+
+		for i, r := range rows {
+			ts := r.UpdatedAt
+			if len(ts) > 16 {
+				ts = ts[:16] // truncate to minute
+			}
+			ticker := r.Symbol
+			if ticker == "" {
+				ticker = "—"
+			}
+			chain := r.Chain
+			if chain == "" {
+				chain = "?"
+			}
+
+			// Status indicator
+			statusIcon := "⏳"
+			switch r.LifecycleState {
+			case "EXECUTED", "POSITION_OPEN", "POSITION_CLOSED", "EVALUATED":
+				statusIcon = "✅"
+			case "FAILED":
+				statusIcon = "❌"
+			case "SELECTED":
+				statusIcon = "🎯"
+			}
+
+			// Build this row into a temporary buffer so we can decide whether
+			// to append it without exceeding the Telegram limit.
+			var row strings.Builder
+			row.WriteString(fmt.Sprintf(
+				"%s <code>%s</code> [%s] %s · %s\n",
+				statusIcon,
+				html.EscapeString(r.TokenAddress),
+				html.EscapeString(ticker),
+				html.EscapeString(r.LifecycleState),
+				html.EscapeString(chain),
+			))
+
+			if r.TxHash != "" {
+				tx := r.TxHash
+				if len(tx) > maxTxHashChars {
+					tx = tx[:maxTxHashChars] + "…"
+				}
+				row.WriteString(fmt.Sprintf("  tx: <code>%s</code>\n", html.EscapeString(tx)))
+			}
+			if r.ErrorCode != "" {
+				ec := r.ErrorCode
+				if len(ec) > maxErrorCodeChars {
+					ec = ec[:maxErrorCodeChars] + "…"
+				}
+				row.WriteString(fmt.Sprintf("  err: <i>%s</i>\n", html.EscapeString(ec)))
+			}
+			row.WriteString(fmt.Sprintf("  <i>%s</i>\n", html.EscapeString(ts)))
+			row.WriteString("\n")
+
+			if sb.Len()+row.Len() > maxOutputChars {
+				sb.WriteString(fmt.Sprintf("…truncated (%d more rows not shown)\n", len(rows)-i))
+				break
+			}
+			sb.WriteString(row.String())
+		}
+
 		return sb.String(), nil
 	}
 }

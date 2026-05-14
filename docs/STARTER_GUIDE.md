@@ -42,6 +42,8 @@
 11. [Common Errors and Fixes](#11-common-errors-and-fixes)
 12. [Reference — All Environment Variables](#12-reference--all-environment-variables)
 13. [Phase 7 – 11 Features Overview](#13-phase-7--11-features-overview)
+14. [Scenario Testing: Local Docker → VPS → Mainnet](#14-scenario-testing-local-docker--vps--mainnet)
+15. [Optional Add-ons — Skip Until Profitable](#15-optional-add-ons--skip-until-profitable)
 
 ---
 
@@ -2307,6 +2309,7 @@ through the PostgreSQL event bus \u2014 modules never call Telegram directly.
 | `/rescan_status`             | Shows rescan worker enabled/disabled state and last run timestamp                   |
 | `/dq [hours]`                | Shows Data Quality rejection breakdown for the last N hours (default: 1)            |
 | `/dlq`                       | Shows Dead Letter Queue size and top error types                                    |
+| `/executions`                | Last 20 tokens that reached execution stage (success + failed) with full CA address |
 | `/version`                   | Shows current strategy version and config snapshot hash                             |
 | `/mode strict`               | Switches to STRICT mode (conservative — rug-spike safety)                           |
 | `/mode balanced`             | Switches to BALANCED mode (default)                                                 |
@@ -3445,3 +3448,216 @@ docker compose logs bot | grep '"msg":"Config loaded"'
 
 > **Remember:** The bot's profit formula is `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality`. Rushing to mainnet before validating execution and data quality
 > sets two of those factors to near-zero — and the product of any factor near zero is near zero.
+
+---
+
+## 15. Optional Add-ons — Skip Until Profitable
+
+These integrations are **disabled by default** and not required to run the bot. Enable them only
+after you have confirmed positive PnL in live canary trading. Each one adds real cost — buying
+them before your edge is proven wastes money without improving results.
+
+> **Pricing verified:** May 2026. All prices USD/month unless noted.
+
+| Provider                      | Phase    | Monthly Cost                                                                   | What you unlock                                                  | Skip until...                                       |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------------- |
+| **BirdEye**                   | Phase 9  | Free (30K CUs, 1 rps) → **$39 Lite** → **$99 Starter**                         | LP-lock score enrichment, copy-trade signal, token security data | You want richer DQ signal beyond Helius DAS         |
+| **Jito**                      | Phase 11 | **$0** (tip-only, no subscription)                                             | MEV sandwich protection, atomic bundle execution                 | You are losing trades to front-runners / sandwiches |
+| **Solana gRPC (Yellowstone)** | Phase 11 | **~$125 deposit** PAYG ($0.08/GB + $10/M calls for RPC; streaming at $0.08/GB) | Sub-slot ingestion latency via Yellowstone gRPC stream           | You are latency-racing other bots for the same pool |
+
+---
+
+### 15.1 BirdEye (Phase 9)
+
+BirdEye Data Services (BDS) provides enriched on-chain token data — security scores,
+LP-lock status, holder concentration, and copy-trade wallet tracking. The bot uses it
+in Phase 9 via the `BIRDEYE_API_KEY` env var (Section 3.6).
+
+**Current plans (live as of May 2026, from [docs.birdeye.so/docs/pricing](https://docs.birdeye.so/docs/pricing)):**
+
+| Plan            | Price/mo | CUs included | RPS | Overage per 1M CUs | WebSocket       |
+| --------------- | -------- | ------------ | --- | ------------------ | --------------- |
+| Standard (Free) | $0       | 30,000       | 1   | Not available      | ❌              |
+| Lite            | $39      | 1,500,000    | 15  | $23                | ❌              |
+| Starter         | $99      | 5,000,000    | 15  | $19.9              | ❌              |
+| Premium         | $199     | 15,000,000   | 50  | $9.9               | ✅ (500 conns)  |
+| Business        | $499     | 60,000,000   | 100 | $6.9               | ✅ (2000 conns) |
+
+**When to upgrade:**
+
+- Free tier (30K CUs) is exhausted in minutes during active trading — if you see `429` from
+  BirdEye, jump to **Lite ($39)** first.
+- Starter ($99) is the first plan with enough headroom for continuous trading (5M CUs/month).
+- Premium ($199) adds WebSocket feeds — useful only if you build real-time DQ signal later.
+
+**Env var:** `BIRDEYE_API_KEY` — see Section 3.6 for how to obtain it.
+
+---
+
+### 15.2 Jito Bundles (Phase 11)
+
+Jito is a Solana block-engine service that lets you submit **atomic bundles** (up to 5 txs,
+all-or-nothing) and get MEV sandwich protection. The service itself has **no subscription fee** —
+you only pay a tip to validators per bundle.
+
+**How the cost model works (from [docs.jito.wtf/lowlatencytxnsend](https://docs.jito.wtf/lowlatencytxnsend/)):**
+
+| Item                              | Cost                                                                                            |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Subscription                      | $0 — completely free to use                                                                     |
+| Minimum tip per bundle            | 1,000 lamports (~$0.00014 at current SOL price)                                                 |
+| Typical tip (50th percentile)     | ~0.00001 SOL per bundle                                                                         |
+| Competitive tip (95th percentile) | ~0.0014 SOL per bundle                                                                          |
+| Default rate limit                | **1 req/sec/IP/region** (free)                                                                  |
+| Custom rate limit                 | Request via [Jito Discord](https://discord.com/channels/938287290806042626/1336799632898134037) |
+
+**Important notes:**
+
+- Jito `sendTransaction` acts as a direct proxy to Solana's RPC — same signature, MEV protection
+  included automatically.
+- The `jitodontfront` account trick (add to any instruction) blocks your tx from being sandwiched.
+- Use **Singapore** endpoint (`singapore.mainnet.block-engine.jito.wtf`) for lowest latency
+  from Jakarta/Southeast Asia.
+- The codebase already has Jito support wired in Phase 11 — enable via `JITO_BUNDLE_URL` and
+  `JITO_TIP_ACCOUNT` env vars (Section 3.7). Both are read via `os.Getenv` — never put them in YAML.
+
+**When to enable:** Only when you observe on-chain evidence of your swaps being sandwiched
+(buy tx appears immediately before yours at a worse price). Paying tips on every trade before
+that point raises your cost basis without benefit.
+
+---
+
+### 15.3 Solana gRPC / Yellowstone (Phase 11)
+
+Yellowstone is Triton One's gRPC streaming interface for Solana. Instead of WebSocket
+`logsSubscribe` (current default), it delivers raw slot updates and filtered account/tx streams
+with sub-slot latency — critical when you are racing other sniping bots for the same new pool.
+
+**Current pricing (live as of May 2026, from [triton.one/pricing](https://triton.one/pricing)):**
+
+| Model                 | Cost                                                       | Includes                          |
+| --------------------- | ---------------------------------------------------------- | --------------------------------- |
+| PAYG (Shared)         | **$125 minimum deposit** (valid 12 months, non-refundable) | Standard RPC + gRPC streaming     |
+| Standard RPC calls    | $0.08/GB bandwidth + $10/million calls                     | getTransaction, getBlock, etc.    |
+| Yellowstone streaming | $0.08/GB bandwidth                                         | Filtered gRPC subscription stream |
+| Dedicated node        | Custom quote                                               | Reserved capacity, lowest latency |
+
+**How costs scale in practice:**
+
+- A sniping bot at canary volume (~8 trades/day) costs roughly **$1–3/month** in bandwidth on PAYG.
+- The $125 deposit covers ~3–6 months of active canary trading before needing a top-up.
+- At high-frequency (100+ trades/day), budget $20–50/month in bandwidth.
+
+**Env vars:** `SOLANA_GRPC_ENDPOINT` + `SOLANA_GRPC_TOKEN` — token is read via `os.Getenv` only
+(see security constraints in Section 3.8). Never add the token to `config/chains.yaml`.
+
+**When to enable:** When your WebSocket-based ingestion is consistently slower than competing bots
+(you see tokens detected 1–3 slots late vs. the earliest on-chain trade). For initial canary
+trading, WebSocket `logsSubscribe` via QuickNode or Helius is sufficient.
+
+---
+
+### 15.4 Decision Flowchart
+
+```
+Are you profitable on canary (48–72h positive PnL)?
+│
+├─ NO  → Keep running. Fix Data Quality or Edge first. Add-ons won't help.
+│
+└─ YES → Are trades being front-run / sandwiched?
+         │
+         ├─ YES → Enable Jito (Phase 11, $0 subscription + tips)
+         │
+         └─ NO  → Are you losing pools to faster bots?
+                  │
+                  ├─ YES → Upgrade to Yellowstone gRPC ($125 deposit)
+                  │
+                  └─ NO  → Is BirdEye DQ giving 429 errors?
+                           │
+                           ├─ YES → Upgrade to BirdEye Lite ($39/mo)
+                           └─ NO  → You don't need any add-ons yet.
+```
+
+---
+
+### 15.5 QuickNode & Helius — RPC Plan Upgrades
+
+The two Solana RPC providers you already have free accounts with are also the two you'll upgrade
+first when volume grows. This section tells you exactly which plan to pick and when.
+
+> **Pricing verified:** May 2026, from [quicknode.com/pricing](https://www.quicknode.com/pricing)
+> and [helius.dev/pricing](https://www.helius.dev/pricing).
+
+#### QuickNode Plans
+
+| Plan       | Monthly | Annual (-15%) | API Credits | Extra per 1M | RPS | Yellowstone gRPC |
+| ---------- | ------- | ------------- | ----------- | ------------ | --- | ---------------- |
+| **Free**   | **$0**  | $0            | 10M         | —            | 15  | ✅ Included      |
+| **Build**  | **$49** | $42           | 80M         | $0.62        | 50  | ✅ Included      |
+| Accelerate | $249    | $212          | 450M        | $0.55        | 125 | ✅ Included      |
+| Scale      | $499    | $424          | 950M        | $0.53        | 250 | ✅ Included      |
+| Business   | $999    | $849          | 2B          | $0.50        | 500 | ✅ Included      |
+
+> **Key fact:** QuickNode Yellowstone gRPC is **included at no extra cost on all plans** — even
+> the free tier. You do not need a Triton One account if you are already on QuickNode Build+.
+
+**When to upgrade QuickNode:**
+
+| Trigger                                           | Recommended action                          |
+| ------------------------------------------------- | ------------------------------------------- |
+| Free tier running low (>8M credits/month)         | Upgrade to **Build ($49/mo)**               |
+| 1,800+ trades/day (credits exhausted)             | Upgrade to **Accelerate ($249/mo)**         |
+| You want Yellowstone gRPC _now_ (not just canary) | **Build ($49/mo)** unlocks full gRPC access |
+| 429 errors on QuickNode free-tier at 15 RPS cap   | Upgrade to **Build** (50 RPS)               |
+
+#### Helius Plans
+
+| Plan          | Monthly | Credits | Extra per 1M | sendTx/sec | RPS | Staked Conns | LaserStream gRPC |
+| ------------- | ------- | ------- | ------------ | ---------- | --- | ------------ | ---------------- |
+| **Free**      | **$0**  | 1M      | —            | **1**      | 10  | ❌           | ❌               |
+| **Developer** | **$49** | 10M     | $5           | **5**      | 50  | ✅           | Devnet only      |
+| Business      | $499    | 100M    | $5           | 50         | 200 | ✅           | ✅               |
+| Professional  | $999    | 200M    | $5           | 100        | 500 | ✅           | ✅               |
+
+> **Key fact:** The Helius free tier caps `sendTransaction` at **1 request/second**. That is the
+> root cause of the 429 errors you see during active trading. Upgrading to **Developer ($49)**
+> raises this limit to 5 tx/sec and adds **Staked Connections** (higher transaction landing rate
+> during network congestion). The code already rotates to Helius automatically if QuickNode fails
+> — so Helius is your fallback, not your primary `sendTransaction` path.
+
+**When to upgrade Helius:**
+
+| Trigger                                                     | Recommended action                      |
+| ----------------------------------------------------------- | --------------------------------------- |
+| Free 1M credits exhausted, using Helius as DAS fallback     | Upgrade to **Developer ($49/mo)**       |
+| 429 on Helius free during QuickNode outage window           | Upgrade to **Developer** (5 sendTx/sec) |
+| Consistent QuickNode outages, Helius is primary for >1h/day | Upgrade to **Developer**                |
+| You want Helius LaserStream gRPC (alternative to Triton)    | Upgrade to **Business ($499/mo)**       |
+
+#### Side-by-Side: First Paid Upgrade Comparison
+
+| Feature                             | QuickNode Build ($49)       | Helius Developer ($49) | Winner for sniper bot |
+| ----------------------------------- | --------------------------- | ---------------------- | --------------------- |
+| Singapore / low-latency node        | ✅                          | ❌ (US-East only)      | **QuickNode**         |
+| API credits                         | 80M                         | 10M                    | **QuickNode**         |
+| sendTransaction/sec                 | ~50 RPS (no per-method cap) | 5/sec                  | **QuickNode**         |
+| Yellowstone gRPC included           | ✅                          | ❌ (Devnet only)       | **QuickNode**         |
+| Staked connections                  | ❌                          | ✅                     | **Helius**            |
+| Sender (parallel tx to Jito+Helius) | ❌                          | ✅                     | **Helius**            |
+| DAS / token metadata APIs           | ⭐⭐⭐⭐                    | ⭐⭐⭐⭐⭐             | **Helius**            |
+| Cost per month                      | $49                         | $49                    | Tie                   |
+
+**Recommendation — upgrade in this order:**
+
+1. **QuickNode Build ($49/mo)** — first upgrade. Solves latency (Singapore), eliminates `sendTransaction`
+   throttle on QuickNode, unlocks Yellowstone gRPC. Combined free headroom with Helius fallback
+   carries you past 800 trades/day.
+
+2. **Helius Developer ($49/mo)** — second upgrade, only after QuickNode is no longer enough OR
+   you want Staked Connections to improve Helius's transaction landing rate as a fallback. The
+   `Sender` service (included on all Helius plans) already parallelizes tx submission to both
+   Helius and Jito endpoints in one call — useful when you enable Phase 11 Jito.
+
+3. **Do not upgrade Helius to Business ($499) or QuickNode to Accelerate ($249)** until you are
+   consistently running 200+ trades/day with proven positive expectancy. At that volume, one
+   extra winning trade per day covers the cost.

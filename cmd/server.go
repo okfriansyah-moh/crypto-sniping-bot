@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -514,7 +515,51 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 		}, logger))
 	}
 
+	// Creator reputation probe — queries pump.fun's public API to populate
+	// CreatorPrevTokenCount with ground-truth launch history. Closes the
+	// cold-start serial-launcher gap (BLOCKER-2): without this, a fresh DB
+	// always returns count=0 for every creator regardless of real history.
+	// Registered after the metadata probe so the enriched DTO already has
+	// social-link fields set when creator reputation is assessed.
+	if cfg.Probes.SolanaCreatorReputation.Enabled {
+		out = append(out, probes.NewSolanaCreatorReputationProbe(nil, probes.SolanaCreatorReputationConfig{
+			Enabled:      true,
+			TimeoutMs:    cfg.Probes.SolanaCreatorReputation.TimeoutMs,
+			BaseURL:      cfg.Probes.SolanaCreatorReputation.BaseURL,
+			MaxBodyBytes: cfg.Probes.SolanaCreatorReputation.MaxBodyBytes,
+			PageLimit:    cfg.Probes.SolanaCreatorReputation.PageLimit,
+			// HeliusRPCURL enables the Helius DAS circuit-breaker fallback when
+			// pump.fun is unreachable. The URL embeds the API key from the
+			// SOLANA_RPC_HTTP_2 env var — never hardcoded in config files.
+			HeliusRPCURL: findHeliusHTTPURL(cfg.Solana.RPCEndpoints),
+		}, logger))
+	}
+
 	return out
+}
+
+// findHeliusHTTPURL scans cfg.Solana.RPCEndpoints for the first Helius HTTP
+// endpoint and returns its URL (which embeds the API key as ?api-key=...).
+// This URL is passed to the creator-reputation probe as the Helius DAS
+// circuit-breaker fallback. Returns "" when no Helius HTTP endpoint is found.
+//
+// Provider detection: explicit Provider=="helius" field takes precedence;
+// falls back to URL substring matching ("helius-rpc.com", "helius.dev").
+func findHeliusHTTPURL(endpoints []config.SolanaRPCEndpoint) string {
+	for _, ep := range endpoints {
+		if ep.Kind != "http" || ep.URL == "" {
+			continue
+		}
+		provider := strings.ToLower(ep.Provider)
+		urlLower := strings.ToLower(ep.URL)
+		isHelius := provider == "helius" ||
+			strings.Contains(urlLower, "helius-rpc.com") ||
+			strings.Contains(urlLower, "helius.dev")
+		if isHelius {
+			return ep.URL
+		}
+	}
+	return ""
 }
 
 // solanaProbeRPCAdapter adapts *rpc.SolanaClient → probes.SolanaProbeRPCClient.

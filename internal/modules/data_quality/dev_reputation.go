@@ -56,11 +56,9 @@ func DetectDevReputation(
 		knownCount++
 		launchScore := 0.0
 		if in.CreatorPrevTokenCount >= maxPrevTokens {
-			// Scale: at maxPrevTokens → 0.5; at 2×maxPrevTokens → 1.0 (capped).
-			// This prevents a step-function hard penalty while still pushing
-			// the aggregate risk score meaningfully above the REJECT threshold.
-			ratio := float64(in.CreatorPrevTokenCount) / float64(maxPrevTokens)
-			launchScore = clampFloat(0.5*ratio, 0, 1)
+			// Hard penalty: any dev at or above the threshold is max-risk.
+			// Threshold is set to 1 in config, meaning any prior launch → REJECT.
+			launchScore = 1.0
 			flags = append(flags, "DEV_SERIAL_LAUNCHER")
 		}
 		signals = append(signals, launchScore)
@@ -78,7 +76,13 @@ func DetectDevReputation(
 	}
 
 	if knownCount == 0 {
-		return DevReputationResult{Unknown: true, UnknownFlag: "dq_unknown_dev_reputation"}
+		// Fail-closed: unknown dev history is maximum risk.
+		// An unknown dev who may have launched hundreds of rugs is worse than
+		// a known serial launcher — we have no data to argue otherwise.
+		return DevReputationResult{
+			Score: 1.0,
+			Flags: []string{"DEV_UNKNOWN_HISTORY"},
+		}
 	}
 
 	// Average across known signals.

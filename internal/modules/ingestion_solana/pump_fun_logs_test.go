@@ -154,3 +154,88 @@ func TestDecodePumpFunCreateFromLogs_TooManyProgramDataLinesRejected(t *testing.
 		t.Errorf("expected nil event when no CreateEvent present, got %+v", got)
 	}
 }
+
+// ── sanitizeMetadataString ────────────────────────────────────────────────────
+
+func TestSanitizeMetadataString_CleanStringPassesThrough(t *testing.T) {
+	if got := sanitizeMetadataString("LOL", 32); got != "LOL" {
+		t.Errorf("want %q, got %q", "LOL", got)
+	}
+	if got := sanitizeMetadataString("My Token Name", 64); got != "My Token Name" {
+		t.Errorf("want %q, got %q", "My Token Name", got)
+	}
+}
+
+func TestSanitizeMetadataString_ControlCharsStripped(t *testing.T) {
+	// newline, tab, carriage return, null — all stripped
+	if got := sanitizeMetadataString("bad\ntoken", 64); got != "badtoken" {
+		t.Errorf("newline not stripped: got %q", got)
+	}
+	if got := sanitizeMetadataString("bad\x00token", 64); got != "badtoken" {
+		t.Errorf("null not stripped: got %q", got)
+	}
+	if got := sanitizeMetadataString("bad\x1btoken", 64); got != "badtoken" {
+		t.Errorf("escape not stripped: got %q", got)
+	}
+	if got := sanitizeMetadataString("bad\x7ftoken", 64); got != "badtoken" {
+		t.Errorf("DEL not stripped: got %q", got)
+	}
+}
+
+func TestSanitizeMetadataString_InjectionAttemptCleaned(t *testing.T) {
+	// Simulates the `rm -rf payment-service` token name seen in live Helius data.
+	// The string has no control chars — it passes through but is just text,
+	// not executable in any context our code uses it.
+	raw := "rm -rf payment-service"
+	got := sanitizeMetadataString(raw, 64)
+	if got != raw {
+		t.Errorf("clean printable injection string should pass unchanged, got %q", got)
+	}
+	// Verify it would be truncated if it exceeded maxLen.
+	short := sanitizeMetadataString(raw, 4)
+	if short != "rm -" {
+		t.Errorf("truncation: want %q, got %q", "rm -", short)
+	}
+}
+
+func TestSanitizeMetadataString_TruncatesAtRuneBoundary(t *testing.T) {
+	// 5-char emoji string — each emoji is 1 rune, multiple bytes.
+	s := "🚀🌙💎🙌🎉"
+	got := sanitizeMetadataString(s, 3)
+	runes := []rune(got)
+	if len(runes) != 3 {
+		t.Errorf("want 3 runes after truncation, got %d: %q", len(runes), got)
+	}
+}
+
+func TestSanitizeMetadataString_EmptyStringReturnsEmpty(t *testing.T) {
+	if got := sanitizeMetadataString("", 32); got != "" {
+		t.Errorf("want empty, got %q", got)
+	}
+}
+
+func TestSanitizeMetadataString_OnlyControlCharsReturnsEmpty(t *testing.T) {
+	if got := sanitizeMetadataString("\x00\x01\x02\x1f\x7f", 32); got != "" {
+		t.Errorf("want empty string after stripping all controls, got %q", got)
+	}
+}
+
+// TestNormalizePumpFunCreateFromLogs_NameSymbolSanitized verifies that
+// Name and Symbol are sanitized end-to-end through NormalizePumpFunCreateFromLogs.
+func TestNormalizePumpFunCreateFromLogs_NameSymbolSanitized(t *testing.T) {
+	event := &PumpFunLogCreateEvent{
+		Name:         "bad\nname\x00here",
+		Symbol:       "B\x1bAD",
+		URI:          "ipfs://abc",
+		Mint:         "So11111111111111111111111111111111111111112",
+		BondingCurve: "So11111111111111111111111111111111111111112",
+		User:         "So11111111111111111111111111111111111111112",
+	}
+	dto := NormalizePumpFunCreateFromLogs("sig1", 1000, event, "v1", "", 0, 0)
+	if dto.Name != "badnamehere" {
+		t.Errorf("Name not sanitized: got %q", dto.Name)
+	}
+	if dto.Symbol != "BAD" {
+		t.Errorf("Symbol not sanitized: got %q", dto.Symbol)
+	}
+}

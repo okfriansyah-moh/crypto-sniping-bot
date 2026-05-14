@@ -531,3 +531,7 @@ func (m *mockAdapter) GetHistoricalProfile(_ context.Context, _ string) (*contra
 func (m *mockAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.HistoricalMarketProfileDTO, error) {
 	return nil, nil
 }
+
+func (m *mockAdapter) GetExecutionLog(_ context.Context, _ int) ([]database.ExecutionLogRow, error) {
+	return nil, nil
+}

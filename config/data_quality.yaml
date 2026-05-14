@@ -14,12 +14,12 @@ data_quality:
   # ── Detector enable flags ─────────────────────────────────────
   # Disabled detectors are skipped entirely (cost-saving for non-applicable chains).
   detectors:
-    honeypot_simulation: true # eth_call buy→sell round trip
+    honeypot_simulation: false # EVM-only (eth_call buy→sell) — not applicable to Solana; re-enable when EVM chains are added
     tax_anomaly: true # decode Transfer logs in simulated tx
     lp_lock: true # Unicrypt / Team Finance / PinkLock
     wash_trading: true # unique-sender ratio over recent Swaps
     rug_authority: true # ABI selectors (EVM) / mint authority (Solana)
-    contract_verified: true # Etherscan / BscScan v2 source-code lookup
+    contract_verified: false # EVM-only (Etherscan/BscScan) — not applicable to Solana; re-enable when EVM chains are added
     # dev_reputation: serial-launcher + no-social-links filter.
     # Requires solana_creator_reputation probe to populate
     # CreatorPrevTokenCount / SocialLinksKnown on MarketDataDTO.
@@ -69,14 +69,52 @@ data_quality:
     # max_creator_prev_token_count: reject contribution rises when the creator
     # wallet has launched this many prior tokens. The $RIBBIT pattern
     # (29 launches, 0 migrations) gives full serial-launcher risk.
-    # 0 disables; canonical default: 5.
-    max_creator_prev_token_count: 5
+    # 0 disables; canonical default: 1.
+    max_creator_prev_token_count: 1
 
     # no_social_links_risk_score: fixed risk contribution [0,1] when
     # SocialLinksKnown=true and HasSocialLinks=false. Set to 0 to disable.
     # Combined with serial-launcher signal this will push most pump-and-dump
     # tokens over the REJECT threshold. Alone it is a soft signal only.
     no_social_links_risk_score: 0.40
+
+    # reject_unknown_total_supply: when true, a token whose TotalSupplyKnown=false
+    # is structurally rejected when max_total_supply > 0. This closes the
+    # LP-probe failure gap — if the probe is unhealthy the token is rejected
+    # (fail-closed) rather than silently passing with an unchecked supply.
+    # Set to false only on chains where supply is legitimately not fetchable
+    # (or set max_total_supply: 0 to disable the supply check entirely).
+    # MANDATORY criterion — must not be disabled in production.
+    reject_unknown_total_supply: true
+
+    # reject_no_social_links: when true, a confirmed absence of social links
+    # (SocialLinksKnown=true AND HasSocialLinks=false) becomes a structural
+    # hard-reject. Social links must represent real profile pages (Twitter/X
+    # profile, Telegram channel, or real project website) — not DEX pages,
+    # scanner links, or pump.fun launcher URLs.
+    # MANDATORY criterion — must not be disabled in production.
+    reject_no_social_links: true
+
+    # reject_unknown_social_links: when true, SocialLinksKnown=false (metadata
+    # probe timed out, fetch error, or probe disabled) is a structural hard-reject.
+    # Closes the probe-failure gap: a token whose social presence cannot be
+    # verified is treated the same as a token with no social links.
+    # MANDATORY criterion — must not be disabled in production.
+    reject_unknown_social_links: true
+
+    # reject_unknown_creator_count: when true, CreatorPrevTokenCountKnown=false
+    # (creator reputation probe timed out, API error, or not run) is a structural
+    # hard-reject when max_creator_prev_token_count > 0. Closes the probe-failure
+    # gap: a creator whose launch history cannot be verified must be assumed to be
+    # a serial launcher. Without this, a 300ms RPC timeout converts a 29-token
+    # serial rug developer into an approved first-timer.
+    # MANDATORY criterion — must not be disabled in production.
+    # NOTE: the solana_creator_reputation probe calls frontend-api.pump.fun behind
+    # Cloudflare. Browser-compatible headers (User-Agent, Origin, Referer) are set
+    # on every request to prevent HTTP 530 bot-block responses. If 530s persist,
+    # increase probes.solana_creator_reputation.timeout_ms in pipeline.yaml or
+    # wire an alternative creator history source (e.g. Helius searchAssets).
+    reject_unknown_creator_count: true
 
     # min_token_age_seconds: hard-reject tokens younger than this threshold.
     # Tokens under this age have incomplete data — holder distribution is not
@@ -89,6 +127,22 @@ data_quality:
     # LP burned, contract renounced. 15 minutes gives enough time for holder
     # distribution and wash patterns to become observable.
     min_token_age_seconds: 900 # 15 minutes
+
+    # min_holder_count: structural hard-reject when confirmed unique holder
+    # count is below this floor. A token with fewer than 50 holders after
+    # launch is either entirely dev-owned (like COOKING with 1 holder) or has
+    # no real community traction. Skipped automatically for brand-new launches
+    # (PumpFunCreate events) to avoid false rejections at creation time.
+    # Canonical values: STRICT=100, BALANCED=50, EXPLORATION=10.
+    # 0 disables the check entirely.
+    min_holder_count: 50
+
+    # reject_unknown_holder_count: when true, HolderDistKnown=false (holder
+    # distribution probe timed out or not run) is a structural hard-reject when
+    # min_holder_count > 0. Does NOT apply to brand-new launches.
+    # Set false initially until probe reliability is confirmed in production;
+    # flip to true once the solana_holder_dist probe has a stable track record.
+    reject_unknown_holder_count: false
 
     # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
     rug_dangerous_selectors:

@@ -27,6 +27,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,11 @@ type endpointEntry struct {
 	Dialect ProviderDialect
 }
 
+// defaultWSFailoverThreshold is the number of consecutive WS subscribe failures
+// for an endpoint before the client pins to the next provider.
+// Overridden by SolanaHealthConfig.ConsecutiveWSFailuresThreshold in chains.yaml.
+const defaultWSFailoverThreshold int64 = 5
+
 // SolanaClient implements ingestion_solana.SolanaRPCClient.
 // Supports multi-endpoint failover: on a provider rate-limit error the client
 // rotates to the next configured endpoint so the caller's retry hits a
@@ -56,6 +62,12 @@ type endpointEntry struct {
 // Each endpoint carries a ProviderDialect that captures provider-specific
 // behaviours (rate-limit codes, WS ping interval) — the core client logic is
 // provider-agnostic.
+//
+// Adaptive fallover: each WS endpoint tracks consecutive subscribe failures
+// in wsFailCounts. When an endpoint reaches wsFailThreshold consecutive failures
+// the client advances wsIdx past that endpoint and logs solana_ws_provider_failover,
+// effectively pinning to the next provider. A subsequent successful subscription
+// resets the counter so the endpoint can recover after the outage clears.
 type SolanaClient struct {
 	wsEndpoints   []endpointEntry // all configured ws endpoints, priority order
 	httpEndpoints []endpointEntry // all configured http endpoints, priority order
@@ -69,6 +81,19 @@ type SolanaClient struct {
 	// txRateLimiter throttles getTransaction calls to the configured req/s cap.
 	// Waiting for a tick before each call prevents rate-limit errors.
 	txRateLimiter <-chan time.Time
+	// wsFailCounts tracks consecutive subscribe failures per WS endpoint (indexed
+	// by endpoint position mod len). Reset to 0 on a successful subscription.
+	wsFailCounts []atomic.Int64
+	// wsFailThreshold is the consecutive-failure count that triggers provider
+	// promotion. Sourced from SolanaHealthConfig.ConsecutiveWSFailuresThreshold.
+	wsFailThreshold int64
+	// wsCooldownUntil holds a unix-nano timestamp per WS endpoint. While
+	// time.Now().UnixNano() < wsCooldownUntil[i], that endpoint is skipped by
+	// activeWSEntry because it returned a 429 rate-limit response recently.
+	wsCooldownUntil []atomic.Int64
+	// wsRateLimitCooldown is how long to back off from a rate-limited WS
+	// endpoint. Sourced from SolanaHealthConfig.CircuitOpenCooldownMs.
+	wsRateLimitCooldown time.Duration
 }
 
 // activeWS returns the current WebSocket endpoint entry.
@@ -133,14 +158,28 @@ func NewSolanaClient(cfg config.SolanaConfig, logger *slog.Logger) (*SolanaClien
 		logger.Info("solana_http_endpoint", "index", i, "provider", e.Dialect.Name())
 	}
 
+	failThreshold := int64(cfg.Health.ConsecutiveWSFailuresThreshold)
+	if failThreshold <= 0 {
+		failThreshold = defaultWSFailoverThreshold
+	}
+
+	rateLimitCooldown := time.Duration(cfg.Health.CircuitOpenCooldownMs) * time.Millisecond
+	if rateLimitCooldown <= 0 {
+		rateLimitCooldown = defaultWSRateLimitCooldown
+	}
+
 	return &SolanaClient{
 		wsEndpoints:   wsEPs,
 		httpEndpoints: httpEPs,
 		httpClient: &http.Client{
 			Timeout: solanaRequestTimeout,
 		},
-		logger:        logger,
-		txRateLimiter: buildRateLimiter(cfg.GetTransactionRPS),
+		logger:              logger,
+		txRateLimiter:       buildRateLimiter(cfg.GetTransactionRPS),
+		wsFailCounts:        make([]atomic.Int64, len(wsEPs)),
+		wsFailThreshold:     failThreshold,
+		wsCooldownUntil:     make([]atomic.Int64, len(wsEPs)),
+		wsRateLimitCooldown: rateLimitCooldown,
 	}, nil
 }
 
@@ -155,6 +194,142 @@ func buildRateLimiter(rps int) <-chan time.Time {
 		rps = defaultGetTransactionRPS
 	}
 	return time.NewTicker(time.Second / time.Duration(rps)).C
+}
+
+// defaultWSRateLimitCooldown is how long to suppress retries to an endpoint
+// that returned HTTP 429 or a JSON-RPC quota error.
+// Overridden by SolanaHealthConfig.CircuitOpenCooldownMs in chains.yaml.
+const defaultWSRateLimitCooldown = 30 * time.Second
+
+// ── WS failover helpers ───────────────────────────────────────────────────────
+
+// activeWSEntry returns the best available WS endpoint and its slot index.
+//
+// Selection order:
+//  1. Walk forward from wsIdx mod len — return the first endpoint NOT in
+//     rate-limit cooldown (wsCooldownUntil[i] ≤ now).
+//  2. If ALL endpoints are in cooldown (both providers hammered simultaneously),
+//     return the one whose cooldown expires soonest so the reconnect loop's
+//     backoff can still make progress rather than spinning endlessly.
+//
+// This replaces bare wsIdx.Load() reads in SubscribeLogs so that 429-cooled
+// endpoints are skipped automatically on the next attempt.
+func (c *SolanaClient) activeWSEntry() (endpointEntry, int) {
+	n := len(c.wsEndpoints)
+	if n == 0 {
+		return endpointEntry{}, 0
+	}
+	now := time.Now().UnixNano()
+	base := int(c.wsIdx.Load())
+	for i := 0; i < n; i++ {
+		idx := (base + i) % n
+		if c.wsCooldownUntil[idx].Load() <= now {
+			return c.wsEndpoints[idx], idx
+		}
+	}
+	// All endpoints are in cooldown — return the one expiring soonest.
+	best := base % n
+	bestExp := c.wsCooldownUntil[best].Load()
+	for i := 1; i < n; i++ {
+		idx := (base + i) % n
+		if exp := c.wsCooldownUntil[idx].Load(); exp < bestExp {
+			best = idx
+			bestExp = exp
+		}
+	}
+	c.logger.Warn("solana_ws_all_endpoints_in_cooldown",
+		"endpoint_count", n,
+		"cooldown_expires_in_ms", (bestExp-now)/int64(time.Millisecond),
+	)
+	return c.wsEndpoints[best], best
+}
+
+// markWSRateLimited puts the endpoint at capturedIdx into a cooldown window.
+// While the cooldown is active, activeWSEntry skips that endpoint so the next
+// attempt automatically uses a different provider.  The cooldown expires after
+// wsRateLimitCooldown, giving the provider time to clear the rate-limit window.
+func (c *SolanaClient) markWSRateLimited(capturedIdx int, entry endpointEntry, programID string) {
+	if len(c.wsCooldownUntil) == 0 {
+		return
+	}
+	slot := capturedIdx % len(c.wsCooldownUntil)
+	until := time.Now().Add(c.wsRateLimitCooldown).UnixNano()
+	c.wsCooldownUntil[slot].Store(until)
+	c.logger.Warn("solana_ws_endpoint_rate_limited",
+		"program", programID,
+		"provider", entry.Dialect.Name(),
+		"url", entry.URL,
+		"cooldown_ms", c.wsRateLimitCooldown.Milliseconds(),
+	)
+}
+
+// recordWSEOFFailure is called whenever a logsSubscribe attempt fails with an
+// EOF/UnexpectedEOF error at the WS endpoint identified by capturedIdx.
+//
+// Behaviour:
+//   - Increments the per-endpoint consecutive failure counter.
+//   - If the counter reaches wsFailThreshold the client promotes to the next
+//     endpoint by advancing wsIdx past capturedIdx (CAS-guarded so only one
+//     goroutine triggers the promotion) and logs solana_ws_provider_failover.
+//   - Otherwise performs the existing single-step wsIdx rotation and logs
+//     solana_ws_subscribe_eof_rotating (unchanged behaviour for callers below
+//     the threshold).
+func (c *SolanaClient) recordWSEOFFailure(entry endpointEntry, programID string, capturedIdx int) {
+	if len(c.wsEndpoints) == 0 {
+		return
+	}
+	n := int64(len(c.wsEndpoints))
+
+	// Only track failures and attempt promotion when threshold is enabled (> 0)
+	// and there are at least 2 endpoints to promote to.
+	if c.wsFailThreshold > 0 && n > 1 {
+		// Increment the failure counter for this endpoint slot.
+		slotIdx := capturedIdx % int(n)
+		newCount := c.wsFailCounts[slotIdx].Add(1)
+
+		if newCount >= c.wsFailThreshold {
+			// Try to promote: advance wsIdx so capturedIdx is no longer active.
+			// CAS ensures only one goroutine does the promotion + log when multiple
+			// programs all hit the threshold simultaneously.
+			expected := int64(capturedIdx)
+			if c.wsIdx.CompareAndSwap(expected, expected+1) {
+				c.wsFailCounts[slotIdx].Store(0)
+				nextEntry := c.wsEndpoints[int(expected+1)%int(n)]
+				c.logger.Warn("solana_ws_provider_failover",
+					"program", programID,
+					"from_provider", entry.Dialect.Name(),
+					"from", entry.URL,
+					"to_provider", nextEntry.Dialect.Name(),
+					"to", nextEntry.URL,
+					"consecutive_failures", newCount,
+					"threshold", c.wsFailThreshold,
+				)
+				return
+			}
+			// Another goroutine already promoted — fall through to single-step rotate.
+		}
+	}
+
+	// Single-step rotation (existing behaviour).
+	newIdx := c.wsIdx.Add(1)
+	nextEntry := c.wsEndpoints[int(newIdx)%int(n)]
+	c.logger.Warn("solana_ws_subscribe_eof_rotating",
+		"program", programID,
+		"provider", entry.Dialect.Name(),
+		"from", entry.URL,
+		"to_provider", nextEntry.Dialect.Name(),
+		"to", nextEntry.URL,
+		"total_endpoints", len(c.wsEndpoints),
+	)
+}
+
+// resetWSFailCount resets the consecutive-failure counter for the endpoint at
+// capturedIdx after a successful logsSubscribe handshake.
+func (c *SolanaClient) resetWSFailCount(capturedIdx int) {
+	if len(c.wsFailCounts) == 0 {
+		return
+	}
+	c.wsFailCounts[capturedIdx%len(c.wsFailCounts)].Store(0)
 }
 
 // ── JSON-RPC helpers ──────────────────────────────────────────────────────────
@@ -262,15 +437,27 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 // rotated so that the next call from runProgramLoop's reconnect loop hits the
 // fallback provider (e.g. QuickNode → Helius).
 func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-chan ingestion_solana.LogsNotification, error) {
-	// Capture the current endpoint entry — dialect and URL are bound for the
-	// lifetime of this subscription session.
-	wsEntry := c.activeWS()
+	// Capture the current endpoint entry and its index — both are bound for the
+	// lifetime of this subscription attempt so that failure/success accounting
+	// targets the correct per-endpoint counter even if wsIdx advances concurrently.
+	if len(c.wsEndpoints) == 0 {
+		return nil, fmt.Errorf("solana_client: no WebSocket endpoint configured")
+	}
+	wsEntry, capturedIdx := c.activeWSEntry()
 	if wsEntry.URL == "" {
 		return nil, fmt.Errorf("solana_client: no WebSocket endpoint configured")
 	}
 
 	conn, err := dialWS(wsEntry.URL, solanaWSConnectTimeout)
 	if err != nil {
+		// HTTP 429 at WebSocket upgrade: the provider is rate-limiting new
+		// connections.  Put the endpoint into cooldown so activeWSEntry skips it
+		// on the next attempt; do NOT mutate wsIdx (that caused oscillation when
+		// multiple goroutines incremented it concurrently, landing back on the
+		// same provider half the time).
+		if strings.Contains(err.Error(), "HTTP 429") {
+			c.markWSRateLimited(capturedIdx, wsEntry, programID)
+		}
 		return nil, fmt.Errorf("solana_client: ws connect: %w", err)
 	}
 
@@ -299,38 +486,22 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 	}
 	if err := conn.ReadJSON(&subResp); err != nil {
 		conn.Close()
-		// EOF or ErrUnexpectedEOF here means the provider sent a WebSocket close
-		// frame (or dropped the TCP connection) before responding to the subscribe
-		// request — typically a concurrent-connection cap or transient server drop.
-		// Rotate the WS endpoint so the reconnect loop retries on the fallback
-		// provider (e.g. QuickNode → Helius), identical to the rate-limit rotation.
+		// EOF or ErrUnexpectedEOF means the provider dropped the connection before
+		// responding to the subscribe request — typically a concurrent-connection
+		// cap or transient server drop.  recordWSEOFFailure increments the
+		// per-endpoint failure counter and, once the configured threshold is
+		// reached, promotes to the next provider (e.g. QuickNode → Helius).
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			newIdx := c.wsIdx.Add(1)
-			nextEntry := c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
-			c.logger.Warn("solana_ws_subscribe_eof_rotating",
-				"program", programID,
-				"provider", wsEntry.Dialect.Name(),
-				"from", wsEntry.URL,
-				"to_provider", nextEntry.Dialect.Name(),
-				"to", nextEntry.URL,
-				"total_endpoints", len(c.wsEndpoints),
-			)
+			c.recordWSEOFFailure(wsEntry, programID, capturedIdx)
 		}
 		return nil, fmt.Errorf("solana_client: read subscribe response: %w", err)
 	}
 	if subResp.Error != nil {
 		conn.Close()
 		if wsEntry.Dialect.IsRateLimited(subResp.Error.Code) {
-			newIdx := c.wsIdx.Add(1)
-			nextEntry := c.wsEndpoints[int(newIdx)%len(c.wsEndpoints)]
-			c.logger.Warn("solana_ws_rate_limited_rotating",
-				"program", programID,
-				"provider", wsEntry.Dialect.Name(),
-				"from", wsEntry.URL,
-				"to_provider", nextEntry.Dialect.Name(),
-				"to", nextEntry.URL,
-				"total_endpoints", len(c.wsEndpoints),
-			)
+			// Quota / rate-limit at the JSON-RPC level — same treatment as HTTP
+			// 429: put the endpoint into cooldown so activeWSEntry skips it.
+			c.markWSRateLimited(capturedIdx, wsEntry, programID)
 		}
 		return nil, fmt.Errorf("solana_client: logsSubscribe: %w", subResp.Error)
 	}
@@ -339,6 +510,10 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 	// transparently inside ReadJSON) reset the window, preventing spurious
 	// i/o timeout errors on quiet slots.
 	conn.readDeadline = solanaWSReadDeadline
+
+	// Successful handshake — reset the consecutive-failure counter so the
+	// endpoint can recover after a transient outage.
+	c.resetWSFailCount(capturedIdx)
 
 	subID := subResp.Result
 	ch := make(chan ingestion_solana.LogsNotification, 256)
