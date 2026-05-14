@@ -60,13 +60,165 @@ All common operations are wrapped in `make` targets. Run `make <target>`.
 
 ### Docker
 
-| Target              | Description                                                              |
-| ------------------- | ------------------------------------------------------------------------ |
-| `make docker-build` | Build Docker image without starting services                             |
-| `make docker-up`    | Build image + run DB migration + hydrate historical profiles + start bot |
-| `make docker-down`  | Stop all services (data volume preserved)                                |
-| `make docker-clean` | Stop all services **and delete the database volume**                     |
-| `make docker-logs`  | Tail live bot logs (`docker compose logs -f bot`)                        |
+| Target                                      | Description                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------ |
+| `make docker-build`                         | Build Docker image without starting services                             |
+| `make docker-up`                            | Build image + run DB migration + hydrate historical profiles + start bot |
+| `make postgres`                             | Start PostgreSQL only                                                    |
+| `make docker-up-postgres`                   | Alias for `make postgres`                                                |
+| `make docker-down`                          | Stop all services (data volume preserved)                                |
+| `make docker-clean`                         | Stop all services (data volume preserved)                                |
+| `make docker-clean-all`                     | Stop all services **and delete the database volume**                     |
+| `make docker-logs`                          | Tail live bot logs (`docker compose logs -f bot`)                        |
+| `make db-backup`                            | Create compressed PostgreSQL dump to `backups/`                          |
+| `make db-restore FILE=...`                  | Restore local dump into local Docker DB                                  |
+| `make db-backup-vps VPS_HOST=...`           | Download VPS DB dump to local `backups/`                                 |
+| `make db-restore-vps VPS_HOST=... FILE=...` | Upload local dump and restore into VPS DB                                |
+
+### Docker + Postgres Persistence Scenarios (Beginner)
+
+This section explains when to use each command in real life, with copy-paste flows.
+
+#### Scenario 1: Daily local development without losing DB data
+
+Use this when you are coding/testing on your laptop and want Postgres data to stay across restarts.
+
+1. Start everything:
+
+```bash
+make docker-up
+```
+
+2. Stop safely at end of session (data preserved):
+
+```bash
+make docker-clean
+# or
+make docker-down
+```
+
+3. Next day, continue from previous DB state:
+
+```bash
+make docker-up
+```
+
+Important: `make docker-clean-all` is destructive. Use it only when you intentionally want a fresh empty database.
+
+---
+
+#### Scenario 2: You only want Postgres running (no bot)
+
+Use this when running SQL checks, ad-hoc analysis, or local tooling against DB only.
+
+```bash
+make postgres
+# alias:
+make docker-up-postgres
+```
+
+Then stop later while keeping data:
+
+```bash
+make docker-down
+```
+
+---
+
+#### Scenario 3: Take a safety snapshot before risky changes
+
+Use this before migrations, config experiments, or branch switches.
+
+```bash
+make db-backup
+ls -lh backups/
+```
+
+If something goes wrong, restore from snapshot:
+
+```bash
+make db-restore FILE=backups/sniper_YYYYMMDD_HHMMSS.dump
+```
+
+---
+
+#### Scenario 4: Download VPS data to local for analysis/backtest
+
+Use this when your VPS has richer live data and you want the same dataset locally.
+
+```bash
+# 1) Pull VPS snapshot to local backups/
+make db-backup-vps VPS_HOST=YOUR_VPS_IP VPS_USER=root VPS_APP_DIR=/opt/crypto-sniping-bot
+
+# 2) Ensure local DB container is running
+make postgres
+
+# 3) Restore the pulled dump into local DB
+make db-restore FILE=backups/sniper_YYYYMMDD_HHMMSS.dump
+```
+
+Tip: use `ls -lt backups/` to find the newest dump filename.
+
+---
+
+#### Scenario 5: Upload local dataset to VPS
+
+Use this when you prepared data locally (for example, curated historical dataset) and want VPS to use it.
+
+```bash
+# 1) Create local snapshot
+make db-backup
+
+# 2) Push and restore into VPS DB
+make db-restore-vps VPS_HOST=YOUR_VPS_IP VPS_USER=root VPS_APP_DIR=/opt/crypto-sniping-bot FILE=backups/sniper_YYYYMMDD_HHMMSS.dump
+```
+
+Warning: `db-restore-vps` restores with `--clean --if-exists`, so objects in VPS DB are replaced by the dump contents.
+
+---
+
+#### One-file example script (copy-paste)
+
+Save as `scripts/db_sync_example.sh` if you want an automated routine.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------- edit these ----------
+VPS_HOST="YOUR_VPS_IP"
+VPS_USER="root"
+VPS_APP_DIR="/opt/crypto-sniping-bot"
+# -------------------------------
+
+echo "[1/6] Start local Postgres"
+make postgres
+
+echo "[2/6] Backup local DB"
+make db-backup
+
+echo "[3/6] Pull VPS DB snapshot"
+make db-backup-vps VPS_HOST="$VPS_HOST" VPS_USER="$VPS_USER" VPS_APP_DIR="$VPS_APP_DIR"
+
+LATEST_DUMP="$(ls -t backups/sniper_*.dump | head -1)"
+echo "Latest dump: $LATEST_DUMP"
+
+echo "[4/6] Restore latest dump into local DB"
+make db-restore FILE="$LATEST_DUMP"
+
+echo "[5/6] (Optional) Push local DB back to VPS"
+# Uncomment if needed:
+# make db-restore-vps VPS_HOST="$VPS_HOST" VPS_USER="$VPS_USER" VPS_APP_DIR="$VPS_APP_DIR" FILE="$LATEST_DUMP"
+
+echo "[6/6] Done"
+```
+
+Run it:
+
+```bash
+chmod +x scripts/db_sync_example.sh
+./scripts/db_sync_example.sh
+```
 
 ### Log Collection & Pre-Analysis
 
