@@ -242,11 +242,16 @@ func parseSocialLinks(body []byte, tokenName, tokenSymbol string) (bool, error) 
 		}
 	}
 
-	// 3. links object (catch-all) — apply profile gate to all values.
+	// 3. links object (catch-all) — only accept the known profile keys.
+	// Without this filter, arbitrary keys (e.g. "discord", "github", or any
+	// non-standard name) could satisfy HasSocialLinks with arbitrary values.
 	for k, v := range meta.Links {
-		// Infer social type from key name for targeted validation.
-		if isSocialProfileURL(strings.ToLower(k), v, tokenName, tokenSymbol) {
-			return true, nil
+		key := strings.ToLower(strings.TrimSpace(k))
+		switch key {
+		case "twitter", "x", "telegram", "website":
+			if isSocialProfileURL(key, v, tokenName, tokenSymbol) {
+				return true, nil
+			}
 		}
 	}
 
@@ -260,12 +265,12 @@ func parseSocialLinks(body []byte, tokenName, tokenSymbol string) (bool, error) 
 //   - "twitter" / "x": must have exactly one path segment (the username) on
 //     twitter.com or x.com. Rejects posts (/status/), internal paths (/i/),
 //     search (/search), intents (/intent/), and all other non-profile paths.
-//   - "telegram": any non-empty t.me link is accepted (t.me links always
-//     reference channels/groups/bots, not individual posts on the public web).
-//   - "website": must be a real external project website — not a DEX, scanner,
-//     launcher, blockchain explorer, template-hosting platform, OR a social
-//     media platform.
-//   - all other types: any non-empty URL that is not a blocked domain.
+//   - "telegram": must be a parseable URL whose host is t.me, telegram.me, or
+//     telegram.org. Any other host (including bare strings) is rejected.
+//   - "website": must be a real external project website — a parseable
+//     https:// URL that is not a DEX, scanner, launcher, blockchain explorer,
+//     template-hosting platform, or social media platform.
+//   - all other types: rejected (caller must pre-filter to a known key set).
 //
 // Association check: when tokenName or tokenSymbol is non-empty (≥ 3 chars
 // normalised), the URL path/handle must contain the normalised token name as
@@ -282,18 +287,46 @@ func isSocialProfileURL(socialType, rawURL, tokenName, tokenSymbol string) bool 
 		}
 		return profileAssociatedWithToken(u, tokenName, tokenSymbol)
 	}
-	// All non-twitter types: reject DEX/scanner/launcher domains.
-	if isBlockedWebsiteDomain(u) {
-		return false
+
+	// Telegram: must parse as URL with a known telegram host.
+	if t == "telegram" {
+		parsed, err := url.Parse(u)
+		if err != nil {
+			return false
+		}
+		host := strings.ToLower(parsed.Hostname())
+		switch host {
+		case "t.me", "telegram.me", "telegram.org":
+			return true
+		default:
+			return false
+		}
 	}
-	// For the "website" metadata field: additionally reject social media and
-	// messaging platform URLs. A token's project website must be its own domain,
-	// not a Twitter profile, Telegram channel, or Discord server that duplicates
-	// (or substitutes for) the dedicated twitter/telegram social fields.
-	if t == "website" && isSocialMediaWebsiteDomain(u) {
-		return false
+
+	// Website: must be a parseable https URL on a non-blocked, non-social
+	// host. Reject anything else (including bare strings and http URLs).
+	if t == "website" {
+		parsed, err := url.Parse(u)
+		if err != nil {
+			return false
+		}
+		if strings.ToLower(parsed.Scheme) != "https" {
+			return false
+		}
+		if parsed.Hostname() == "" {
+			return false
+		}
+		if isBlockedWebsiteDomain(u) {
+			return false
+		}
+		if isSocialMediaWebsiteDomain(u) {
+			return false
+		}
+		return true
 	}
-	return true
+
+	// All other social types are not accepted as evidence of social presence.
+	return false
 }
 
 // profileAssociatedWithToken returns true when the URL path/handle contains
@@ -312,13 +345,14 @@ func profileAssociatedWithToken(rawURL, tokenName, tokenSymbol string) bool {
 		return true
 	}
 
-	// Extract the meaningful part of the URL to search: the path (handle).
-	uLower := strings.ToLower(rawURL)
+	// Normalise the URL using the same rules as token identifiers so handles
+	// like "my-token" still match a token identifier normalised to "mytoken".
+	normURL := normaliseTokenIdentifier(rawURL)
 
-	if len(normName) >= 3 && strings.Contains(uLower, normName) {
+	if len(normName) >= 3 && strings.Contains(normURL, normName) {
 		return true
 	}
-	if len(normSymbol) >= 3 && strings.Contains(uLower, normSymbol) {
+	if len(normSymbol) >= 3 && strings.Contains(normURL, normSymbol) {
 		return true
 	}
 	return false
@@ -375,16 +409,12 @@ var blockedWebsiteDomains = []string{
 	"my.canva.site",
 }
 
-// isBlockedWebsiteDomain returns true when rawURL's host matches any entry in
-// the blockedWebsiteDomains list (substring match covers subdomains too).
+// isBlockedWebsiteDomain returns true when rawURL's host equals or is a
+// dot-bounded subdomain of any entry in blockedWebsiteDomains. Matching is
+// host-only (via url.Parse) — query strings or paths that contain a blocked
+// substring do not match. Malformed URLs and URLs with no host return false.
 func isBlockedWebsiteDomain(rawURL string) bool {
-	u := strings.ToLower(rawURL)
-	for _, domain := range blockedWebsiteDomains {
-		if strings.Contains(u, domain) {
-			return true
-		}
-	}
-	return false
+	return hostMatchesDomainList(rawURL, blockedWebsiteDomains)
 }
 
 // socialMediaWebsiteDomains lists social-media and messaging-platform domains
@@ -416,13 +446,36 @@ var socialMediaWebsiteDomains = []string{
 	"bio.link",
 }
 
-// isSocialMediaWebsiteDomain returns true when rawURL references a known
-// social media or messaging platform — blocking it from satisfying the
-// "website" metadata requirement.
+// isSocialMediaWebsiteDomain returns true when rawURL's host equals or is a
+// dot-bounded subdomain of any entry in socialMediaWebsiteDomains. Host-only
+// match via url.Parse — substring matches in paths or query strings do not
+// count. This blocks social-media URLs from satisfying the "website" metadata
+// requirement.
 func isSocialMediaWebsiteDomain(rawURL string) bool {
-	u := strings.ToLower(rawURL)
-	for _, domain := range socialMediaWebsiteDomains {
-		if strings.Contains(u, domain) {
+	return hostMatchesDomainList(rawURL, socialMediaWebsiteDomains)
+}
+
+// hostMatchesDomainList parses rawURL and returns true when its lowercase
+// hostname is either equal to a domain in the list or a dot-bounded subdomain
+// of one (e.g. host="app.dexscreener.com" matches domain="dexscreener.com",
+// but host="mydexscreener.com" does not). Returns false for empty, malformed,
+// or hostless URLs.
+func hostMatchesDomainList(rawURL string, domains []string) bool {
+	u := strings.TrimSpace(rawURL)
+	if u == "" {
+		return false
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return false
+	}
+	for _, domain := range domains {
+		d := strings.ToLower(domain)
+		if host == d || strings.HasSuffix(host, "."+d) {
 			return true
 		}
 	}

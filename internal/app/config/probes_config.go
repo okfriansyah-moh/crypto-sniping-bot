@@ -89,11 +89,13 @@ type SolanaCreatorReputationYAML struct {
 	Enabled bool `yaml:"enabled"`
 
 	// TimeoutMs is the HTTP deadline for the pump.fun API request.
-	// Valid range: [500, 10000]. Default: 5000.
+	// Valid range: [500, 10000]. Probe internal default: 3000.
+	// (config/pipeline.yaml ships an explicit 5000ms override to accommodate
+	// the pump.fun + Helius DAS fallback path.)
 	TimeoutMs int `yaml:"timeout_ms"`
 
 	// BaseURL is the pump.fun creator API root. Must be HTTPS.
-	// Default: "https://frontend-api.pump.fun".
+	// Default: "https://frontend-api-v3.pump.fun".
 	BaseURL string `yaml:"base_url"`
 
 	// MaxBodyBytes caps the API response body (bytes).

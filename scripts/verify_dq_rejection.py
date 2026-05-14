@@ -30,11 +30,19 @@ MAX_CREATOR_PREV_TOKEN_COUNT = 1   # reject if prev_count >= this
 MAX_BODY_BYTES                = 128 * 1024  # 128 KiB cap (matches probe)
 TIMEOUT_S                     = 5
 
-# Blocked website domains (mirrors isBlockedWebsiteDomain in solana_metadata.go)
+# Blocked website domains (mirrors blockedWebsiteDomains in solana_metadata.go).
+# Keep this list in sync with internal/modules/probes/solana_metadata.go.
 BLOCKED_WEBSITE_DOMAINS = [
-    "dexscreener.com", "birdeye.so", "solscan.io", "raydium.io",
-    "jup.ag", "pump.fun", "photon-sol.trycloudflar.com",
-    "defined.fi", "dextools.io", "poocoin.app",
+    "pump.fun", "solscan.io", "birdeye.so", "dexscreener.com",
+    "raydium.io", "jup.ag", "jupiter.ag", "orca.so",
+    "solanabeach.io", "explorer.solana.com", "solana.fm",
+    "bubblemaps.io", "defined.fi", "geckoterminal.com",
+    "coinmarketcap.com", "coingecko.com", "dextools.io",
+    "ave.ai", "axiom.trade", "photon-sol.trycourier.app",
+    "bullx.io",
+    # No-code / template-hosting platforms.
+    "webflow.io", "carrd.co", "framer.app", "super.so",
+    "notion.so", "my.canva.site",
 ]
 
 # Social-media domains blocked as "website" field (mirrors isSocialMediaWebsiteDomain)

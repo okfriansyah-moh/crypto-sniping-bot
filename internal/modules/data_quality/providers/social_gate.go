@@ -152,10 +152,11 @@ func (p *SocialGateProvider) Evaluate(
 				continue
 			}
 			// A Twitter/X social that points to a post/thread (not a profile)
-			// is not evidence of a real project identity. Record it as
-			// "twitter_post" so scoreSocials does not treat it as hasTwitter.
+			// is not evidence of a real project identity, so do not count it
+			// as social presence at all. Without this, a single tweet link
+			// would satisfy the milder "no_twitter" branch (0.30) instead of
+			// being treated as "no real socials" (0.50).
 			if (t == "twitter" || t == "x") && isPostURL(s.URL) {
-				socialTypes = append(socialTypes, "twitter_post")
 				continue
 			}
 			socialTypes = append(socialTypes, t)

@@ -1044,7 +1044,14 @@ func buildExecutionsFn(db database.Adapter) func(ctx context.Context) (string, e
 			return sb.String(), nil
 		}
 
-		for _, r := range rows {
+		// Telegram caps a single sendMessage payload at 4096 chars. We leave
+		// ~256 chars of safety margin (HTML overhead, footer line) and stop
+		// emitting rows once we exceed maxOutputChars.
+		const maxOutputChars = 3800
+		const maxTxHashChars = 24    // first 24 chars is enough to identify a tx
+		const maxErrorCodeChars = 80 // bound long error strings
+
+		for i, r := range rows {
 			ts := r.UpdatedAt
 			if len(ts) > 16 {
 				ts = ts[:16] // truncate to minute
@@ -1069,7 +1076,10 @@ func buildExecutionsFn(db database.Adapter) func(ctx context.Context) (string, e
 				statusIcon = "🎯"
 			}
 
-			sb.WriteString(fmt.Sprintf(
+			// Build this row into a temporary buffer so we can decide whether
+			// to append it without exceeding the Telegram limit.
+			var row strings.Builder
+			row.WriteString(fmt.Sprintf(
 				"%s <code>%s</code> [%s] %s · %s\n",
 				statusIcon,
 				html.EscapeString(r.TokenAddress),
@@ -1079,13 +1089,27 @@ func buildExecutionsFn(db database.Adapter) func(ctx context.Context) (string, e
 			))
 
 			if r.TxHash != "" {
-				sb.WriteString(fmt.Sprintf("  tx: <code>%s</code>\n", html.EscapeString(r.TxHash)))
+				tx := r.TxHash
+				if len(tx) > maxTxHashChars {
+					tx = tx[:maxTxHashChars] + "…"
+				}
+				row.WriteString(fmt.Sprintf("  tx: <code>%s</code>\n", html.EscapeString(tx)))
 			}
 			if r.ErrorCode != "" {
-				sb.WriteString(fmt.Sprintf("  err: <i>%s</i>\n", html.EscapeString(r.ErrorCode)))
+				ec := r.ErrorCode
+				if len(ec) > maxErrorCodeChars {
+					ec = ec[:maxErrorCodeChars] + "…"
+				}
+				row.WriteString(fmt.Sprintf("  err: <i>%s</i>\n", html.EscapeString(ec)))
 			}
-			sb.WriteString(fmt.Sprintf("  <i>%s</i>\n", html.EscapeString(ts)))
-			sb.WriteString("\n")
+			row.WriteString(fmt.Sprintf("  <i>%s</i>\n", html.EscapeString(ts)))
+			row.WriteString("\n")
+
+			if sb.Len()+row.Len() > maxOutputChars {
+				sb.WriteString(fmt.Sprintf("…truncated (%d more rows not shown)\n", len(rows)-i))
+				break
+			}
+			sb.WriteString(row.String())
 		}
 
 		return sb.String(), nil

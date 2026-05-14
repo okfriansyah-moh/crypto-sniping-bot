@@ -25,11 +25,13 @@ import (
 	"crypto-sniping-bot/contracts"
 )
 
-// sanitizeMetadataString cleans an untrusted on-chain string (name, symbol) before
-// it enters the DTO. It strips ASCII control characters (0x00–0x1F and 0x7F) to
-// prevent log injection — e.g. tokens named `rm -rf ...` or containing newlines
-// that break structured log parsers. Truncates to maxLen runes.
-// Clean strings (normal token names) pass through unchanged.
+// sanitizeMetadataString cleans an untrusted on-chain string (name, symbol)
+// before it enters the DTO. It strips ASCII control characters (0x00–0x1F
+// and 0x7F), including newlines and other non-printable bytes that can
+// break structured-log parsers or enable control-character-based log
+// injection. Truncates to maxLen runes. Printable strings (normal token
+// names and symbols, including ones containing spaces or punctuation)
+// pass through unchanged.
 func sanitizeMetadataString(s string, maxLen int) string {
 	var b strings.Builder
 	b.Grow(len(s))

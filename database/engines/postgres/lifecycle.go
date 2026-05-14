@@ -587,7 +587,10 @@ SELECT
     COALESCE(md.chain,        '') AS chain,
     tl.current_state,
     COALESCE(er.status,       '') AS exec_status,
-    COALESCE(er.error_code,   COALESCE(tl.terminal_reason, '')) AS error_code,
+    -- er.error_code and tl.terminal_reason are TEXT NOT NULL DEFAULT ''.
+    -- COALESCE only treats NULL as missing, so we wrap each TEXT field in
+    -- NULLIF(.., '') to make an empty string fall through to the next source.
+    COALESCE(NULLIF(er.error_code, ''), NULLIF(tl.terminal_reason, ''), '') AS error_code,
     COALESCE(er.tx_hash,      '') AS tx_hash,
     tl.updated_at
 FROM token_lifecycle tl
@@ -620,13 +623,15 @@ LIMIT $1`
 	var out []database.ExecutionLogRow
 	for rows.Next() {
 		var r database.ExecutionLogRow
+		var updatedAt time.Time
 		if err := rows.Scan(
 			&r.TokenAddress, &r.Symbol, &r.Chain,
 			&r.LifecycleState, &r.Status, &r.ErrorCode,
-			&r.TxHash, &r.UpdatedAt,
+			&r.TxHash, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("get execution log scan: %w", err)
 		}
+		r.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {

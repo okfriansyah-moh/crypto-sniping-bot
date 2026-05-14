@@ -531,21 +531,21 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 			// HeliusRPCURL enables the Helius DAS circuit-breaker fallback when
 			// pump.fun is unreachable. The URL embeds the API key from the
 			// SOLANA_RPC_HTTP_2 env var — never hardcoded in config files.
-			HeliusRPCURL: findHelliusHTTPURL(cfg.Solana.RPCEndpoints),
+			HeliusRPCURL: findHeliusHTTPURL(cfg.Solana.RPCEndpoints),
 		}, logger))
 	}
 
 	return out
 }
 
-// findHelliusHTTPURL scans cfg.Solana.RPCEndpoints for the first Helius HTTP
+// findHeliusHTTPURL scans cfg.Solana.RPCEndpoints for the first Helius HTTP
 // endpoint and returns its URL (which embeds the API key as ?api-key=...).
 // This URL is passed to the creator-reputation probe as the Helius DAS
 // circuit-breaker fallback. Returns "" when no Helius HTTP endpoint is found.
 //
 // Provider detection: explicit Provider=="helius" field takes precedence;
 // falls back to URL substring matching ("helius-rpc.com", "helius.dev").
-func findHelliusHTTPURL(endpoints []config.SolanaRPCEndpoint) string {
+func findHeliusHTTPURL(endpoints []config.SolanaRPCEndpoint) string {
 	for _, ep := range endpoints {
 		if ep.Kind != "http" || ep.URL == "" {
 			continue

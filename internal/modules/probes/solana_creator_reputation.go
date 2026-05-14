@@ -155,34 +155,53 @@ type circuitBreaker struct {
 	halfOpenAfterSec    int // re-test after N seconds
 }
 
-// shouldUseFallback returns true when the circuit is OPEN or transitions
-// from OPEN to HALF_OPEN (if the cooldown has elapsed). Callers that
-// receive true must route to Helius DAS; pump.fun must not be called.
+// shouldUseFallback returns true ONLY while the circuit is OPEN and the
+// cooldown has not yet elapsed. When the cooldown has elapsed the state is
+// promoted to HALF_OPEN and the method returns false so that the caller
+// performs exactly one pump.fun re-test. The result of that re-test
+// (recordSuccess → closes the circuit; recordFailure → re-opens it) is what
+// drives the OPEN → HALF_OPEN → OPEN/CLOSED loop.
+//
+// Callers that receive true must route to Helius DAS; pump.fun must not be
+// called. Callers that receive false must call pump.fun and then exactly one
+// of recordSuccess() or recordFailure() with the outcome.
 func (cb *circuitBreaker) shouldUseFallback() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	switch cb.state {
-	case circuitOpen:
+	if cb.state == circuitOpen {
 		if time.Since(cb.openedAt) >= time.Duration(cb.halfOpenAfterSec)*time.Second {
+			// Cooldown elapsed — promote to HALF_OPEN and allow the caller
+			// to re-test pump.fun once.
 			cb.state = circuitHalfOpen
-			return true // route to Helius but allow a pump.fun re-test next turn
+			return false
 		}
 		return true
-	case circuitHalfOpen:
-		return true
-	default: // circuitClosed
-		return false
 	}
+	// CLOSED and HALF_OPEN both allow a pump.fun attempt.
+	return false
 }
 
-// recordFailure increments the consecutive failure counter and opens the
-// circuit when the threshold is reached. Returns true if the circuit just
+// recordFailure increments the consecutive failure counter and opens (or
+// re-opens) the circuit when appropriate. Returns true if the circuit just
 // transitioned to OPEN (so the caller can emit a log line).
+//
+//   - CLOSED → OPEN once consecutiveFailures crosses failureThreshold.
+//   - HALF_OPEN → OPEN immediately on any failure (one strike during the
+//     re-test bumps the circuit straight back to OPEN and restarts the
+//     cooldown timer).
 func (cb *circuitBreaker) recordFailure() (justOpened bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	cb.consecutiveFailures++
-	if cb.state == circuitClosed && cb.consecutiveFailures >= cb.failureThreshold {
+	switch cb.state {
+	case circuitClosed:
+		if cb.consecutiveFailures >= cb.failureThreshold {
+			cb.state = circuitOpen
+			cb.openedAt = time.Now()
+			return true
+		}
+	case circuitHalfOpen:
+		// Re-test failed — re-open the circuit and restart the cooldown.
 		cb.state = circuitOpen
 		cb.openedAt = time.Now()
 		return true
@@ -291,7 +310,9 @@ func (p *SolanaCreatorReputationProbe) Probe(
 	var fetchErr error
 
 	if p.breaker != nil && p.breaker.shouldUseFallback() {
-		// Circuit is OPEN/HALF_OPEN — route to Helius DAS directly.
+		// Circuit is OPEN and the cooldown has not yet elapsed — route to
+		// Helius DAS directly. (HALF_OPEN flips back to false inside
+		// shouldUseFallback() so a pump.fun re-test runs below.)
 		p.logger.Info("creator_probe_circuit_open_using_helius",
 			"creator", in.CreatorAddress,
 			"token", in.TokenAddress,
@@ -305,10 +326,11 @@ func (p *SolanaCreatorReputationProbe) Probe(
 			)
 			return in, fetchErr
 		}
-		// Helius succeeded from HALF_OPEN — do not reset the circuit yet;
-		// only a successful pump.fun call should close it.
+		// Helius succeeded while the circuit is OPEN — do not reset the
+		// circuit; only a successful pump.fun call (during HALF_OPEN re-test)
+		// closes it.
 	} else {
-		// Circuit is CLOSED — try pump.fun first.
+		// Circuit is CLOSED or HALF_OPEN — try pump.fun.
 		count, fetchErr = p.fetchCreatorTokenCount(ctx, in.CreatorAddress)
 		if fetchErr != nil {
 			p.logger.Warn("creator_probe_pumpfun_failed",
@@ -416,11 +438,16 @@ func (p *SolanaCreatorReputationProbe) fetchCreatorTokenCount(
 		return 0, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 
-	// Bounded read — never io.ReadAll on an unbounded body.
-	lr := io.LimitReader(resp.Body, p.cfg.MaxBodyBytes)
+	// Bounded read with truncation detection — read at most MaxBodyBytes+1
+	// so oversized responses fail with an explicit error instead of being
+	// silently parsed against a truncated body.
+	lr := io.LimitReader(resp.Body, p.cfg.MaxBodyBytes+1)
 	body, err := io.ReadAll(lr)
 	if err != nil {
 		return 0, fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > p.cfg.MaxBodyBytes {
+		return 0, fmt.Errorf("response body exceeds limit (%d bytes)", p.cfg.MaxBodyBytes)
 	}
 
 	count, err := parseCreatorCoinCount(body)
@@ -600,7 +627,8 @@ func parseHelliusDASCount(body []byte) (int32, error) {
 }
 
 // validateBaseURL enforces the HTTPS-only security invariant.
-// Loopback addresses (127.x, localhost) are allowed for test servers.
+// Loopback addresses (127.x, localhost, ::1) are allowed for test servers
+// but must still use http or https — never ftp, file, or any other scheme.
 func (p *SolanaCreatorReputationProbe) validateBaseURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -610,7 +638,10 @@ func (p *SolanaCreatorReputationProbe) validateBaseURL(rawURL string) error {
 	isLoopback := host == "localhost" ||
 		strings.HasPrefix(host, "127.") ||
 		host == "::1"
-	if u.Scheme == "https" || isLoopback {
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme == "http" && isLoopback {
 		return nil
 	}
 	return fmt.Errorf("base_url must use HTTPS (got scheme %q)", u.Scheme)
