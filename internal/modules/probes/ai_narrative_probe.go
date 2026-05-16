@@ -154,9 +154,9 @@ func (p *AINarrativeProbe) buildRequest(in contracts.MarketDataDTO) *ai.Completi
 		trending = "AI agents, DePIN, gaming, RWA, memecoins"
 	}
 	system := fmt.Sprintf(
-		"Crypto trader analyst. Solana meme token scorer. Output JSON only, no prose. "+
-			"Trending now: %s. "+
-			"Score 0=bad 10=good. cp=copy-paste boilerplate reuse across rugs. imp=known project name mimic.",
+		"Token metadata classifier. Output JSON only, no prose. "+
+			"Active themes: %s. "+
+			"ns=quality 0-10, sp=risk 0-10. cp=duplicate generic description shared across failed projects. imp=mimics established brand name.",
 		trending,
 	)
 
@@ -176,7 +176,7 @@ func (p *AINarrativeProbe) buildRequest(in contracts.MarketDataDTO) *ai.Completi
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
-		MaxTokens:   80,
+		MaxTokens:   100,
 		Temperature: 0, // deterministic: same input → same output
 	}
 }
