@@ -551,7 +551,7 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 			RateLimitPerMin:  cfg.AIEnrichment.RateLimitPerMin,
 			MaxPromptChars:   cfg.AIEnrichment.MaxPromptChars,
 		}
-		aiClient, aiErr := ai.NewCopilotClient(aiCfg, logger)
+		aiClient, aiErr := ai.NewGroqClient(aiCfg, logger)
 		if aiErr != nil {
 			logger.Warn("ai_narrative_probe_skip", "reason", aiErr.Error())
 		} else {

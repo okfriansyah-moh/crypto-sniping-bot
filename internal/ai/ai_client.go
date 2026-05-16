@@ -1,4 +1,4 @@
-// Package ai provides a minimal GitHub Copilot API client for on-demand
+// Package ai provides a minimal Groq API client for on-demand
 // LLM enrichment of pipeline signals.
 //
 // # 1-shot autonomous design
@@ -14,11 +14,11 @@
 // Model priority (highest → lowest):
 //  1. AI_ENRICH_MODEL env var (set at runtime — same pattern as MODEL_HEAVY in run_parallel.sh)
 //  2. ai_enrichment.model in config/pipeline.yaml
-//  3. Built-in default: gpt-4.1
+//  3. Built-in default: llama-3.3-70b-versatile
 //
 // # Security invariants (never relax)
 //
-//   - Auth token read exclusively from env GITHUB_COPILOT_TOKEN — never YAML.
+//   - Auth token read exclusively from env GROQ_API_KEY — never YAML.
 //   - All requests use HTTPS only; non-HTTPS endpoint is rejected at construction.
 //   - Response body bounded to MaxResponseBytes (default 4 KiB).
 //   - User content truncated to MaxPromptChars before sending (context limit guard).
@@ -48,17 +48,17 @@ import (
 )
 
 // ErrDisabled is returned when the client is configured with Enabled=false.
-var ErrDisabled = errors.New("ai/copilot: client disabled")
+var ErrDisabled = errors.New("ai/groq: client disabled")
 
 // ErrRateLimit is returned when the token bucket is empty (non-blocking check).
-var ErrRateLimit = errors.New("ai/copilot: rate limit reached — try later")
+var ErrRateLimit = errors.New("ai/groq: rate limit reached — try later")
 
-// Config configures the GitHub Copilot API client.
-// The auth token is NOT a field — read exclusively from GITHUB_COPILOT_TOKEN env var.
+// Config configures the Groq API client.
+// The auth token is NOT a field — read exclusively from GROQ_API_KEY env var.
 type Config struct {
 	Enabled          bool   `yaml:"enabled"`
-	Endpoint         string `yaml:"endpoint"`           // default: https://api.githubcopilot.com/chat/completions
-	Model            string `yaml:"model"`              // default: gpt-4o
+	Endpoint         string `yaml:"endpoint"`           // default: https://api.groq.com/openai/v1/chat/completions
+	Model            string `yaml:"model"`              // default: llama-3.3-70b-versatile
 	TimeoutMs        int    `yaml:"timeout_ms"`         // default: 8000
 	MaxRetries       int    `yaml:"max_retries"`        // default: 1 (1 retry = 2 total attempts)
 	MaxResponseBytes int64  `yaml:"max_response_bytes"` // default: 4096
@@ -93,15 +93,15 @@ type AIClient interface {
 	Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error)
 }
 
-// httpDoer is the minimal HTTP interface needed by CopilotClient.
+// httpDoer is the minimal HTTP interface needed by GroqClient.
 // *http.Client satisfies it; tests inject a fake.
 type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// CopilotClient calls the GitHub Copilot chat completions endpoint.
-// Construct with NewCopilotClient; call StartRateLimiter once at startup.
-type CopilotClient struct {
+// GroqClient calls the Groq chat completions endpoint.
+// Construct with NewGroqClient; call StartRateLimiter once at startup.
+type GroqClient struct {
 	cfg    Config
 	token  string
 	client httpDoer
@@ -114,29 +114,29 @@ type CopilotClient struct {
 	stopCh chan struct{}
 }
 
-// NewCopilotClient creates a ready-to-use CopilotClient.
+// NewGroqClient creates a ready-to-use GroqClient.
 //
 // Returns an error when:
-//   - Enabled=true and GITHUB_COPILOT_TOKEN is not set.
+//   - Enabled=true and GROQ_API_KEY is not set.
 //   - Endpoint does not begin with "https://".
-func NewCopilotClient(cfg Config, logger *slog.Logger) (*CopilotClient, error) {
+func NewGroqClient(cfg Config, logger *slog.Logger) (*GroqClient, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	applyConfigDefaults(&cfg)
 
-	token := os.Getenv("GITHUB_COPILOT_TOKEN")
+	token := os.Getenv("GROQ_API_KEY")
 	if cfg.Enabled && token == "" {
-		return nil, fmt.Errorf("ai/copilot: GITHUB_COPILOT_TOKEN env var required when ai_enrichment.enabled=true")
+		return nil, fmt.Errorf("ai/groq: GROQ_API_KEY env var required when ai_enrichment.enabled=true")
 	}
 
 	// Enforce HTTPS — security invariant, never relax.
 	if !strings.HasPrefix(cfg.Endpoint, "https://") {
-		return nil, fmt.Errorf("ai/copilot: endpoint must use HTTPS, got %q", cfg.Endpoint)
+		return nil, fmt.Errorf("ai/groq: endpoint must use HTTPS, got %q", cfg.Endpoint)
 	}
 
 	timeout := time.Duration(cfg.TimeoutMs) * time.Millisecond
-	c := &CopilotClient{
+	c := &GroqClient{
 		cfg:    cfg,
 		token:  token,
 		client: &http.Client{Timeout: timeout},
@@ -151,7 +151,7 @@ func NewCopilotClient(cfg Config, logger *slog.Logger) (*CopilotClient, error) {
 		c.bucket <- struct{}{}
 	}
 
-	logger.Info("ai_copilot_client_initialized",
+	logger.Info("ai_groq_client_initialized",
 		"enabled", cfg.Enabled,
 		"model", cfg.Model,
 		"endpoint", cfg.Endpoint,
@@ -164,12 +164,12 @@ func NewCopilotClient(cfg Config, logger *slog.Logger) (*CopilotClient, error) {
 }
 
 // WithHTTPClient replaces the internal HTTP client. Used in tests to inject a fake.
-func (c *CopilotClient) WithHTTPClient(h httpDoer) { c.client = h }
+func (c *GroqClient) WithHTTPClient(h httpDoer) { c.client = h }
 
 // StartRateLimiter launches the background token-bucket refill goroutine.
 // Safe to call multiple times — only the first call starts the goroutine.
 // Call Stop() at shutdown to release resources.
-func (c *CopilotClient) StartRateLimiter() {
+func (c *GroqClient) StartRateLimiter() {
 	c.once.Do(func() {
 		interval := time.Minute / time.Duration(c.cfg.RateLimitPerMin)
 		go func() {
@@ -193,7 +193,7 @@ func (c *CopilotClient) StartRateLimiter() {
 }
 
 // Stop shuts down the background rate-limiter goroutine.
-func (c *CopilotClient) Stop() {
+func (c *GroqClient) Stop() {
 	select {
 	case <-c.stopCh: // already closed
 	default:
@@ -210,7 +210,7 @@ func (c *CopilotClient) Stop() {
 //   - Context cancelled → ctx.Err()
 //   - HTTP 429 / 5xx → retried once, then error
 //   - Parse failure → error
-func (c *CopilotClient) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+func (c *GroqClient) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
 	if !c.cfg.Enabled {
 		return nil, ErrDisabled
 	}
@@ -220,7 +220,7 @@ func (c *CopilotClient) Complete(ctx context.Context, req *CompletionRequest) (*
 	case <-c.bucket:
 		// token acquired — proceed
 	default:
-		c.logger.Warn("ai_copilot_rate_limited",
+		c.logger.Warn("ai_groq_rate_limited",
 			"model", c.cfg.Model,
 			"rate_limit_per_min", c.cfg.RateLimitPerMin,
 		)
@@ -238,7 +238,7 @@ func (c *CopilotClient) Complete(ctx context.Context, req *CompletionRequest) (*
 		Temperature: req.Temperature,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ai/copilot: marshal request: %w", err)
+		return nil, fmt.Errorf("ai/groq: marshal request: %w", err)
 	}
 
 	attempts := c.cfg.MaxRetries + 1
@@ -254,7 +254,7 @@ func (c *CopilotClient) Complete(ctx context.Context, req *CompletionRequest) (*
 		}
 		resp, err := c.doRequest(ctx, body)
 		if err == nil {
-			c.logger.Debug("ai_copilot_complete",
+			c.logger.Debug("ai_groq_complete",
 				"model", c.cfg.Model,
 				"input_tokens", resp.InputTokens,
 				"output_tokens", resp.OutputTokens,
@@ -287,47 +287,45 @@ type copilotRespBody struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *CopilotClient) doRequest(ctx context.Context, body []byte) (*CompletionResponse, error) {
+func (c *GroqClient) doRequest(ctx context.Context, body []byte) (*CompletionResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("ai/copilot: build request: %w", err)
+		return nil, fmt.Errorf("ai/groq: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Copilot-Integration-Id", "vscode-chat")
-	req.Header.Set("User-Agent", "crypto-sniping-bot/ai-probe")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ai/copilot: http: %w", err)
+		return nil, fmt.Errorf("ai/groq: http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.MaxResponseBytes))
 	if err != nil {
-		return nil, fmt.Errorf("ai/copilot: read response body: %w", err)
+		return nil, fmt.Errorf("ai/groq: read response body: %w", err)
 	}
 
 	// Retryable: rate-limited or server error.
 	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-		return nil, &retryableError{fmt.Sprintf("ai/copilot: HTTP %d", resp.StatusCode)}
+		return nil, &retryableError{fmt.Sprintf("ai/groq: HTTP %d", resp.StatusCode)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("ai/copilot: HTTP %d: %s",
+		return nil, fmt.Errorf("ai/groq: HTTP %d: %s",
 			resp.StatusCode, truncateMsg(string(respBytes), 200))
 	}
 
 	var parsed copilotRespBody
 	if err := json.Unmarshal(respBytes, &parsed); err != nil {
-		return nil, fmt.Errorf("ai/copilot: parse response JSON: %w", err)
+		return nil, fmt.Errorf("ai/groq: parse response JSON: %w", err)
 	}
 	if parsed.Error != nil {
-		return nil, fmt.Errorf("ai/copilot: API error %s: %s",
+		return nil, fmt.Errorf("ai/groq: API error %s: %s",
 			parsed.Error.Type, truncateMsg(parsed.Error.Message, 200))
 	}
 	if len(parsed.Choices) == 0 {
-		return nil, fmt.Errorf("ai/copilot: empty choices in response")
+		return nil, fmt.Errorf("ai/groq: empty choices in response")
 	}
 
 	return &CompletionResponse{
@@ -375,10 +373,10 @@ func truncateUserContent(msgs []Message, maxChars int) {
 
 func applyConfigDefaults(cfg *Config) {
 	if cfg.Endpoint == "" {
-		cfg.Endpoint = "https://api.githubcopilot.com/chat/completions"
+		cfg.Endpoint = "https://api.groq.com/openai/v1/chat/completions"
 	}
 	if cfg.Model == "" {
-		cfg.Model = "gpt-4.1"
+		cfg.Model = "llama-3.3-70b-versatile"
 	}
 	// AI_ENRICH_MODEL env var overrides config YAML — same pattern as MODEL_HEAVY
 	// in scripts/run_parallel.sh: MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}".
@@ -398,7 +396,7 @@ func applyConfigDefaults(cfg *Config) {
 		cfg.MaxResponseBytes = 4096
 	}
 	if cfg.RateLimitPerMin <= 0 {
-		cfg.RateLimitPerMin = 8
+		cfg.RateLimitPerMin = 30
 	}
 	if cfg.MaxPromptChars <= 0 {
 		cfg.MaxPromptChars = 600

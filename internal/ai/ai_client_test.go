@@ -27,28 +27,28 @@ func (f *fakeHTTP) Do(_ *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// newTestClient creates a CopilotClient with a fake HTTP transport and
+// newTestClient creates a GroqClient with a fake HTTP transport and
 // Enabled=true. Token validation is bypassed by setting the env before calling.
-func newTestClient(t *testing.T, fake *fakeHTTP) *CopilotClient {
+func newTestClient(t *testing.T, fake *fakeHTTP) *GroqClient {
 	t.Helper()
-	t.Setenv("GITHUB_COPILOT_TOKEN", "test-token")
-	c, err := NewCopilotClient(Config{
+	t.Setenv("GROQ_API_KEY", "test-token")
+	c, err := NewGroqClient(Config{
 		Enabled:          true,
-		Endpoint:         "https://api.githubcopilot.com/chat/completions",
-		Model:            "gpt-4o",
+		Endpoint:         "https://api.groq.com/openai/v1/chat/completions",
+		Model:            "llama-3.3-70b-versatile",
 		MaxResponseBytes: 4096,
 		RateLimitPerMin:  10,
 		MaxPromptChars:   600,
 	}, slog.Default())
 	if err != nil {
-		t.Fatalf("NewCopilotClient: %v", err)
+		t.Fatalf("NewGroqClient: %v", err)
 	}
 	c.WithHTTPClient(fake)
 	return c
 }
 
-func TestCopilotClient_Disabled(t *testing.T) {
-	c, err := NewCopilotClient(Config{Enabled: false}, slog.Default())
+func TestGroqClient_Disabled(t *testing.T) {
+	c, err := NewGroqClient(Config{Enabled: false}, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error for disabled client: %v", err)
 	}
@@ -58,29 +58,29 @@ func TestCopilotClient_Disabled(t *testing.T) {
 	}
 }
 
-func TestCopilotClient_NonHTTPSEndpointRejected(t *testing.T) {
-	t.Setenv("GITHUB_COPILOT_TOKEN", "tok")
-	_, err := NewCopilotClient(Config{
+func TestGroqClient_NonHTTPSEndpointRejected(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "tok")
+	_, err := NewGroqClient(Config{
 		Enabled:  true,
-		Endpoint: "http://api.githubcopilot.com/chat/completions",
+		Endpoint: "http://api.groq.com/openai/v1/chat/completions",
 	}, slog.Default())
 	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Errorf("expected HTTPS enforcement error, got %v", err)
 	}
 }
 
-func TestCopilotClient_MissingTokenErrors(t *testing.T) {
-	t.Setenv("GITHUB_COPILOT_TOKEN", "")
-	_, err := NewCopilotClient(Config{
+func TestGroqClient_MissingTokenErrors(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "")
+	_, err := NewGroqClient(Config{
 		Enabled:  true,
-		Endpoint: "https://api.githubcopilot.com/chat/completions",
+		Endpoint: "https://api.groq.com/openai/v1/chat/completions",
 	}, slog.Default())
-	if err == nil || !strings.Contains(err.Error(), "GITHUB_COPILOT_TOKEN") {
+	if err == nil || !strings.Contains(err.Error(), "GROQ_API_KEY") {
 		t.Errorf("expected token missing error, got %v", err)
 	}
 }
 
-func TestCopilotClient_SuccessfulCompletion(t *testing.T) {
+func TestGroqClient_SuccessfulCompletion(t *testing.T) {
 	fake := &fakeHTTP{
 		statusCode: 200,
 		body: `{
@@ -106,17 +106,17 @@ func TestCopilotClient_SuccessfulCompletion(t *testing.T) {
 	}
 }
 
-func TestCopilotClient_RateLimitFail(t *testing.T) {
-	t.Setenv("GITHUB_COPILOT_TOKEN", "tok")
+func TestGroqClient_RateLimitFail(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "tok")
 	// RateLimitPerMin=1 means bucket capacity=1. After one call, bucket empty.
-	c, err := NewCopilotClient(Config{
+	c, err := NewGroqClient(Config{
 		Enabled:         true,
-		Endpoint:        "https://api.githubcopilot.com/chat/completions",
+		Endpoint:        "https://api.groq.com/openai/v1/chat/completions",
 		RateLimitPerMin: 1,
 		MaxRetries:      0,
 	}, slog.Default())
 	if err != nil {
-		t.Fatalf("NewCopilotClient: %v", err)
+		t.Fatalf("NewGroqClient: %v", err)
 	}
 	c.WithHTTPClient(&fakeHTTP{statusCode: 200, body: `{"choices":[{"message":{"content":"x"}}],"usage":{}}`})
 
@@ -130,7 +130,7 @@ func TestCopilotClient_RateLimitFail(t *testing.T) {
 	}
 }
 
-func TestCopilotClient_HTTP429Retried(t *testing.T) {
+func TestGroqClient_HTTP429Retried(t *testing.T) {
 	calls := 0
 	fake := &fakeHTTP{}
 	c := newTestClient(t, &fakeHTTP{})

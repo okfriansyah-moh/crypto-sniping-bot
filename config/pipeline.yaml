@@ -471,19 +471,19 @@ rescan:
       include_passed: true
 
 # ---------------------------------------------------------------------------
-# AI enrichment — GitHub Copilot API-powered narrative scoring.
-# Token read from GITHUB_COPILOT_TOKEN env var (never in YAML).
+# AI enrichment — Groq API-powered narrative scoring.
+# Token read from GROQ_API_KEY env var (never in YAML).
 # All calls async, fail-open: NarrativeKnown=false on any error.
 # ---------------------------------------------------------------------------
 ai_enrichment:
   enabled: true
-  endpoint: "https://api.githubcopilot.com/chat/completions"
-  # Model override priority: AI_ENRICH_MODEL env var > this field > code default (gpt-4.1)
-  model: "gpt-4.1"
+  endpoint: "https://api.groq.com/openai/v1/chat/completions"
+  # Model override priority: AI_ENRICH_MODEL env var > this field > code default (llama-3.3-70b-versatile)
+  model: "llama-3.3-70b-versatile"
   timeout_ms: 8000
   max_retries: 1
   max_response_bytes: 4096
-  rate_limit_per_min: 8
+  rate_limit_per_min: 30
   max_prompt_chars: 600
   trending_narratives:
     - "AI agents"
