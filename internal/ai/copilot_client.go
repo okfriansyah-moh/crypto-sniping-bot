@@ -14,7 +14,7 @@
 // Model priority (highest → lowest):
 //  1. AI_ENRICH_MODEL env var (set at runtime — same pattern as MODEL_HEAVY in run_parallel.sh)
 //  2. ai_enrichment.model in config/pipeline.yaml
-//  3. Built-in default: gpt-4o-mini
+//  3. Built-in default: gpt-4.1
 //
 // # Security invariants (never relax)
 //
@@ -378,7 +378,7 @@ func applyConfigDefaults(cfg *Config) {
 		cfg.Endpoint = "https://api.githubcopilot.com/chat/completions"
 	}
 	if cfg.Model == "" {
-		cfg.Model = "gpt-4o-mini"
+		cfg.Model = "gpt-4.1"
 	}
 	// AI_ENRICH_MODEL env var overrides config YAML — same pattern as MODEL_HEAVY
 	// in scripts/run_parallel.sh: MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}".

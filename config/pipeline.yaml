@@ -478,8 +478,8 @@ rescan:
 ai_enrichment:
   enabled: true
   endpoint: "https://api.githubcopilot.com/chat/completions"
-  # Model override priority: AI_ENRICH_MODEL env var > this field > code default (gpt-4o-mini)
-  model: "gpt-4o-mini"
+  # Model override priority: AI_ENRICH_MODEL env var > this field > code default (gpt-4.1)
+  model: "gpt-4.1"
   timeout_ms: 8000
   max_retries: 1
   max_response_bytes: 4096
