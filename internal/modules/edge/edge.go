@@ -211,7 +211,7 @@ func (m *Module) ProcessWithContext(
 
 		EdgeType:            chosen.edgeType,
 		EdgeStrength:        chosen.strength,
-		EdgeConfidence:      chosen.confidence,
+		EdgeConfidence:      applyNarrativeMultiplier(chosen.confidence, in.NarrativeKnown, in.NarrativeScore),
 		MomentumScore:       momentumScore,
 		ThresholdApplied:    chosen.threshold,
 		OpportunityWindowMs: opportunityWindowMs,
@@ -363,6 +363,17 @@ func clamp01(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+// applyNarrativeMultiplier scales EdgeConfidence by ±10% based on the
+// AI narrative score (0–10, midpoint 5). Only applied when NarrativeKnown=true.
+// Δ = (score - 5) × 0.02 → range [-0.10, +0.10].
+func applyNarrativeMultiplier(confidence float64, known bool, score float64) float64 {
+	if !known {
+		return confidence
+	}
+	delta := (score - 5.0) * 0.02
+	return clamp01(confidence * (1.0 + delta))
 }
 
 // minFloat is retained for backward compatibility with callers and tests

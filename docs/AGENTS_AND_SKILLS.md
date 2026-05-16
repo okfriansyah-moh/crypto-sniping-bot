@@ -153,6 +153,24 @@ phase-builder → dto-guardian → integration → security-auditor → test-bui
 | traceability               | `.github/skills/traceability/SKILL.md`               | All   | TraceID/CorrelationID/CausationID/VersionID contract       |
 | profit-first               | `.github/skills/profit-first/SKILL.md`               | All   | Profit factor design framework, feature evaluation gate    |
 
+### AI Enrichment Skills (cross-layer via `internal/ai/CopilotClient`)
+
+AI Enrichment is an optional cross-cutting layer that uses the GitHub Copilot API to add narrative intelligence. All calls are **1-shot, fail-open, and autonomous** — the pipeline is never blocked. Model is configurable via `AI_ENRICH_MODEL` env var (default: `gpt-5.4-mini`), following the same pattern as `MODEL_HEAVY` in `scripts/run_parallel.sh`.
+
+| Skill                | Path                                            | Layer | Purpose                                                                    |
+| -------------------- | ----------------------------------------------- | ----- | -------------------------------------------------------------------------- |
+| `ai-narrative-probe` | `internal/modules/probes/ai_narrative_probe.go` | 0/1   | Narrative scoring 0–10; copy-paste/impersonation detection via Copilot API |
+| `loss-explainer`     | `internal/modules/learning/loss_explainer.go`   | 10    | AI loss category + natural-language reason appended to `LearningRecordDTO` |
+
+**Cross-layer effects:**
+
+| Layer | Component                  | Effect                                                                                                         |
+| ----- | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| L0/1  | `AINarrativeProbe`         | Populates `NarrativeScore`, `IsCopyPasteDesc`, `IsImpersonation` on `MarketDataDTO`                            |
+| L1 DQ | Copy-paste soft bump       | +0.30 `AggregateRiskScore` for `IsCopyPasteDesc`; +0.20 for `IsImpersonation` (never overrides 3 hard-rejects) |
+| L3    | `applyNarrativeMultiplier` | ±10% adjustment to `EdgeConfidence` from `NarrativeScore`                                                      |
+| L10   | `LossExplainer`            | Sets `AIExplanationKnown`, `AILossCategory`, `AIExplanation` on `LearningRecordDTO`                            |
+
 ### Skill Structure
 
 Each skill is a folder at `.github/skills/<kebab-case-name>/SKILL.md` with standardized format:

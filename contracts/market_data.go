@@ -164,4 +164,35 @@ type MarketDataDTO struct {
 	CreatorPrevTokenCount      int32  `json:"creator_prev_token_count,omitempty"`
 	SocialLinksKnown           bool   `json:"social_links_known,omitempty"`
 	HasSocialLinks             bool   `json:"has_social_links,omitempty"`
+
+	// ─────────────────────────────────────────────────────────────────────
+	// AI Narrative Enrichment — populated by the ai_narrative probe (Layer 0.5).
+	//
+	// MetadataDescription is the raw description text from the off-chain
+	// metadata JSON (pump.fun / Metaplex "description" field). Populated by
+	// solana_metadata probe alongside social-link extraction. Empty when the
+	// metadata URI is absent or the field is not present in the JSON.
+	//
+	// NarrativeKnown=false means the ai_narrative probe has not run or
+	// encountered an error (fail-open). Downstream consumers treat this the
+	// same as other *Known=false fields: degrade per operational-mode profile.
+	//
+	// NarrativeScore: 0–10, higher = stronger alignment with trending narratives.
+	// ScamProbabilityScore: 0–10, higher = more scam signals detected by LLM.
+	// IsCopyPasteDesc: true when the description is copy-paste boilerplate
+	//   reused across multiple rug tokens — used by the DQ copy-paste detector.
+	// IsImpersonation: true when name/symbol pattern indicates impersonation
+	//   of a known project (e.g. "ELONMUSK2", "TRUMP2026").
+	// NarrativeType: canonical narrative tag produced by the AI
+	//   (ai|defi|gaming|meme|generic|scam|other).
+	// NarrativeReason: human-readable one-liner, max 50 chars.
+	// ─────────────────────────────────────────────────────────────────────
+	MetadataDescription  string  `json:"metadata_description,omitempty"`
+	NarrativeKnown       bool    `json:"narrative_known,omitempty"`
+	NarrativeScore       float64 `json:"narrative_score,omitempty"`
+	ScamProbabilityScore float64 `json:"scam_probability_score,omitempty"`
+	IsCopyPasteDesc      bool    `json:"is_copy_paste_desc,omitempty"`
+	IsImpersonation      bool    `json:"is_impersonation,omitempty"`
+	NarrativeType        string  `json:"narrative_type,omitempty"`
+	NarrativeReason      string  `json:"narrative_reason,omitempty"`
 }

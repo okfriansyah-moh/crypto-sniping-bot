@@ -353,6 +353,18 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		// double-add to riskScore.
 	}
 
+	// AI narrative soft signals — additive contributions, never override
+	// mandatory hard-rejects (serial_launcher / no_social / high_supply).
+	// Only applied when NarrativeKnown=true (probe completed successfully).
+	if in.NarrativeKnown {
+		if in.IsCopyPasteDesc {
+			riskScore += 0.30 // boilerplate description reused across rug tokens
+		}
+		if in.IsImpersonation {
+			riskScore += 0.20 // name/symbol mimics known project
+		}
+	}
+
 	if riskScore < 0 {
 		riskScore = 0
 	}

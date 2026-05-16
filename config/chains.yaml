@@ -86,29 +86,29 @@ solana:
   preferred_region: "us-east"
   providers_required: 1
   rpc:
+    # Helius is the primary provider — Enhanced WS supports unlimited concurrent
+    # logsSubscribe connections (all 6 programs), 50 RPS, Staked Connections for
+    # faster tx landing. Set SOLANA_RPC_HTTP_1 and SOLANA_WS_1 to your Helius
+    # endpoint: https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+    #            wss://mainnet.helius-rpc.com/?api-key=YOUR_KEY
     - url: "${SOLANA_RPC_HTTP_1}"
       priority: 1
       kind: http
       region: us-east
-      provider: quicknode # primary: QuickNode
-    # QuickNode WS disabled — free tier limits logsSubscribe to 1 concurrent
-    # connection; 3 programs require 3 slots which exceeds the plan quota (-32003).
-    # Re-enable once upgraded to a plan with ≥3 logsSubscribe slots.
-    #- url: "${SOLANA_WS_1}"
-    #  priority: 1
-    #  kind: ws
-    #  region: us-east
-    #  provider: quicknode
+      provider: helius # primary: Helius
+    - url: "${SOLANA_WS_1}"
+      priority: 1
+      kind: ws
+      region: us-east
+      provider: helius # primary WS: Helius Enhanced WebSocket
+    # QuickNode retained as HTTP fallback (free tier or paid).
+    # Set SOLANA_RPC_HTTP_2 to your QuickNode HTTP endpoint.
+    # QuickNode WS is NOT used — free tier blocks concurrent logsSubscribe.
     - url: "${SOLANA_RPC_HTTP_2}"
       priority: 2
       kind: http
       region: us-east
-      provider: helius # fallback: Helius
-    - url: "${SOLANA_WS_2}"
-      priority: 2
-      kind: ws
-      region: us-east
-      provider: helius
+      provider: quicknode # fallback HTTP only
     # P5: ZeroSlot — ultra-low-latency RPC for transaction submission.
     # Disabled by default (empty URL); set SOLANA_ZEROSLOT_HTTP to enable.
     # ZeroSlot routes via private mempool, reducing front-run exposure.
@@ -125,24 +125,28 @@ solana:
     # P4: PumpFun AMM (graduation events — token migrates from bonding curve to AMM)
     - program_id: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
       family: pumpfun-amm
-    # P4: Raydium CLMM / Orca Whirlpool / Meteora DLMM disabled — these are
-    # established AMMs where new pool creation is rare and does not fit the
-    # new-launch edge profile.  Disabled to stay within QuickNode's concurrent
-    # logsSubscribe limit (3 active programs → 3 WS slots needed vs 6).
-    # Re-enable once a higher-tier RPC plan is in place.
-    #- program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
-    #  family: raydium-clmm
-    #- program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
-    #  family: orca-whirlpool
-    #- program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
-    #  family: meteora-dlmm
+    # Raydium CLMM / Orca Whirlpool / Meteora DLMM — enabled for Helius plan.
+    # Helius Developer (Enhanced WS) supports unlimited concurrent logsSubscribe
+    # connections — no 3-slot cap. These AMMs generate rare new-pool events that
+    # cover PumpFun graduation (raydium-clmm) and high-quality Orca/Meteora
+    # launches. Credit cost is minimal: ≤300 getTransaction calls/day × 100
+    # credits = 900k credits/month worst-case (well within 10M budget).
+    - program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+      family: raydium-clmm
+    - program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+      family: orca-whirlpool
+    - program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
+      family: meteora-dlmm
   # getTransaction HTTP rate cap — must be ≤ RPC provider account limit.
-  # QuickNode free tier = 15 req/s; lowered to 2 to stay within daily quota.
-  # At 2 req/s the daily usage is ~172k calls — well under free-tier daily caps.
-  get_transaction_rps: 2
-  # rate_limit_backoff_ms: how long to suppress getTransaction calls after a
-  # -32003 daily-quota error. Default 60s; increase if quota resets take longer.
-  rate_limit_backoff_ms: 60000
+  # Helius Developer plan: 50 RPS sustained. Set to 10 to stay well within
+  # the 10M credit monthly budget (non-PumpFun getTransaction = 100 credits
+  # each; PumpFun skips getTransaction entirely via pumpfun_decode_from_logs).
+  # Raise to 20 if events queue and latency degrades; credit impact is linear.
+  get_transaction_rps: 10
+  # rate_limit_backoff_ms: backoff after a 429/rate-limit response from the RPC
+  # provider. Helius uses per-second RPS limits (not daily quotas), so a short
+  # backoff is sufficient — 429s are transient bursts, not 24h lockouts.
+  rate_limit_backoff_ms: 5000
   # processing_workers: bounded goroutine pool for non-pumpfun families
   # (raydium-v4) so that slow getTransaction calls do not block the WS read
   # loop and create a notification backlog. Pump.fun runs entirely from log
@@ -170,13 +174,19 @@ solana:
   # Set pyth_sol_usd_account to "" to disable and force the static estimate.
   # Mainnet SOL/USD = H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG.
   pyth_sol_usd_account: "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
-  pyth_cache_ttl_seconds: 5
+  # pyth_cache_ttl_seconds: Pyth SOL/USD price is fetched via getAccountInfo
+  # (1 Helius credit). At 5s TTL that is 518k credits/month. Raising to 30s
+  # reduces this to 86k credits/month (saves 432k credits) with negligible
+  # impact on position accuracy — SOL price moves <0.1% per 30s in normal
+  # conditions and our positions use 5-min max_hold_seconds.
+  pyth_cache_ttl_seconds: 30
   pyth_stale_after_seconds: 60
   # ws_subscribe_stagger_ms: delay between each program's first logsSubscribe
-  # attempt at startup.  Spreads the connection burst across time so all 3
-  # programs don't hammer the sole WS endpoint simultaneously.
-  # With 3 programs and 3000ms stagger: program 0 at t=0, 1 at t=3s, 2 at t=6s.
-  ws_subscribe_stagger_ms: 10000
+  # attempt at startup.  Spreads the connection burst across time so all 6
+  # programs don't hammer the WS endpoint simultaneously.
+  # With 6 programs and 3000ms stagger: program 0 at t=0, ..., 5 at t=15s.
+  # Lowered from 10000ms (3-program era) — Helius Enhanced WS handles bursts.
+  ws_subscribe_stagger_ms: 3000
   ingestion_backoff:
     initial_ms: 200
     max_ms: 30000

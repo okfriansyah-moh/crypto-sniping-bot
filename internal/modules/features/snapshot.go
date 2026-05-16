@@ -51,6 +51,11 @@ type MarketSnapshot struct {
 
 	// Solana-specific (additive)
 	BondingCurveProgressBps int32
+
+	// AI Narrative enrichment (additive) — threaded from MarketDataDTO.
+	// NarrativeKnown=false when the ai_narrative probe has not run.
+	NarrativeScore float64
+	NarrativeKnown bool
 }
 
 // MarketSnapshotFromDTO extracts the relevant fields from a MarketDataDTO.
@@ -84,6 +89,8 @@ func MarketSnapshotFromDTO(md *contracts.MarketDataDTO) MarketSnapshot {
 		ReserveBaseRaw:          md.ReserveBaseRaw,
 		ReserveTokenRaw:         md.ReserveTokenRaw,
 		BondingCurveProgressBps: md.BondingCurveProgressBps,
+		NarrativeScore:          md.NarrativeScore,
+		NarrativeKnown:          md.NarrativeKnown,
 	}
 }
 
