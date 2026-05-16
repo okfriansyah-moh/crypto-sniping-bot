@@ -203,7 +203,7 @@ func (m *Module) ProcessWithContext(
 
 	finalConfidence := applyNarrativeMultiplier(chosen.confidence, in.NarrativeKnown, in.NarrativeScore)
 	if in.NarrativeKnown {
-		m.logger.Debug("edge_narrative_multiplier",
+		m.logger.Info("edge_narrative_multiplier",
 			"token", in.TokenAddress,
 			"base_confidence", chosen.confidence,
 			"final_confidence", finalConfidence,

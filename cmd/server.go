@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"crypto-sniping-bot/database/engines/postgres"
+	"crypto-sniping-bot/internal/ai"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/app/logging"
 	"crypto-sniping-bot/internal/app/web"
@@ -533,6 +534,36 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 			// SOLANA_RPC_HTTP_2 env var — never hardcoded in config files.
 			HeliusRPCURL: findHeliusHTTPURL(cfg.Solana.RPCEndpoints),
 		}, logger))
+	}
+
+	// AI narrative probe — registered last so it sees the fully-enriched DTO
+	// (social links, creator reputation) produced by all prior probes.
+	// Requires GITHUB_COPILOT_TOKEN env var. Skipped (with a warning) when
+	// the token is absent or the API client fails to initialise.
+	if cfg.AIEnrichment.Enabled && cfg.AIEnrichment.NarrativeProbe.Enabled {
+		aiCfg := ai.Config{
+			Enabled:          true,
+			Endpoint:         cfg.AIEnrichment.Endpoint,
+			Model:            cfg.AIEnrichment.Model,
+			TimeoutMs:        cfg.AIEnrichment.TimeoutMs,
+			MaxRetries:       cfg.AIEnrichment.MaxRetries,
+			MaxResponseBytes: cfg.AIEnrichment.MaxResponseBytes,
+			RateLimitPerMin:  cfg.AIEnrichment.RateLimitPerMin,
+			MaxPromptChars:   cfg.AIEnrichment.MaxPromptChars,
+		}
+		aiClient, aiErr := ai.NewCopilotClient(aiCfg, logger)
+		if aiErr != nil {
+			logger.Warn("ai_narrative_probe_skip", "reason", aiErr.Error())
+		} else {
+			aiClient.StartRateLimiter()
+			narrativeCfg := probes.AINarrativeConfig{
+				Enabled:             true,
+				MaxDescriptionChars: cfg.AIEnrichment.NarrativeProbe.MaxDescriptionChars,
+				TrendingNarratives:  cfg.AIEnrichment.TrendingNarratives,
+			}
+			out = append(out, probes.NewAINarrativeProbe(aiClient, narrativeCfg, logger))
+			logger.Info("ai_narrative_probe_registered", "model", aiCfg.Model, "rate_limit_per_min", aiCfg.RateLimitPerMin)
+		}
 	}
 
 	return out

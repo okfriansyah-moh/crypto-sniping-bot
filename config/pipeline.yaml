@@ -476,7 +476,7 @@ rescan:
 # All calls async, fail-open: NarrativeKnown=false on any error.
 # ---------------------------------------------------------------------------
 ai_enrichment:
-  enabled: false
+  enabled: true
   endpoint: "https://api.githubcopilot.com/chat/completions"
   # Model override priority: AI_ENRICH_MODEL env var > this field > code default (gpt-5.4-mini)
   model: "gpt-5.4-mini"
@@ -493,7 +493,7 @@ ai_enrichment:
     - "BTCfi"
     - "memecoins"
   narrative_probe:
-    enabled: false
+    enabled: true
     max_description_chars: 300
     min_narrative_score: 3.0
     copy_paste_rug_reject: false

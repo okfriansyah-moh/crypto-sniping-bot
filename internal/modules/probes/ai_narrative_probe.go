@@ -118,7 +118,7 @@ func (p *AINarrativeProbe) Probe(ctx context.Context, in contracts.MarketDataDTO
 		return in, nil
 	}
 
-	p.logger.Debug("ai_narrative_probe",
+	p.logger.Info("ai_narrative_probe",
 		"token", in.TokenAddress,
 		"name", in.Name,
 		"symbol", in.Symbol,

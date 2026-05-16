@@ -61,8 +61,45 @@ type Config struct {
 	// internal/app/config/rescan_config.go for struct definitions.
 	Rescan RescanConfig `yaml:"rescan"`
 
+	// AI enrichment — GitHub Copilot API client + per-probe sub-configs.
+	// Maps to ai_enrichment: block in config/pipeline.yaml.
+	// Auth token read exclusively from GITHUB_COPILOT_TOKEN env var.
+	AIEnrichment AIEnrichmentConfig `yaml:"ai_enrichment"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
+}
+
+// AIEnrichmentConfig holds the GitHub Copilot AI enrichment configuration.
+// Maps to the ai_enrichment: block in config/pipeline.yaml.
+// The auth token is NOT a field — read exclusively from GITHUB_COPILOT_TOKEN env var.
+type AIEnrichmentConfig struct {
+	Enabled          bool     `yaml:"enabled"`
+	Endpoint         string   `yaml:"endpoint"`
+	Model            string   `yaml:"model"`
+	TimeoutMs        int      `yaml:"timeout_ms"`
+	MaxRetries       int      `yaml:"max_retries"`
+	MaxResponseBytes int64    `yaml:"max_response_bytes"`
+	RateLimitPerMin  int      `yaml:"rate_limit_per_min"`
+	MaxPromptChars   int      `yaml:"max_prompt_chars"`
+	TrendingNarratives []string `yaml:"trending_narratives"`
+
+	NarrativeProbe NarrativeProbeAIConfig `yaml:"narrative_probe"`
+	LossExplainer  LossExplainerAIConfig  `yaml:"loss_explainer"`
+}
+
+// NarrativeProbeAIConfig configures the AI narrative enrichment probe.
+type NarrativeProbeAIConfig struct {
+	Enabled             bool    `yaml:"enabled"`
+	MaxDescriptionChars int     `yaml:"max_description_chars"`
+	MinNarrativeScore   float64 `yaml:"min_narrative_score"`
+	CopyPasteRugReject  bool    `yaml:"copy_paste_rug_reject"`
+}
+
+// LossExplainerAIConfig configures the AI loss-explanation enrichment.
+type LossExplainerAIConfig struct {
+	Enabled            bool `yaml:"enabled"`
+	MinRecordsPerBatch int  `yaml:"min_records_per_batch"`
 }
 
 // PipelineConfig holds top-level pipeline metadata.

@@ -112,7 +112,7 @@ func (e *LossExplainer) Explain(ctx context.Context, record contracts.LearningRe
 	out.AIExplanationKnown = true
 	out.AILossCategory = parsed.Cat
 	out.AIExplanation = parsed.Why
-	e.logger.Debug("loss_explainer_enriched",
+	e.logger.Info("loss_explainer_enriched",
 		"record_id", record.RecordID,
 		"outcome", record.Outcome,
 		"category", parsed.Cat,

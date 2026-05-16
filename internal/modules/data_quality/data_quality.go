@@ -367,7 +367,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 			narrativeBump += 0.20
 		}
 		if narrativeBump > 0 {
-			m.logger.Debug("ai_narrative_dq_bump",
+			m.logger.Info("ai_narrative_dq_bump",
 				"token", in.TokenAddress,
 				"copy_paste", in.IsCopyPasteDesc,
 				"impersonation", in.IsImpersonation,
