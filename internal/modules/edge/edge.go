@@ -27,6 +27,7 @@ package edge
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"crypto-sniping-bot/contracts"
@@ -35,7 +36,8 @@ import (
 
 // Module is the edge discovery engine.
 type Module struct {
-	cfg *config.EdgeConfig
+	cfg    *config.EdgeConfig
+	logger *slog.Logger
 }
 
 // New returns a new edge Module. A nil cfg is replaced with a safe
@@ -44,7 +46,7 @@ func New(cfg *config.EdgeConfig) *Module {
 	if cfg == nil {
 		cfg = &config.EdgeConfig{}
 	}
-	return &Module{cfg: applyDefaults(cfg)}
+	return &Module{cfg: applyDefaults(cfg), logger: slog.Default()}
 }
 
 // applyDefaults returns a copy of cfg with zero-valued fields filled in.
@@ -199,6 +201,18 @@ func (m *Module) ProcessWithContext(
 		fmt.Sprintf("edge:%s:%s:%s", in.EventID, chosen.edgeType, m.cfg.ModelVersion),
 	)
 
+	finalConfidence := applyNarrativeMultiplier(chosen.confidence, in.NarrativeKnown, in.NarrativeScore)
+	if in.NarrativeKnown {
+		m.logger.Debug("edge_narrative_multiplier",
+			"token", in.TokenAddress,
+			"base_confidence", chosen.confidence,
+			"final_confidence", finalConfidence,
+			"narrative_score", in.NarrativeScore,
+			"delta_pct", (finalConfidence-chosen.confidence)*100,
+			"edge_type", chosen.edgeType,
+		)
+	}
+
 	return contracts.EdgeDTO{
 		EventID:       eventID,
 		TraceID:       in.TraceID,
@@ -211,7 +225,7 @@ func (m *Module) ProcessWithContext(
 
 		EdgeType:            chosen.edgeType,
 		EdgeStrength:        chosen.strength,
-		EdgeConfidence:      applyNarrativeMultiplier(chosen.confidence, in.NarrativeKnown, in.NarrativeScore),
+		EdgeConfidence:      finalConfidence,
 		MomentumScore:       momentumScore,
 		ThresholdApplied:    chosen.threshold,
 		OpportunityWindowMs: opportunityWindowMs,

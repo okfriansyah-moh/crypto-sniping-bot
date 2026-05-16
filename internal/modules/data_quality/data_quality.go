@@ -357,11 +357,24 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	// mandatory hard-rejects (serial_launcher / no_social / high_supply).
 	// Only applied when NarrativeKnown=true (probe completed successfully).
 	if in.NarrativeKnown {
+		var narrativeBump float64
 		if in.IsCopyPasteDesc {
 			riskScore += 0.30 // boilerplate description reused across rug tokens
+			narrativeBump += 0.30
 		}
 		if in.IsImpersonation {
 			riskScore += 0.20 // name/symbol mimics known project
+			narrativeBump += 0.20
+		}
+		if narrativeBump > 0 {
+			m.logger.Debug("ai_narrative_dq_bump",
+				"token", in.TokenAddress,
+				"copy_paste", in.IsCopyPasteDesc,
+				"impersonation", in.IsImpersonation,
+				"narrative_risk_bump", narrativeBump,
+				"narrative_score", in.NarrativeScore,
+				"narrative_type", in.NarrativeType,
+			)
 		}
 	}
 

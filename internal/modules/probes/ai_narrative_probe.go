@@ -120,11 +120,14 @@ func (p *AINarrativeProbe) Probe(ctx context.Context, in contracts.MarketDataDTO
 
 	p.logger.Debug("ai_narrative_probe",
 		"token", in.TokenAddress,
+		"name", in.Name,
+		"symbol", in.Symbol,
 		"narrative_score", out.NarrativeScore,
 		"scam_score", out.ScamProbabilityScore,
 		"type", out.NarrativeType,
 		"copy_paste", out.IsCopyPasteDesc,
 		"impersonation", out.IsImpersonation,
+		"reason", out.NarrativeReason,
 	)
 	return out, nil
 }

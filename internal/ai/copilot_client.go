@@ -150,6 +150,16 @@ func NewCopilotClient(cfg Config, logger *slog.Logger) (*CopilotClient, error) {
 	for i := 0; i < cfg.RateLimitPerMin; i++ {
 		c.bucket <- struct{}{}
 	}
+
+	logger.Info("ai_copilot_client_initialized",
+		"enabled", cfg.Enabled,
+		"model", cfg.Model,
+		"endpoint", cfg.Endpoint,
+		"rate_limit_per_min", cfg.RateLimitPerMin,
+		"timeout_ms", cfg.TimeoutMs,
+		"max_retries", cfg.MaxRetries,
+		"max_response_bytes", cfg.MaxResponseBytes,
+	)
 	return c, nil
 }
 
@@ -210,6 +220,10 @@ func (c *CopilotClient) Complete(ctx context.Context, req *CompletionRequest) (*
 	case <-c.bucket:
 		// token acquired — proceed
 	default:
+		c.logger.Warn("ai_copilot_rate_limited",
+			"model", c.cfg.Model,
+			"rate_limit_per_min", c.cfg.RateLimitPerMin,
+		)
 		return nil, ErrRateLimit
 	}
 
