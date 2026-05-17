@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"crypto-sniping-bot/contracts"
@@ -74,14 +75,28 @@ type SolanaAuthoritiesConfig struct {
 	Commitment string `yaml:"commitment"`
 }
 
+// authorityResult is the cached authority data for a single SPL token.
+type authorityResult struct {
+	mintRenounced   bool
+	freezeRenounced bool
+}
+
 // SolanaAuthoritiesProbe populates MintAuthorityRenounced,
 // FreezeAuthorityRenounced and SolanaAuthoritiesKnown from the SPL mint
 // account on chain. Skips EVM tokens (Chain != "solana") and tokens with
 // no MintAddress.
+//
+// Results are cached in memory indefinitely: SPL mint/freeze authority is
+// immutable once renounced, so a single RPC call per token address is enough.
+// The cache avoids redundant getAccountInfo calls for rescan events and any
+// other repeated probes of the same token within the process lifetime.
 type SolanaAuthoritiesProbe struct {
 	rpc    SolanaProbeRPCClient
 	cfg    SolanaAuthoritiesConfig
 	logger *slog.Logger
+	// cache maps tokenAddress (string) → authorityResult.
+	// Written once on first successful probe; never evicted (immutable data).
+	cache sync.Map
 }
 
 func NewSolanaAuthoritiesProbe(rpc SolanaProbeRPCClient, cfg SolanaAuthoritiesConfig, logger *slog.Logger) *SolanaAuthoritiesProbe {
@@ -100,6 +115,9 @@ func (p *SolanaAuthoritiesProbe) Name() string { return "solana_authorities" }
 // on a copy of the input DTO. Non-Solana inputs pass through unchanged.
 // On RPC failure or decode error the input is returned with the error;
 // the *Known flag stays false so DQ degrades gracefully.
+//
+// Cache hit: if this token was probed before in the current process lifetime,
+// returns the cached result immediately without any Helius RPC call.
 func (p *SolanaAuthoritiesProbe) Probe(ctx context.Context, in contracts.MarketDataDTO) (contracts.MarketDataDTO, error) {
 	if !strings.EqualFold(in.Chain, "solana") {
 		return in, nil
@@ -108,6 +126,17 @@ func (p *SolanaAuthoritiesProbe) Probe(ctx context.Context, in contracts.MarketD
 	if mint == "" {
 		return in, errors.New("probes/solana_authorities: empty token address")
 	}
+
+	// Fast path: return cached result without RPC call.
+	if cached, ok := p.cache.Load(mint); ok {
+		r := cached.(authorityResult)
+		out := in
+		out.MintAuthorityRenounced = r.mintRenounced
+		out.FreezeAuthorityRenounced = r.freezeRenounced
+		out.SolanaAuthoritiesKnown = true
+		return out, nil
+	}
+
 	if p.rpc == nil {
 		return in, errors.New("probes/solana_authorities: nil rpc client")
 	}
@@ -145,5 +174,11 @@ func (p *SolanaAuthoritiesProbe) Probe(ctx context.Context, in contracts.MarketD
 	out.MintAuthorityRenounced = state.MintAuthorityRenounced
 	out.FreezeAuthorityRenounced = state.FreezeAuthorityRenounced
 	out.SolanaAuthoritiesKnown = true
+	// Store in cache so future probes of the same token skip the RPC call.
+	// Mint/freeze authority is immutable — safe to cache indefinitely.
+	p.cache.Store(mint, authorityResult{
+		mintRenounced:   state.MintAuthorityRenounced,
+		freezeRenounced: state.FreezeAuthorityRenounced,
+	})
 	return out, nil
 }

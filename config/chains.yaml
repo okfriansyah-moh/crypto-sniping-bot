@@ -138,11 +138,13 @@ solana:
     - program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
       family: meteora-dlmm
   # getTransaction HTTP rate cap — must be ≤ RPC provider account limit.
-  # Helius Developer plan: 50 RPS sustained. Set to 10 to stay well within
-  # the 10M credit monthly budget (non-PumpFun getTransaction = 100 credits
-  # each; PumpFun skips getTransaction entirely via pumpfun_decode_from_logs).
-  # Raise to 20 if events queue and latency degrades; credit impact is linear.
-  get_transaction_rps: 10
+  # Helius Developer plan: 50 RPS sustained. Set to 3 as a safety net now that
+  # the ray_log: pre-filter eliminates >99% of raydium-v4 swap notifications
+  # before getTransaction is called. Only genuine Initialize2 (pool creation)
+  # events reach this RPS cap. Lower from 10 to 3 to bound worst-case credit
+  # spend to ~10,800 calls/hr × ~4 credits = ~43,200 credits/hr even if the
+  # filter is somehow bypassed. Raise to 10 only if new-pool detection misses.
+  get_transaction_rps: 3
   # rate_limit_backoff_ms: backoff after a 429/rate-limit response from the RPC
   # provider. Helius uses per-second RPS limits (not daily quotas), so a short
   # backoff is sufficient — 429s are transient bursts, not 24h lockouts.

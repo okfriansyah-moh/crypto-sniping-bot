@@ -400,22 +400,28 @@ func TestShouldFetchTransaction_PumpFun(t *testing.T) {
 }
 
 func TestShouldFetchTransaction_Raydium(t *testing.T) {
-	// Raydium V4 is not Anchor — always return true regardless of logs.
+	// Raydium V4 uses the ray_log: pre-filter:
+	//   - logs containing "ray_log:" → swap/deposit/withdraw → skip getTransaction
+	//   - no "ray_log:" → possible Initialize2 → fetch (fail-open)
 	prog := config.SolanaProgramConfig{ProgramID: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", Family: "raydium-v4"}
 
 	cases := []struct {
-		name string
-		logs []string
+		name      string
+		logs      []string
+		wantFetch bool
 	}{
-		{"no logs", nil},
-		{"swap logs", []string{"Program log: some swap log"}},
-		{"init logs", []string{"Program log: initialize"}},
+		{"no logs (Initialize2 candidate)", nil, true},
+		{"unrelated logs only (Initialize2 candidate)", []string{"Program log: some other log"}, true},
+		{"ray_log present (swap)", []string{"Program log: ray_log: ABC123=="}, false},
+		{"ray_log among others (swap)", []string{"Program log: init stuff", "Program log: ray_log: XYZ=="}, false},
+		{"ray_log: prefix exact (swap)", []string{"Program log: ray_log:"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			notif := ingestion_solana.LogsNotification{Logs: tc.logs}
-			if !ingestion_solana.ShouldFetchTransaction(notif, prog) {
-				t.Error("raydium-v4 should always return true from ShouldFetchTransaction")
+			got := ingestion_solana.ShouldFetchTransaction(notif, prog)
+			if got != tc.wantFetch {
+				t.Errorf("ShouldFetchTransaction = %v, want %v", got, tc.wantFetch)
 			}
 		})
 	}

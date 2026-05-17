@@ -274,7 +274,55 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		}
 	}
 
+	// ── Rescan-aware probe skip ───────────────────────────────────────────
+	// Rescan events (transport: "rescan_*") re-emit tokens that have already
+	// been fully probed at ingest time. Several probe results are immutable or
+	// change so slowly that re-probing wastes Helius credits:
+	//
+	//   solana_authorities: Mint/freeze authority is immutable once set.
+	//     After the first probe the Known flag is true and the result never
+	//     changes. Skipping saves 1 getAccountInfo per rescan event.
+	//
+	//   solana_holder_dist: Phase 1 bands (15m–8h) skip this probe — holder
+	//     distribution changes slowly in the first 8h and getTokenLargestAccounts
+	//     is the most expensive Helius call per request. Phase 2 bands (12h–48h)
+	//     re-fetch to catch post-launch whale accumulation that materially changes
+	//     the DQ risk profile over longer timeframes.
+	//
+	//   solana_pumpfun_lp: Bonding curve reserves change with every trade —
+	//     keep this probe running so the pipeline sees updated liquidity.
+	//
+	// All other probes (metadata, creator_reputation) are HTTP-only (no Helius
+	// credits) so they are not skipped for rescan events.
+	isRescan := strings.HasPrefix(enriched.Transport, "rescan_")
+	// Phase 2 late-rescan bands re-fetch holder distribution for fresh DQ data.
+	isLateRescan := isRescan && (enriched.Transport == "rescan_12h" ||
+		enriched.Transport == "rescan_24h" ||
+		enriched.Transport == "rescan_36h" ||
+		enriched.Transport == "rescan_48h")
+	rescanSkipProbes := map[string]bool{}
+	if isRescan {
+		// Only skip authority probe when the result is already known (immutable).
+		if enriched.SolanaAuthoritiesKnown {
+			rescanSkipProbes["solana_authorities"] = true
+		}
+		// Skip holder distribution for Phase 1 bands (15m–8h) only.
+		// Phase 2 bands (12h–48h) re-fetch for fresh whale accumulation data.
+		if !isLateRescan {
+			rescanSkipProbes["solana_holder_dist"] = true
+		}
+	}
+
 	for _, p := range w.probes {
+		if rescanSkipProbes[p.Name()] {
+			w.logger.Debug("market_probe_rescan_skip",
+				"probe", p.Name(),
+				"transport", enriched.Transport,
+				"token", enriched.TokenAddress,
+				"event_id", evt.EventID,
+			)
+			continue
+		}
 		start := time.Now()
 		out, err := p.Probe(ctx, enriched)
 		dur := time.Since(start).Milliseconds()

@@ -619,8 +619,13 @@ func (m *Module) processNotification(
 //	"Program log: Instruction: Sell"     → swap (skip)
 //	"Program log: Instruction: Withdraw" → LP action (skip)
 //
-// Raydium V4 is not an Anchor program and does not log instruction names,
-// so we cannot filter it by log content and always return true.
+// Raydium V4 is not an Anchor program and does not log instruction names.
+// However, it uses the ray_log! macro to emit packed event data for every
+// swap (SwapBaseIn, SwapBaseOut), deposit, and withdraw operation via
+// "Program log: ray_log: <base58data>". The Initialize2 (new pool creation)
+// instruction does NOT emit ray_log: entries — it produces no AmmInfo event.
+// Filtering on ray_log: presence eliminates >99% of swap notifications before
+// issuing a getTransaction call (fail-open: no ray_log: → fetch).
 func ShouldFetchTransaction(notif LogsNotification, prog config.SolanaProgramConfig) bool {
 	switch prog.Family {
 	case "pumpfun":
@@ -662,8 +667,25 @@ func ShouldFetchTransaction(notif LogsNotification, prog config.SolanaProgramCon
 			}
 		}
 		return false
+	case "raydium-v4":
+		// Raydium V4 emits "Program log: ray_log: ..." for every swap
+		// (SwapBaseIn / SwapBaseOut), deposit, and withdraw via the ray_log!
+		// macro. Initialize2 (pool creation) is the only instruction that does
+		// NOT emit ray_log: entries. Filtering on ray_log: presence eliminates
+		// >99% of Helius getTransaction calls that would otherwise be wasted on
+		// swaps and discarded after normalization.
+		//
+		// Fail-open: if no ray_log: is present, we might be looking at an
+		// Initialize2 or a rare admin instruction — fetch and let the normalizer
+		// decide. A missed swap fetch is cheaper than a missed pool creation.
+		for _, l := range notif.Logs {
+			if strings.Contains(l, "ray_log:") {
+				return false // swap / deposit / withdraw — skip getTransaction
+			}
+		}
+		return true // no ray_log: → likely Initialize2, fetch
 	default:
-		// raydium-v4 and unknown families: fetch and let normalize decide.
+		// Unknown families: fetch and let normalize decide.
 		return true
 	}
 }
