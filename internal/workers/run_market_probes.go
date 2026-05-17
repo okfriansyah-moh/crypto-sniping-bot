@@ -32,6 +32,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"crypto-sniping-bot/contracts"
@@ -49,9 +52,19 @@ const MarketDataEnrichedEventType = "market_data_enriched"
 // every inbound market_data_event and emits a market_data_enriched
 // event. With zero probes registered it acts as pass-through.
 type MarketProbesWorker struct {
-	adapter database.Adapter
-	probes  []probes.MarketProbe
-	logger  *slog.Logger
+	adapter     database.Adapter
+	probes      []probes.MarketProbe
+	logger      *slog.Logger
+	knownTokens map[string]struct{} // copycat detection list (lowercase + trimmed)
+	seenNames   sync.Map            // in-process cache: "chain:normalizedName" → struct{}
+
+	// Probe rate limiter — caps Helius RPC HTTP calls per rolling hour.
+	// Tokens over the cap are emitted with Known=false flags; DQ's
+	// fail-closed rules (reject_unknown_social_links etc.) handle them.
+	maxProbesPerHour int        // 0 = unlimited
+	probedThisHour   int64      // atomic counter; reset each hour window
+	hourMu           sync.Mutex // guards hourWindowStart reset
+	hourWindowStart  time.Time  // start of the current one-hour window
 }
 
 // NewMarketProbesWorker constructs a worker. Pass nil/empty `probeList`
@@ -69,6 +82,44 @@ func NewMarketProbesWorker(adapter database.Adapter, probeList []probes.MarketPr
 	}
 }
 
+// WithNameDedup configures the pre-probe name-deduplication and copycat guard.
+// knownTokens is a list of famous/established token names (any case); entries
+// are normalized (lowercased, trimmed) at load time. A new token whose
+// normalized name matches any entry is flagged IsCopycat=true and all RPC
+// probes are skipped, saving Helius credits.
+//
+// Call this after NewMarketProbesWorker and before registering the worker.
+// When not called, both the copycat list and the DB duplicate-name check are
+// still active via the session cache — only the known-token list is absent.
+func (w *MarketProbesWorker) WithNameDedup(knownTokens []string) *MarketProbesWorker {
+	w.knownTokens = make(map[string]struct{}, len(knownTokens))
+	for _, n := range knownTokens {
+		normalized := strings.ToLower(strings.TrimSpace(n))
+		if normalized != "" {
+			w.knownTokens[normalized] = struct{}{}
+		}
+	}
+	return w
+}
+
+// WithProbeRateLimit sets a hard ceiling on the number of tokens that trigger
+// Helius RPC probe calls per rolling one-hour window. When maxPerHour is
+// reached within an hour, additional tokens bypass all probes and are emitted
+// with Known=false flags. The DQ layer's fail-closed rules then reject them
+// without consuming any further Helius credits.
+//
+// Credit math at maxPerHour=350 (Helius free tier, 1M credits/month):
+//
+//	350 × 3 credits × 720 hr = 756k credits/month (probes only)
+//
+// Set maxPerHour=0 to disable rate limiting (unlimited probes).
+// Call this after NewMarketProbesWorker and before registering the worker.
+func (w *MarketProbesWorker) WithProbeRateLimit(maxPerHour int) *MarketProbesWorker {
+	w.maxProbesPerHour = maxPerHour
+	w.hourWindowStart = time.Now()
+	return w
+}
+
 // Process decodes the inbound market_data_event, runs every registered
 // probe in order, and emits a market_data_enriched event carrying the
 // (possibly enriched) DTO.
@@ -84,7 +135,143 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	}
 
 	enriched := md
+
+	// ── Pre-probe name-dedup guard ────────────────────────────────────────
+	// Skip ALL probes (saving Helius credits) when the token's name is a
+	// duplicate of a previously ingested token, or matches a well-known/
+	// famous token in the configured copycat list.
+	//
+	// The guard runs only when Name is non-empty (pump.fun Solana tokens).
+	// EVM tokens have empty Name and are passed through to probes unchanged.
+	//
+	// Order of checks (fastest-first):
+	//   1. In-process session cache — zero DB cost for repeat names.
+	//   2. Copycat list — O(1) map lookup against famous token names.
+	//   3. DB query — covers cross-restart duplicate detection.
+	if md.Name != "" {
+		normalizedName := strings.ToLower(strings.TrimSpace(md.Name))
+		if normalizedName != "" {
+			cacheKey := md.Chain + ":" + normalizedName
+
+			// 1. In-process session cache: if we've seen this name on this
+			// chain before, flag as duplicate immediately (no DB hit needed).
+			if _, inCache := w.seenNames.Load(cacheKey); inCache {
+				enriched.IsNameDuplicate = true
+				w.logger.Info("pre_probe_name_dedup_cache_hit",
+					"name", md.Name,
+					"chain", md.Chain,
+					"token", md.TokenAddress,
+					"event_id", evt.EventID,
+				)
+			}
+
+			// 2. Copycat list: O(1) lookup against famous token names.
+			if !enriched.IsNameDuplicate && !enriched.IsCopycat && len(w.knownTokens) > 0 {
+				if _, isCopycat := w.knownTokens[normalizedName]; isCopycat {
+					enriched.IsCopycat = true
+					w.logger.Info("pre_probe_copycat_detected",
+						"name", md.Name,
+						"normalized", normalizedName,
+						"token", md.TokenAddress,
+						"chain", md.Chain,
+						"event_id", evt.EventID,
+					)
+				}
+			}
+
+			// 3. DB check: covers cross-restart duplicates not yet in session cache.
+			if !enriched.IsNameDuplicate && !enriched.IsCopycat {
+				seen, err := w.adapter.CheckTokenNameSeen(ctx, normalizedName, md.Chain, md.TokenAddress)
+				if err != nil {
+					// Fail-open: log and proceed with probes; do not reject on DB error.
+					w.logger.Warn("pre_probe_name_check_error",
+						"name", md.Name,
+						"chain", md.Chain,
+						"event_id", evt.EventID,
+						"error", err,
+					)
+				} else if seen {
+					enriched.IsNameDuplicate = true
+					w.logger.Info("pre_probe_name_dedup_db_hit",
+						"name", md.Name,
+						"normalized", normalizedName,
+						"token", md.TokenAddress,
+						"chain", md.Chain,
+						"event_id", evt.EventID,
+					)
+				}
+			}
+
+			// Add to session cache so the next token with this name is caught
+			// by the fast path, regardless of whether it was a duplicate.
+			w.seenNames.Store(cacheKey, struct{}{})
+
+			// If either flag is set, skip all probes and emit immediately.
+			if enriched.IsNameDuplicate || enriched.IsCopycat {
+				enriched.EventID = contracts.ContentIDFromString(fmt.Sprintf("md_enriched:%s", md.EventID))
+				if err := w.adapter.InsertMarketData(ctx, enriched); err != nil {
+					w.logger.Warn("market_probes_persist_failed",
+						"event_id", enriched.EventID,
+						"trace_id", evt.TraceID,
+						"error", err,
+					)
+				}
+				w.logger.Info("pre_probe_guard_skipped_all_probes",
+					"event_id", evt.EventID,
+					"token", md.TokenAddress,
+					"name", md.Name,
+					"is_name_duplicate", enriched.IsNameDuplicate,
+					"is_copycat", enriched.IsCopycat,
+					"probes_saved", len(w.probes),
+				)
+				return makeOutputEvent(
+					enriched.EventID, enriched, MarketDataEnrichedEventType,
+					evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+				)
+			}
+		}
+	}
+
 	var results []probes.ProbeResult
+	// ── Probe rate limiter ────────────────────────────────────────────────
+	// When maxProbesPerHour > 0, enforce a hard ceiling on Helius RPC HTTP
+	// calls per rolling one-hour window. Tokens over the cap skip all probes
+	// and proceed with Known=false flags — DQ's fail-closed structural rejects
+	// handle them without spending any additional Helius credits.
+	if w.maxProbesPerHour > 0 {
+		// Reset counter at the start of each new hour window.
+		w.hourMu.Lock()
+		if time.Since(w.hourWindowStart) >= time.Hour {
+			w.hourWindowStart = time.Now()
+			atomic.StoreInt64(&w.probedThisHour, 0)
+		}
+		w.hourMu.Unlock()
+
+		count := atomic.AddInt64(&w.probedThisHour, 1)
+		if count > int64(w.maxProbesPerHour) {
+			// Over the hourly cap — emit immediately with Known=false flags.
+			enriched.EventID = contracts.ContentIDFromString(fmt.Sprintf("md_enriched:%s", md.EventID))
+			if err := w.adapter.InsertMarketData(ctx, enriched); err != nil {
+				w.logger.Warn("market_probes_persist_failed",
+					"event_id", enriched.EventID,
+					"trace_id", evt.TraceID,
+					"error", err,
+				)
+			}
+			w.logger.Info("pre_probe_rate_limit_skipped",
+				"event_id", evt.EventID,
+				"token", md.TokenAddress,
+				"probed_this_hour", count,
+				"max_probes_per_hour", w.maxProbesPerHour,
+				"probes_saved", len(w.probes),
+			)
+			return makeOutputEvent(
+				enriched.EventID, enriched, MarketDataEnrichedEventType,
+				evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+			)
+		}
+	}
+
 	for _, p := range w.probes {
 		start := time.Now()
 		out, err := p.Probe(ctx, enriched)

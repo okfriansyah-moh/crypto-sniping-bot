@@ -440,6 +440,11 @@ func (s *dispatcherStubAdapter) LoadBaselines(_ context.Context, _ string) (map[
 func (s *dispatcherStubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
 }
+
+// CheckTokenNameSeen stub — always returns (false, nil) so tests proceed through probes.
+func (s *dispatcherStubAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
+	return false, nil
+}
 func (s *dispatcherStubAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
 	return 0, nil
 }

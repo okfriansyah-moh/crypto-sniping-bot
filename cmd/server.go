@@ -123,9 +123,22 @@ func runServer() {
 	dqInputType := "market_data_event"
 	if cfg.Probes.Enabled {
 		probeList := buildMarketProbes(cfg, solanaRPCClient, solUsdSource, logger)
+		probeWorker := workers.NewMarketProbesWorker(db, probeList, logger)
+		if cfg.DataQualityRuntime.NameDedup.Enabled && len(cfg.DataQualityRuntime.NameDedup.KnownTokens) > 0 {
+			probeWorker.WithNameDedup(cfg.DataQualityRuntime.NameDedup.KnownTokens)
+			logger.Info("market_probes_name_dedup_enabled",
+				"known_token_count", len(cfg.DataQualityRuntime.NameDedup.KnownTokens),
+			)
+		}
+		if cfg.Probes.MaxProbesPerHour > 0 {
+			probeWorker.WithProbeRateLimit(cfg.Probes.MaxProbesPerHour)
+			logger.Info("market_probes_rate_limit_enabled",
+				"max_probes_per_hour", cfg.Probes.MaxProbesPerHour,
+			)
+		}
 		orch.RegisterStage(
 			"market_probes_worker",
-			workers.NewMarketProbesWorker(db, probeList, logger),
+			probeWorker,
 			"market_data_event",
 		)
 		dqInputType = workers.MarketDataEnrichedEventType

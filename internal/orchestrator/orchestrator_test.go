@@ -516,6 +516,11 @@ func (m *mockAdapter) LoadBaselines(_ context.Context, _ string) (map[string]map
 func (m *mockAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	return []contracts.MarketDataDTO{}, nil
 }
+
+// CheckTokenNameSeen stub — always returns (false, nil) so tests proceed through probes.
+func (m *mockAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
+	return false, nil
+}
 func (m *mockAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
 	return 0, nil
 }

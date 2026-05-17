@@ -195,4 +195,20 @@ type MarketDataDTO struct {
 	IsImpersonation      bool    `json:"is_impersonation,omitempty"`
 	NarrativeType        string  `json:"narrative_type,omitempty"`
 	NarrativeReason      string  `json:"narrative_reason,omitempty"`
+
+	// ─────────────────────────────────────────────────────────────────────
+	// Token Name Deduplication — set by the MarketProbesWorker pre-probe
+	// guard to short-circuit expensive RPC calls (Helius credits) for
+	// tokens already known by name or matching a well-known/famous token.
+	//
+	// IsNameDuplicate=true: a token with the same lowercased, trimmed name
+	// has already been ingested for this chain (different token address).
+	// IsCopycat=true: the token name matches an entry in the known_tokens
+	// list configured in config/data_quality.yaml.
+	//
+	// Both flags are set before any RPC probe runs so the DataQualityWorker
+	// can structurally reject the token with zero Helius credit cost.
+	// ─────────────────────────────────────────────────────────────────────
+	IsNameDuplicate bool `json:"is_name_duplicate,omitempty"`
+	IsCopycat       bool `json:"is_copycat,omitempty"`
 }

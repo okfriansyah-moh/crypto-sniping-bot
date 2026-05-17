@@ -208,6 +208,22 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		!in.SocialLinksKnown {
 		rejectReasons = append(rejectReasons, "unknown_social_links")
 	}
+	// Structural reject: pre-probe duplicate name flag.
+	// Set by the MarketProbesWorker pre-probe guard when a token with the same
+	// lowercased, trimmed name has already been ingested for this chain.
+	// Tokens with duplicate names are near-certainly low-quality cash-grabs;
+	// rejecting them before any detector runs saves all downstream compute.
+	if m.runtime != nil && m.runtime.Detectors.NameDuplicate && in.IsNameDuplicate {
+		rejectReasons = append(rejectReasons, "duplicate_name")
+	}
+	// Structural reject: pre-probe copycat flag.
+	// Set by the MarketProbesWorker pre-probe guard when the token name matches
+	// a well-known/famous token entry in the configured known_tokens list.
+	// Copycats of established tokens (PEPE, DOGE, WIF, TRUMP, BTC, SOL, …) are
+	// impersonation attempts and must be rejected before capital allocation.
+	if m.runtime != nil && m.runtime.Detectors.CopycatName && in.IsCopycat {
+		rejectReasons = append(rejectReasons, "copycat_name")
+	}
 	// Structural reject: insufficient confirmed holder count.
 	// Brand-new launches (PumpFunCreate events) are exempt — holder distribution
 	// takes time to settle and would produce false rejections at the moment of
@@ -353,27 +369,42 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		// double-add to riskScore.
 	}
 
-	// AI narrative soft signals — additive contributions, never override
-	// mandatory hard-rejects (serial_launcher / no_social / high_supply).
-	// Only applied when NarrativeKnown=true (probe completed successfully).
+	// AI narrative gate — only fires when NarrativeKnown=true
+	// (the probe completed successfully and returned a classification).
+	// Fail-open: NarrativeKnown=false → entire block is skipped, no rejection.
 	if in.NarrativeKnown {
-		var narrativeBump float64
-		if in.IsCopyPasteDesc {
-			riskScore += 0.30 // boilerplate description reused across rug tokens
-			narrativeBump += 0.30
+		// Copy-paste description: reject only when narrative quality is poor.
+		// A copy-paste style with a high NarrativeScore means the token has a
+		// genuine, compelling meme story — for meme tokens the narrative IS
+		// the edge, so we pass it. Only low-scoring boilerplate is rejected.
+		if m.runtime != nil && m.runtime.Detectors.AICopyPasteDesc && in.IsCopyPasteDesc {
+			minScore := m.runtime.Thresholds.AICopyPasteDescMinNarrativeScore
+			if minScore <= 0 {
+				minScore = 6.0 // built-in default: 0–5 is weak narrative, 6–10 is good
+			}
+			if in.NarrativeScore < minScore {
+				rejectReasons = append(rejectReasons, "ai_copy_paste_desc")
+			}
 		}
-		if in.IsImpersonation {
-			riskScore += 0.20 // name/symbol mimics known project
-			narrativeBump += 0.20
+		// Impersonation: always reject regardless of narrative score — a token
+		// that mimics a known project name/symbol is a scam, not a meme.
+		if m.runtime != nil && m.runtime.Detectors.AIImpersonation && in.IsImpersonation {
+			rejectReasons = append(rejectReasons, "ai_impersonation")
 		}
-		if narrativeBump > 0 {
-			m.logger.Info("ai_narrative_dq_bump",
+		if in.IsCopyPasteDesc || in.IsImpersonation {
+			m.logger.Info("ai_narrative_dq_gate",
 				"token", in.TokenAddress,
 				"copy_paste", in.IsCopyPasteDesc,
 				"impersonation", in.IsImpersonation,
-				"narrative_risk_bump", narrativeBump,
 				"narrative_score", in.NarrativeScore,
 				"narrative_type", in.NarrativeType,
+				"narrative_quality_pass", in.IsCopyPasteDesc && !in.IsImpersonation && func() bool {
+					min := 6.0
+					if m.runtime != nil && m.runtime.Thresholds.AICopyPasteDescMinNarrativeScore > 0 {
+						min = m.runtime.Thresholds.AICopyPasteDescMinNarrativeScore
+					}
+					return in.NarrativeScore >= min
+				}(),
 			)
 		}
 	}

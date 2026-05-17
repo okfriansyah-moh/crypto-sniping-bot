@@ -800,6 +800,12 @@ func (s *stubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQue
 	return []contracts.MarketDataDTO{}, nil
 }
 
+// CheckTokenNameSeen stub — always returns (false, nil) so tests using
+// stubAdapter proceed through probes without hitting a DB.
+func (s *stubAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
+	return false, nil
+}
+
 // ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
 
 func (s *stubAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.HistoricalMarketProfileDTO) error {

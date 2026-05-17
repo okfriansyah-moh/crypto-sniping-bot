@@ -396,6 +396,34 @@ Every stage emits a structured JSON log line. Use these `msg` field values with 
 
 See [`docs/architecture.md`](docs/architecture.md) for the full design and invariants.
 
+### AI Enrichment Flow (Cross-Cutting Layers 0/1/3/10)
+
+AI narrative enrichment runs **autonomously and fail-open** across four pipeline layers via `internal/ai/CopilotClient`. It never blocks the pipeline — any error produces `NarrativeKnown=false` and processing continues using degraded signals only.
+
+**Auth:** `GITHUB_COPILOT_TOKEN` env var only. HTTPS-only endpoint (`https://api.githubcopilot.com/chat/completions`). 4 KiB response cap. 1-shot per token (one retry on 429/5xx). Model is configurable — see model priority table below.
+
+| Layer            | Component                  | What AI does                                                                                                    | Output fields                                                                                                                    |
+| ---------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **L0 / L0.5**    | `AINarrativeProbe`         | Scores token narrative quality: trending alignment, scam signals, copy-paste detection, impersonation detection | `NarrativeScore` (0–10), `ScamProbabilityScore` (0–10), `IsCopyPasteDesc`, `IsImpersonation`, `NarrativeType`, `NarrativeReason` |
+| **L1 DQ**        | `DataQualityWorker`        | Applies risk bumps when `NarrativeKnown=true`                                                                   | `+0.30` to `RiskScore` if `IsCopyPasteDesc`; `+0.20` if `IsImpersonation`                                                        |
+| **L3 Edge**      | `applyNarrativeMultiplier` | Adjusts edge confidence from narrative quality score                                                            | `±10%` to `EdgeConfidence` based on `NarrativeScore`                                                                             |
+| **L10 Learning** | `LossExplainer` probe      | Classifies losing trades with AI-generated category + natural-language reason                                   | `LearningRecordDTO.AIExplanation`, `LearningRecordDTO.AICategory`                                                                |
+
+**Model priority (highest → lowest):**
+
+1. `AI_ENRICH_MODEL` env var
+2. `ai_enrichment.model` in `config/pipeline.yaml`
+3. Built-in default: `gpt-5.4-mini`
+
+**Log keys to monitor AI enrichment:**
+
+| `msg` field                  | When emitted                                     | Key fields                                                                                   |
+| ---------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `ai_narrative_probe_skipped` | `NarrativeKnown` already true, or probe disabled | —                                                                                            |
+| `ai_narrative_scored`        | Successful enrichment                            | `narrative_score`, `scam_probability`, `is_copy_paste`, `is_impersonation`, `narrative_type` |
+| `ai_narrative_failed`        | API error (fail-open, pipeline continues)        | `error`, `duration_ms`                                                                       |
+| `ai_narrative_dq_bump`       | L1 applied narrative risk bump                   | `copy_paste`, `impersonation`, `narrative_risk_bump`, `narrative_score`                      |
+
 ---
 
 ## Solana Launchpad Coverage (P4)

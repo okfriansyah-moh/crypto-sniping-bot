@@ -158,3 +158,33 @@ func nullableString(s string) interface{} {
 	}
 	return s
 }
+
+// CheckTokenNameSeen returns true when any previously ingested token for the
+// same chain shares normalizedName (already lowercased + trimmed by the caller),
+// excluding the currentTokenAddress itself.
+//
+// This is called by the MarketProbesWorker pre-probe guard to detect duplicate
+// token launches before any expensive RPC call (Helius credit) is made. The
+// query uses an index on lower(trim(name)) — see migration
+// 20260509000026_name_dedup_index.sql.
+//
+// The method fails-open: on any query error it returns (false, err) so the
+// caller can proceed with RPC probes rather than silently dropping the token.
+func (d *DB) CheckTokenNameSeen(ctx context.Context, normalizedName, chain, currentTokenAddress string) (bool, error) {
+	const q = `
+SELECT EXISTS(
+    SELECT 1 FROM market_data
+    WHERE lower(trim(name)) = $1
+      AND chain              = $2
+      AND token_address     != $3
+      AND name IS NOT NULL
+      AND name              != ''
+    LIMIT 1
+)
+`
+	var exists bool
+	if err := d.pool.QueryRowContext(ctx, q, normalizedName, chain, currentTokenAddress).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check token name seen: %w", err)
+	}
+	return exists, nil
+}

@@ -17,6 +17,10 @@ type DataQualityRuntimeConfig struct {
 	Cache             DataQualityCacheConfig         `yaml:"cache"`
 	RiskWeights       DataQualityRiskWeights         `yaml:"risk_weights"`
 	FailurePolicy     DataQualityFailurePolicyConfig `yaml:"failure_policy"`
+	// NameDedup configures the pre-probe name-deduplication guard in the
+	// MarketProbesWorker. Runs before any RPC probe to skip expensive calls
+	// for duplicate-name or famous-token-copycat tokens, saving Helius credits.
+	NameDedup NameDedupConfig `yaml:"name_dedup"`
 
 	// ModeProfiles maps the active operational mode (STRICT / BALANCED /
 	// EXPLORATION / VERY_EXPLORATION) onto the threshold band that turns
@@ -63,6 +67,23 @@ type DataQualityDetectorFlags struct {
 	// Requires the solana_creator_reputation probe to populate
 	// CreatorPrevTokenCount / SocialLinksKnown on the MarketDataDTO.
 	DevReputation bool `yaml:"dev_reputation"`
+	// NameDuplicate enables the structural reject for tokens whose normalized
+	// name (lowercase, trimmed) has already been ingested for the same chain.
+	// The IsNameDuplicate flag is set by the MarketProbesWorker pre-probe
+	// guard before any RPC call runs. Enable this to save Helius credits.
+	NameDuplicate bool `yaml:"name_duplicate"`
+	// CopycatName enables the structural reject for tokens whose name matches
+	// a famous/established token in the known_tokens list (config/data_quality.yaml).
+	// The IsCopycat flag is set by the MarketProbesWorker pre-probe guard.
+	CopycatName bool `yaml:"copycat_name"`
+	// AICopyPasteDesc enables hard rejection when the AI narrative probe returns
+	// NarrativeKnown=true and IsCopyPasteDesc=true. Only acts when the probe
+	// completed successfully — fail-open (NarrativeKnown=false → no reject).
+	AICopyPasteDesc bool `yaml:"ai_copy_paste_desc"`
+	// AIImpersonation enables hard rejection when the AI narrative probe returns
+	// NarrativeKnown=true and IsImpersonation=true. Only acts when the probe
+	// completed successfully — fail-open (NarrativeKnown=false → no reject).
+	AIImpersonation bool `yaml:"ai_impersonation"`
 }
 
 // DataQualityDetectorThresholds gates per-detector verdict math.
@@ -156,6 +177,15 @@ type DataQualityDetectorThresholds struct {
 	// holder distribution probe timed out or was not run) as a structural
 	// hard-reject when MinHolderCount > 0. Does NOT apply to brand-new launches.
 	RejectUnknownHolderCount bool `yaml:"reject_unknown_holder_count"`
+
+	// AICopyPasteDescMinNarrativeScore is the minimum NarrativeScore (0–10)
+	// required to let a copy-paste description token through. When
+	// NarrativeKnown=true and IsCopyPasteDesc=true, the token is rejected
+	// only if NarrativeScore < this value. A token with a copy-paste style
+	// description but a high narrative score (strong meme story, trending
+	// alignment) is allowed — for meme tokens the narrative IS the edge.
+	// 0 → built-in default of 6.0 is used.
+	AICopyPasteDescMinNarrativeScore float64 `yaml:"ai_copy_paste_desc_min_narrative_score"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.
@@ -284,4 +314,24 @@ type DataQualityCopyTradeConfig struct {
 
 	// Weight is the relative contribution within the aggregator (normalised).
 	Weight float64 `yaml:"weight"`
+}
+
+// ── Pre-probe name deduplication ─────────────────────────────────────────
+
+// NameDedupConfig controls the pre-probe name-deduplication guard built into
+// the MarketProbesWorker. The guard runs BEFORE any RPC probe call, so tokens
+// rejected here consume zero Helius credits.
+//
+// Populated from config/data_quality.yaml `name_dedup:` block.
+type NameDedupConfig struct {
+	// Enabled activates both the duplicate-name DB check and the copycat
+	// list check. When false the guard is skipped entirely.
+	Enabled bool `yaml:"enabled"`
+
+	// KnownTokens is a list of famous/established token names in any case;
+	// entries are normalized (lowercased, trimmed) at load time. A new token
+	// whose normalized name matches any entry is flagged IsCopycat=true and
+	// immediately structurally rejected by the DQ layer.
+	// Examples: "pepe", "shib", "doge", "trump", "bitcoin", "solana".
+	KnownTokens []string `yaml:"known_tokens"`
 }

@@ -25,6 +25,23 @@ data_quality:
     # CreatorPrevTokenCount / SocialLinksKnown on MarketDataDTO.
     # Enabled in all modes; degrades to Unknown when probe not yet run.
     dev_reputation: true
+    # name_duplicate: structural reject for tokens whose normalized name
+    # (lowercase, trimmed) has already been ingested for the same chain.
+    # Flag is set by the MarketProbesWorker pre-probe guard — no Helius
+    # credits consumed. Saves ~1-2 credits per duplicate token launch.
+    name_duplicate: true
+    # copycat_name: structural reject for tokens whose name matches a
+    # famous/established token in the name_dedup.known_tokens list below.
+    # Flag is set by the MarketProbesWorker before any RPC probe runs.
+    copycat_name: true
+    # ai_copy_paste_desc: hard reject when the AI narrative probe returns
+    # NarrativeKnown=true and detects a copy-paste / boilerplate description.
+    # Fail-open: if the AI probe fails (NarrativeKnown=false), no rejection.
+    ai_copy_paste_desc: true
+    # ai_impersonation: hard reject when the AI narrative probe returns
+    # NarrativeKnown=true and detects name/symbol impersonation of a known project.
+    # Fail-open: if the AI probe fails (NarrativeKnown=false), no rejection.
+    ai_impersonation: true
 
   # ── Detector thresholds ───────────────────────────────────────
   thresholds:
@@ -143,6 +160,16 @@ data_quality:
     # Set false initially until probe reliability is confirmed in production;
     # flip to true once the solana_holder_dist probe has a stable track record.
     reject_unknown_holder_count: false
+
+    # ai_copy_paste_desc_min_narrative_score: minimum NarrativeScore (0–10)
+    # required to save a copy-paste description from rejection. When the AI
+    # probe returns NarrativeKnown=true and IsCopyPasteDesc=true, the token
+    # is only rejected if its NarrativeScore is BELOW this value.
+    # A copy-paste description with a strong narrative (e.g. genuine meme
+    # alignment, trending topic, compelling lore) scores ≥6 and passes.
+    # Boilerplate with no real story scores <6 and is rejected.
+    # Range: 0–10. Default (0 here → 6.0 built-in). Raise to tighten.
+    ai_copy_paste_desc_min_narrative_score: 6.0
 
     # Rug authority (EVM) — flag mint/pause/blacklist in unverified contracts
     rug_dangerous_selectors:
@@ -290,3 +317,261 @@ data_quality:
       enabled: false # flip to true after wallet list is configured
       shadow_mode: true # boot in shadow until signal quality is validated
       weight: 0.8 # signal boosts confidence — subtract from risk score
+
+# ── Pre-probe name deduplication guard ────────────────────────────────────────
+# Controls the MarketProbesWorker name-dedup guard that runs BEFORE any RPC probe.
+# Tokens flagged here skip ALL Helius RPC calls (saving ~2 credits each).
+#
+# Two checks are performed (fastest first):
+#   1. In-process session cache — zero-cost after the first encounter.
+#   2. Copycat list lookup (below) — O(1) map lookup, zero DB cost.
+#   3. DB query (CheckTokenNameSeen) — covered by idx_market_data_name_chain.
+#
+# The DQ layer then enforces structural rejects on IsNameDuplicate / IsCopycat
+# via the name_duplicate and copycat_name detector flags above.
+name_dedup:
+  enabled: true
+  # known_tokens: normalized names of famous/established tokens.
+  # Entries are lowercased + trimmed at load time; any token whose normalized
+  # name exactly matches an entry is flagged IsCopycat=true and rejected
+  # without any RPC probe being run (zero Helius credit cost).
+  # Add entries freely — the list is read at startup from this YAML block.
+  known_tokens:
+    # ── Solana memecoins ──
+    - pepe
+    - shib
+    - doge
+    - bonk
+    - wif
+    - dogwifhat
+    - trump
+    - brett
+    - floki
+    - meme
+    - wojak
+    - boden
+    - tremp
+    - fwog
+    - pnut
+    - goat
+    - retardio
+    - popcat
+    - mother
+    - slerf
+    - myro
+    - bome
+    - book of meme
+    - ponke
+    - bob
+    - turbo
+    - andy
+    - mog
+    - neiro
+    - apu
+    - milady
+    - giga
+    - sigma
+    - harambe
+    - samo
+    - snek
+    - babydoge
+    - baby doge
+    - dogelon
+    - safemoon
+    - elon
+    - elonmusk
+    - maga
+    # ── Layer-1 / infrastructure tokens ──
+    - bitcoin
+    - ethereum
+    - solana
+    - tether
+    - usdt
+    - usdc
+    - bnb
+    - cardano
+    - ripple
+    - polkadot
+    - avalanche
+    - chainlink
+    - uniswap
+    # ── Solana ecosystem tokens ──
+    - raydium
+    - jupiter
+    - jito
+    - pyth
+    - orca
+    - kamino
+    - kmno
+    - drift
+    - tensor
+    - helium
+    - hnt
+    - marinade
+    - msol
+    - wormhole
+    - w
+    - nosana
+    - stepn
+    - parcl
+    - meteora
+    - grass
+    - io
+    - render
+    - rndr
+    - hubble
+    - serum
+    # ── Top memecoins (2024–2026, by market cap) ──
+    - fartcoin
+    - pengu
+    - pudgy penguins
+    - pudgy
+    - moodeng
+    - moo deng
+    - mew
+    - cat in a dogs world
+    - notcoin
+    - not
+    - gigachad
+    - cheems
+    - troll
+    - npc
+    - non-playable coin
+    - useless
+    - zerebro
+    - pippin
+    - degen
+    - kishu
+    - kishu inu
+    - chillguy
+    - just a chill guy
+    - bobo
+    - broccoli
+    - mubarak
+    - melania
+    - coq
+    - coq inu
+    - dog
+    - toshi
+    - vine
+    - elizaos
+    - eliza
+    - wolf
+    - landwolf
+    - act
+    - jellyjelly
+    - jelly my jelly
+    - ape
+    - apecoin
+    - people
+    - constitutiondao
+    - ordi
+    - anime
+    - animecoin
+    - spx6900
+    - spx
+    - america
+    - lol
+    - billy
+    - hawk tuah
+    - hawktuah
+    - gme
+    - roaring kitty
+    - birb
+    - moonbird
+    - would
+    - pika
+    - ski
+    - aura
+    - purr
+    - rekt
+    - frog
+    - dogs
+    - chad
+    - wen
+    - cope
+    - based
+    - moon
+    # ── AI agent memecoins ──
+    - ai16z
+    - virtuals
+    - virtual
+    - aixbt
+    - arc
+    - griffain
+    - degenai
+    - vader
+    - misato
+    - luna
+    # ── Political memecoins ──
+    - harris
+    - vance
+    - obama
+    - putin
+    - xi
+    - biden
+    - freedom
+    - liberty
+    # ── Layer-1 / L2 tokens (beyond existing) ──
+    - arbitrum
+    - arb
+    - optimism
+    - op
+    - polygon
+    - matic
+    - cosmos
+    - atom
+    - near
+    - fantom
+    - ftm
+    - sui
+    - aptos
+    - apt
+    - sei
+    - injective
+    - inj
+    - mantra
+    - om
+    - ton
+    - toncoin
+    - sonic
+    - starknet
+    - strk
+    - zksync
+    - zk
+    - scroll
+    - linea
+    # ── DeFi / DEX tokens commonly impersonated ──
+    - cake
+    - pancakeswap
+    - sushi
+    - sushiswap
+    - aave
+    - curve
+    - crv
+    - maker
+    - mkr
+    - compound
+    - comp
+    - gmx
+    - lido
+    - steth
+    - ondo
+    - ethena
+    - ena
+    - pendle
+    - sky
+    - spark
+    # ── Exchange tokens ──
+    - okb
+    - okx
+    - kucoin
+    - kcs
+    - bybit
+    - bbt
+    - bitget
+    - bgb
+    - gate
+    - gt
+    - huobi
+    - ht
