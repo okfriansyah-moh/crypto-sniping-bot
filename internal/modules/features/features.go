@@ -219,6 +219,9 @@ func (m *Module) ProcessWithContext(
 		HolderCountRaw:     int64(holderCountRaw(dq, snap)),
 		TokenAgeSecondsRaw: int64(snap.PoolAgeSeconds),
 
+		NarrativeScore: snap.NarrativeScore,
+		NarrativeKnown: snap.NarrativeKnown,
+
 		Confidence:  conf,
 		ExtractedAt: extractedAt,
 	}, nil

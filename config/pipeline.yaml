@@ -118,9 +118,9 @@ capital:
   wallet_address: "" # EIP-55 wallet address (set via env or config)
   wallet_private_key: "" # hex private key — override with env SNIPER_WALLET_KEY
   fixed_entry_size_usd: 5.0 # override by config/capital.yaml — keep in sync
-  max_total_exposure_usd: 500.0 # hard cap on total open exposure
-  max_concurrent_positions: 1 # Phase 2: max 1 position at once
-  max_size_usd: 100.0 # single position USD ceiling
+  max_total_exposure_usd: 50.0 # hard cap on total open exposure
+  max_concurrent_positions: 5 # Phase 2: max 5 concurrent positions
+  max_size_usd: 10.0 # single position USD ceiling
   ttl_seconds: 3 # AllocationDTO TTL before expiry
 
 position:
@@ -321,6 +321,25 @@ execution_quality:
 # via *Known flags per the active operational-mode profile.
 probes:
   enabled: true
+  # max_probes_per_hour: hard ceiling on Helius RPC HTTP probe calls per rolling
+  # one-hour window. Tokens over this cap are emitted with all Known=false flags;
+  # the DQ layer's fail-closed rules (reject_unknown_social_links: true, etc.)
+  # safely reject them without spending any Helius credits.
+  #
+  # Credit ceiling at 3000/hr (Helius Developer, 10M credits/month):
+  #   Probes:  3750 × 3 credits × 720 hr/mo =  8,100,000 credits/month
+  #   Pyth:    1 credit/30s                  =     86,400 credits/month
+  #   Trades:  15/day × 28 credits × 30 days =     12,600 credits/month
+  #   Raydium getTransaction (300/day×100):   =    900,000 credits/month
+  #   Total:                                 ~  9,098,000 credits/month
+  #   Budget:                                  10,000,000 credits/month
+  #   Headroom:                              ~   902,000 credits/month (10%+-) for unexpected spikes, retries, and probe expansion.
+  #
+  # Combined with name-dedup (filters 85-95% before reaching this cap), actual
+  # probe consumption is typically well below the ceiling.
+  # Reduce to 350 if downgrading to Helius free tier (1M credits/month).
+  # Set to 0 to disable (unlimited — not recommended).
+  max_probes_per_hour: 3750
   honeypot_sim:
     enabled: false
     simulation_contract: "" # EIP-55 address of deployed sim contract
@@ -469,3 +488,33 @@ rescan:
       max_rug_score: 0.85
       max_buy_tax_bps: 6000
       include_passed: true
+
+# ---------------------------------------------------------------------------
+# AI enrichment — Groq API-powered narrative scoring.
+# Token read from GROQ_API_KEY env var (never in YAML).
+# All calls async, fail-open: NarrativeKnown=false on any error.
+# ---------------------------------------------------------------------------
+ai_enrichment:
+  enabled: true
+  endpoint: "https://api.groq.com/openai/v1/chat/completions"
+  # Model override priority: AI_ENRICH_MODEL env var > this field > code default (llama-3.3-70b-versatile)
+  model: "llama-3.3-70b-versatile"
+  timeout_ms: 8000
+  max_retries: 1
+  max_response_bytes: 4096
+  rate_limit_per_min: 30
+  max_prompt_chars: 600
+  trending_narratives:
+    - "AI agents"
+    - "DePIN"
+    - "gaming"
+    - "RWA"
+    - "BTCfi"
+    - "memecoins"
+  narrative_probe:
+    enabled: true
+    max_description_chars: 300
+    min_narrative_score: 3.0
+  loss_explainer:
+    enabled: false
+    min_records_per_batch: 5

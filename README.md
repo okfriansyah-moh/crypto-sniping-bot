@@ -396,6 +396,34 @@ Every stage emits a structured JSON log line. Use these `msg` field values with 
 
 See [`docs/architecture.md`](docs/architecture.md) for the full design and invariants.
 
+### AI Enrichment Flow (Cross-Cutting Layers 0/1/3/10)
+
+AI narrative enrichment runs **autonomously and fail-open** across four pipeline layers via `internal/ai/CopilotClient`. It never blocks the pipeline — any error produces `NarrativeKnown=false` and processing continues using degraded signals only.
+
+**Auth:** `GITHUB_COPILOT_TOKEN` env var only. HTTPS-only endpoint (`https://api.githubcopilot.com/chat/completions`). 4 KiB response cap. 1-shot per token (one retry on 429/5xx). Model is configurable — see model priority table below.
+
+| Layer            | Component                  | What AI does                                                                                                    | Output fields                                                                                                                    |
+| ---------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **L0 / L0.5**    | `AINarrativeProbe`         | Scores token narrative quality: trending alignment, scam signals, copy-paste detection, impersonation detection | `NarrativeScore` (0–10), `ScamProbabilityScore` (0–10), `IsCopyPasteDesc`, `IsImpersonation`, `NarrativeType`, `NarrativeReason` |
+| **L1 DQ**        | `DataQualityWorker`        | Applies risk bumps when `NarrativeKnown=true`                                                                   | `+0.30` to `RiskScore` if `IsCopyPasteDesc`; `+0.20` if `IsImpersonation`                                                        |
+| **L3 Edge**      | `applyNarrativeMultiplier` | Adjusts edge confidence from narrative quality score                                                            | `±10%` to `EdgeConfidence` based on `NarrativeScore`                                                                             |
+| **L10 Learning** | `LossExplainer` probe      | Classifies losing trades with AI-generated category + natural-language reason                                   | `LearningRecordDTO.AIExplanation`, `LearningRecordDTO.AICategory`                                                                |
+
+**Model priority (highest → lowest):**
+
+1. `AI_ENRICH_MODEL` env var
+2. `ai_enrichment.model` in `config/pipeline.yaml`
+3. Built-in default: `gpt-5.4-mini`
+
+**Log keys to monitor AI enrichment:**
+
+| `msg` field                  | When emitted                                     | Key fields                                                                                   |
+| ---------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `ai_narrative_probe_skipped` | `NarrativeKnown` already true, or probe disabled | —                                                                                            |
+| `ai_narrative_scored`        | Successful enrichment                            | `narrative_score`, `scam_probability`, `is_copy_paste`, `is_impersonation`, `narrative_type` |
+| `ai_narrative_failed`        | API error (fail-open, pipeline continues)        | `error`, `duration_ms`                                                                       |
+| `ai_narrative_dq_bump`       | L1 applied narrative risk bump                   | `copy_paste`, `impersonation`, `narrative_risk_bump`, `narrative_score`                      |
+
 ---
 
 ## Solana Launchpad Coverage (P4)
@@ -453,6 +481,7 @@ The Data Quality Engine (Layer 1) aggregates signals from multiple providers. Ev
 | Social Gate   | P2    | Twitter/X follower legitimacy gate              | `TWITTER_BEARER_TOKEN`                 | `enabled: false` |
 | BirdEye Intel | P3    | Price velocity, holder count, creator history   | `BIRDEYE_API_KEY`                      | `enabled: false` |
 | Copy Trade    | P8    | Alpha wallet activity match on DEXScreener API  | `COPY_TRADE_WALLETS` (comma-separated) | `enabled: false` |
+| AI Narrative  | AI    | Copilot API narrative score + copy-paste rug    | `GITHUB_COPILOT_TOKEN`                 | `enabled: false` |
 
 ### Copy Trade Provider (P8)
 
@@ -462,6 +491,48 @@ Detects when known "alpha wallets" are active in the token being evaluated — a
 - Chain allowlist: `ethereum`/`eth`, `bsc`/`bnb`, `solana`/`sol`, `base` (unknown chains → `Degraded: true`).
 - Score: `0.0` (strong positive) on alpha match, `0.5` (neutral) otherwise.
 - Response body capped at 128 KiB; timeout 280ms; no real traffic in shadow mode.
+
+---
+
+## AI Enrichment (Optional)
+
+GitHub Copilot API-powered narrative scoring and loss attribution layered across the pipeline. All calls are:
+
+- **1-shot autonomous** — `Complete()` fires one HTTP request and returns immediately. No human approval gate, no interaction loop.
+- **Fail-open** — any error leaves `NarrativeKnown=false` / `AIExplanationKnown=false`; the pipeline is never blocked.
+- **Configurable model** — set `AI_ENRICH_MODEL` env var (highest priority), or `ai_enrichment.model` in `config/pipeline.yaml` (default: `gpt-5.4-mini`).
+
+### What it adds
+
+| Layer | Component             | Effect                                                                                                           |
+| ----- | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| L0/1  | `AINarrativeProbe`    | Scores token narrative quality 0–10; detects copy-paste descriptions                                             |
+| L1 DQ | Copy-paste detector   | Adds +0.30 risk score for boilerplate descriptions, +0.20 for impersonation                                      |
+| L3    | `NarrativeMultiplier` | Soft ±10% adjustment to `EdgeConfidence` based on `NarrativeScore`                                               |
+| L10   | `LossExplainer`       | AI loss category (`timing`/`scam`/`momentum_fade`/etc.) + natural-language reason written to `LearningRecordDTO` |
+
+### Enable
+
+```bash
+# 1. Set the Copilot API token
+export GITHUB_COPILOT_TOKEN=<your-token>
+
+# 2. Optionally override the model (default: gpt-5.4-mini)
+export AI_ENRICH_MODEL=gpt-5.4-mini   # or any model supported by the Copilot API
+
+# 3. Enable in config/pipeline.yaml
+#    ai_enrichment.enabled: true
+#    ai_enrichment.narrative_probe.enabled: true
+#    ai_enrichment.loss_explainer.enabled: true
+```
+
+### Security invariants
+
+- `GITHUB_COPILOT_TOKEN` read via `os.Getenv` only — **never in YAML, never logged**.
+- `AI_ENRICH_MODEL` env var also read via `os.Getenv` — same pattern as `MODEL_HEAVY` in `scripts/run_parallel.sh`.
+- Endpoint must be HTTPS; non-HTTPS is rejected at construction.
+- Response body bounded at `max_response_bytes` (default 4 KiB).
+- Prompts truncated to `max_prompt_chars` (default 600) before sending.
 
 ---
 
@@ -483,6 +554,8 @@ Detects when known "alpha wallets" are active in the token being evaluated — a
 | `COPY_TRADE_WALLETS`            | Copy trade provider active         | Comma-separated alpha wallet addresses              |
 | `BIRDEYE_API_KEY`               | BirdEye provider active            | BirdEye API key for price/holder data               |
 | `TWITTER_BEARER_TOKEN`          | Social gate provider active        | Twitter/X Bearer Token for social gate              |
+| `GITHUB_COPILOT_TOKEN`          | `ai_enrichment.enabled: true`      | GitHub Copilot API token — **never put in YAML**    |
+| `AI_ENRICH_MODEL`               | AI enrichment active (optional)    | Override model (default: `gpt-5.4-mini`)            |
 
 All API keys and secrets are read via `os.Getenv()` at startup only — never stored in YAML, never logged, never passed across module boundaries.
 
@@ -619,24 +692,25 @@ crypto-sniping-bot/
 
 ## Implementation Phases
 
-| Phase | Name                      | Group | Status  | Description                                                                                                                                     |
-| ----- | ------------------------- | ----- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | core-infrastructure       | A     | ✅ Done | DB, event bus, adapter, orchestrator, migrations                                                                                                |
-| 1     | dex-ingestion             | A     | ✅ Done | DEX scanner, RPC pool, `MarketDataDTO` → event bus                                                                                              |
-| 2     | first-trade-pipeline      | A     | ✅ Done | End-to-end: DQ → Feature → Edge → Capital → Execute → Position                                                                                  |
-| 3     | evaluation-correctness    | B     | ✅ Done | Learning records, strategy versioning, replay engine                                                                                            |
-| 4     | signal-quality            | B     | ✅ Done | Full probability models, feature stability, anti-manipulation                                                                                   |
-| 5     | learning-engine           | B     | ✅ Done | Adaptive learning, strategy decay detection, auto-disable                                                                                       |
-| 6     | production-hardening      | C     | ✅ Done | Observability, drawdown protection, wallet sharding, Telegram                                                                                   |
-| 7     | solana-market             | C     | ✅ Done | Solana Raydium/PumpFun ingestion + execution, hybrid transport                                                                                  |
-| 8     | production-hardening-r2   | C     | ✅ Done | Reconciliation, partition leasing, DLQ, crash recovery, reorg guard                                                                             |
-| 9     | profitability-restoration | D     | ✅ Done | Real scam detection, live features, Kelly sizing, price-feed monitor                                                                            |
-| 10    | reference-repo-r1         | D     | ✅ Done | Trailing stop, consecutive-pass gate, bonding curve filter; **rescan worker** (Layer 0.5) — time-banded re-emission of temporally-missed tokens |
-| 10.5  | observability-r1          | D     | ✅ Done | Cumulative pipeline funnel fix (`/pipeline`), new Telegram commands: `/rescan`, `/dq`, `/dlq`                                                   |
-| 11    | reference-repo-r2         | D     | ✅ Done | Creator hygiene, holder concentration, social links, congestion slippage, per-creator dedup, sim-diff                                           |
-| P4    | multi-launchpad-ingestion | D     | ✅ Done | PumpFun AMM + Raydium CLMM + Orca Whirlpool + Meteora DLMM on-chain decoder (17 tests)                                                          |
-| P5    | yellowstone-jito-zeroslot | D     | ✅ Done | Yellowstone gRPC transport, Jito bundle submission (shadow), ZeroSlot priority RPC (8 tests)                                                    |
-| P8    | copy-trade-amplifier      | D     | ✅ Done | Alpha wallet copy-trade DQ provider via DEXScreener API (8 tests), MED-01/HIGH-01/MED-02 security hardening                                     |
+| Phase | Name                      | Group | Status  | Description                                                                                                                                                                                                    |
+| ----- | ------------------------- | ----- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | core-infrastructure       | A     | ✅ Done | DB, event bus, adapter, orchestrator, migrations                                                                                                                                                               |
+| 1     | dex-ingestion             | A     | ✅ Done | DEX scanner, RPC pool, `MarketDataDTO` → event bus                                                                                                                                                             |
+| 2     | first-trade-pipeline      | A     | ✅ Done | End-to-end: DQ → Feature → Edge → Capital → Execute → Position                                                                                                                                                 |
+| 3     | evaluation-correctness    | B     | ✅ Done | Learning records, strategy versioning, replay engine                                                                                                                                                           |
+| 4     | signal-quality            | B     | ✅ Done | Full probability models, feature stability, anti-manipulation                                                                                                                                                  |
+| 5     | learning-engine           | B     | ✅ Done | Adaptive learning, strategy decay detection, auto-disable                                                                                                                                                      |
+| 6     | production-hardening      | C     | ✅ Done | Observability, drawdown protection, wallet sharding, Telegram                                                                                                                                                  |
+| 7     | solana-market             | C     | ✅ Done | Solana Raydium/PumpFun ingestion + execution, hybrid transport                                                                                                                                                 |
+| 8     | production-hardening-r2   | C     | ✅ Done | Reconciliation, partition leasing, DLQ, crash recovery, reorg guard                                                                                                                                            |
+| 9     | profitability-restoration | D     | ✅ Done | Real scam detection, live features, Kelly sizing, price-feed monitor                                                                                                                                           |
+| 10    | reference-repo-r1         | D     | ✅ Done | Trailing stop, consecutive-pass gate, bonding curve filter; **rescan worker** (Layer 0.5) — time-banded re-emission of temporally-missed tokens                                                                |
+| 10.5  | observability-r1          | D     | ✅ Done | Cumulative pipeline funnel fix (`/pipeline`), new Telegram commands: `/rescan`, `/dq`, `/dlq`                                                                                                                  |
+| 11    | reference-repo-r2         | D     | ✅ Done | Creator hygiene, holder concentration, social links, congestion slippage, per-creator dedup, sim-diff                                                                                                          |
+| P4    | multi-launchpad-ingestion | D     | ✅ Done | PumpFun AMM + Raydium CLMM + Orca Whirlpool + Meteora DLMM on-chain decoder (17 tests)                                                                                                                         |
+| P5    | yellowstone-jito-zeroslot | D     | ✅ Done | Yellowstone gRPC transport, Jito bundle submission (shadow), ZeroSlot priority RPC (8 tests)                                                                                                                   |
+| P8    | copy-trade-amplifier      | D     | ✅ Done | Alpha wallet copy-trade DQ provider via DEXScreener API (8 tests), MED-01/HIGH-01/MED-02 security hardening                                                                                                    |
+| AI    | ai-enrichment             | D     | ✅ Done | GitHub Copilot API narrative probe (L0/1), copy-paste rug detector (L1 DQ), NarrativeScore edge multiplier (L3), LossExplainer (L10); model configurable via `AI_ENRICH_MODEL` env var; default `gpt-5.4-mini` |
 
 **Group rules:** Groups A → B → C → D are sequential. Phases within the same group may run in parallel.
 
@@ -801,6 +875,20 @@ All values below live in `config/pipeline.yaml` unless noted.
 | `probes.solana_holder_dist.enabled` | `true`  | Top-5 holder concentration via `getTokenLargestAccounts` |
 | `probes.honeypot_sim.enabled`       | `false` | EVM honeypot simulation; requires deployed contract      |
 | `probes.evm_pair_reserves.enabled`  | `false` | Live Uniswap-V2 `getReserves`; requires EVM RPC          |
+
+#### AI Enrichment (`ai_enrichment:`)
+
+| Parameter                                             | Default        | Description                                                                         |
+| ----------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------- |
+| `ai_enrichment.enabled`                               | `false`        | Master switch; requires `GITHUB_COPILOT_TOKEN`                                      |
+| `ai_enrichment.model`                                 | `gpt-5.4-mini` | Model name; overridden by `AI_ENRICH_MODEL` env var                                 |
+| `ai_enrichment.timeout_ms`                            | `8000`         | Per-call HTTP timeout                                                               |
+| `ai_enrichment.max_retries`                           | `1`            | Retries on HTTP 429/5xx; all calls fail-open                                        |
+| `ai_enrichment.rate_limit_per_min`                    | `8`            | Token-bucket rate limit (non-blocking; excess requests fail-open)                   |
+| `ai_enrichment.narrative_probe.enabled`               | `false`        | Enable `AINarrativeProbe` (Layer 0/1); scores token name/description                |
+| `ai_enrichment.narrative_probe.min_narrative_score`   | `3.0`          | Minimum score to treat narrative as non-negative                                    |
+| `ai_enrichment.narrative_probe.copy_paste_rug_reject` | `false`        | Hard-reject (not soft) on copy-paste detection when `true`                          |
+| `ai_enrichment.loss_explainer.enabled`                | `false`        | Enable `LossExplainer` (Layer 10); adds AI category + reason to `LearningRecordDTO` |
 
 See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION` / `VERY_EXPLORATION`).
 

@@ -176,6 +176,7 @@ func (p *SolanaMetadataProbe) Probe(ctx context.Context, in contracts.MarketData
 	out := in
 	out.SocialLinksKnown = true
 	out.HasSocialLinks = hasLinks
+	out.MetadataDescription = extractDescription(body)
 	return out, nil
 }
 
@@ -199,11 +200,12 @@ func resolveMetadataURL(rawURI, ipfsGateway string) string {
 // pumpMetadata mirrors the top-level keys of the pump.fun / Metaplex
 // off-chain metadata JSON. All social fields are optional.
 type pumpMetadata struct {
-	Twitter    string            `json:"twitter"`
-	Telegram   string            `json:"telegram"`
-	Website    string            `json:"website"`
-	Extensions map[string]string `json:"extensions"`
-	Links      map[string]string `json:"links"`
+	Description string            `json:"description"`
+	Twitter     string            `json:"twitter"`
+	Telegram    string            `json:"telegram"`
+	Website     string            `json:"website"`
+	Extensions  map[string]string `json:"extensions"`
+	Links       map[string]string `json:"links"`
 }
 
 // parseSocialLinks returns true when the metadata JSON contains at least
@@ -562,4 +564,19 @@ func isTwitterProfileURL(rawURL string) bool {
 	}
 
 	return true
+}
+
+// extractDescription extracts the "description" field from a pump.fun /
+// Metaplex metadata JSON body, capping the result at 500 bytes to stay
+// within the MarketDataDTO contract and avoid probe memory issues.
+// Returns an empty string on any parse error (fail-open).
+func extractDescription(body []byte) string {
+	var meta pumpMetadata
+	if err := json.Unmarshal(body, &meta); err != nil {
+		return ""
+	}
+	if len(meta.Description) > 500 {
+		return meta.Description[:500]
+	}
+	return meta.Description
 }

@@ -10,6 +10,24 @@ type ProbesConfig struct {
 	// the raw market_data_event directly.
 	Enabled bool `yaml:"enabled"`
 
+	// MaxProbesPerHour is a hard ceiling on the number of tokens that
+	// trigger Helius RPC probe calls per rolling one-hour window. When the
+	// cap is reached, subsequent tokens are emitted with all Known=false
+	// flags; the DQ layer's fail-closed rules (reject_unknown_social_links,
+	// reject_unknown_total_supply, reject_unknown_creator_count) safely
+	// reject them without spending any RPC credits.
+	//
+	// Credit math (Helius free tier, 1M credits/month):
+	//   350 probes/hr × 3 credits × 720 hr = 756k credits/month for probes
+	//   + Pyth getAccountInfo (30s TTL):       86k credits/month
+	//   + trades (15/day × 28 credits):        13k credits/month
+	//   + raydium-v4 getTransaction (300/day): ~45–900k credits/month
+	//   Total range: ~900k–1.75M credits/month
+	//
+	// Set to 0 to disable the cap (unlimited probes). Not recommended on
+	// Helius free tier — observed rate without filtering is ~65k credits/hr.
+	MaxProbesPerHour int `yaml:"max_probes_per_hour"`
+
 	// HoneypotSim configures the honeypot_sim probe. See
 	// internal/modules/probes/honeypot_sim.go.
 	HoneypotSim HoneypotSimYAML `yaml:"honeypot_sim"`

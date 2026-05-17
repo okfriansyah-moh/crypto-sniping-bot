@@ -45,6 +45,21 @@ type LearningRecordDTO struct {
 	// lost" case; full funding-graph clustering is a follow-up.
 	// nil on every other record (wins, true-rugs caught by wash, etc.).
 	SybilClusterIndicators *SybilIndicators `json:"sybil_cluster_indicators,omitempty"`
+
+	// ─────────────────────────────────────────────────────────────────────
+	// AI Loss Explanation — populated by the loss_explainer (Layer 10).
+	//
+	// AIExplanationKnown=false means the loss_explainer has not run or
+	// encountered an error (fail-open). Operators inspect AIExplanation
+	// to understand systemic loss patterns without reading raw DTO chains.
+	//
+	// AILossCategory: canonical bucket for the root cause
+	//   (timing|scam|momentum_fade|execution|data_quality|narrative|unknown).
+	// AIExplanation: human-readable explanation, max 200 chars.
+	// ─────────────────────────────────────────────────────────────────────
+	AIExplanationKnown bool   `json:"ai_explanation_known,omitempty"`
+	AILossCategory     string `json:"ai_loss_category,omitempty"`
+	AIExplanation      string `json:"ai_explanation,omitempty"`
 }
 
 // SybilIndicators bundles wallet-distribution proxy signals used to

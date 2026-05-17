@@ -79,6 +79,14 @@ type Adapter interface {
 	// one row per token (latest). Read-only. Idempotent. No side effects.
 	GetTokensForRescan(ctx context.Context, q RescanQuery) ([]contracts.MarketDataDTO, error)
 
+	// CheckTokenNameSeen returns true when a previously ingested token for the
+	// same chain shares the same lowercased, trimmed name as normalizedName,
+	// excluding currentTokenAddress itself. Used by the MarketProbesWorker
+	// pre-probe guard to skip expensive RPC calls on duplicate-name tokens.
+	// Read-only, no side effects. Fails-open (returns false) on any DB error
+	// to avoid false rejections when the database is temporarily unavailable.
+	CheckTokenNameSeen(ctx context.Context, normalizedName, chain, currentTokenAddress string) (bool, error)
+
 	// ── Token Lifecycle State Machine ────────────────────────────────────────
 
 	// StartLifecycle creates a new lifecycle entry at state DETECTED.

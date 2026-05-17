@@ -862,6 +862,11 @@ func (m *memAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuer
 	return []contracts.MarketDataDTO{}, nil
 }
 
+// CheckTokenNameSeen stub — always returns (false, nil) so tests proceed through probes.
+func (m *memAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
+	return false, nil
+}
+
 // ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
 
 func (m *memAdapter) UpsertHistoricalProfile(_ context.Context, _ contracts.HistoricalMarketProfileDTO) error {

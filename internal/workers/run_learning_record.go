@@ -13,10 +13,14 @@ import (
 
 // RunLearningRecord is triggered by "position_state_event" with Status=exited.
 // It emits one learning_record_event (shadow=false) per exited position.
+// explainer may be nil — when nil, AI explanation fields are left at their
+// zero defaults (AIExplanationKnown=false). This preserves fail-open semantics:
+// the worker always produces a learning record even when AI enrichment is off.
 func RunLearningRecord(
 	ctx context.Context,
 	adapter database.Adapter,
 	cfg *config.Config,
+	explainer *learning.LossExplainer,
 	logger *slog.Logger,
 ) error {
 	if logger == nil {
@@ -68,6 +72,18 @@ func RunLearningRecord(
 		"shadow", lrDTO.Shadow,
 		"trace_id", lrDTO.TraceID,
 	)
+
+	// AI loss explanation — fail-open: any error leaves AIExplanationKnown=false.
+	// Only runs for FP/FN records (LossExplainer short-circuits on TP internally).
+	if explainer != nil {
+		enriched, explainErr := explainer.Explain(ctx, lrDTO)
+		if explainErr != nil {
+			logger.Warn("learning_recorder_ai_explain_failed",
+				"record_id", lrDTO.RecordID, "error", explainErr)
+		} else {
+			lrDTO = enriched
+		}
+	}
 
 	if err := adapter.InsertLearningRecord(ctx, lrDTO); err != nil {
 		logger.Error("learning_recorder_persist_failed", "event_id", evt.EventID, "error", err)

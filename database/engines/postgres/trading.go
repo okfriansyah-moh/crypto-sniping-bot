@@ -409,7 +409,8 @@ INSERT INTO learning_records (
     features_snapshot, edge_snapshot, validated_snapshot,
     simulated, expired_source, strategy_status,
     expires_at, priority, recorded_at,
-    sybil_indicators
+    sybil_indicators,
+    ai_explanation_known, ai_loss_category, ai_explanation
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7,
@@ -417,7 +418,8 @@ INSERT INTO learning_records (
     $15, $16, $17,
     $18, $19, $20,
     $21, $22, $23,
-    $24
+    $24,
+    $25, $26, $27
 )
 ON CONFLICT (event_id) DO NOTHING`
 
@@ -429,6 +431,7 @@ ON CONFLICT (event_id) DO NOTHING`
 		dto.Simulated, dto.ExpiredSource, dto.StrategyStatus,
 		nullableString(dto.ExpiresAt), dto.Priority, dto.RecordedAt,
 		sybilJSON,
+		dto.AIExplanationKnown, nullableString(dto.AILossCategory), nullableString(dto.AIExplanation),
 	)
 	if err != nil {
 		return fmt.Errorf("insert learning record: %w", err)

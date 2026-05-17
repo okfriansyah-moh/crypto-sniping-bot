@@ -78,6 +78,13 @@ type FeatureDTO struct {
 	// unavailable — the edge module's bottom detector returns score=0 in
 	// that case and the pipeline continues without gating.
 	RecentPricesUsd []float64 `json:"recent_prices_usd,omitempty"`
+
+	// AI Narrative enrichment — threaded from MarketDataDTO.NarrativeScore.
+	// NarrativeKnown=false means the ai_narrative probe has not run.
+	// NarrativeScore [0,10]: used by the edge module as a soft confidence
+	// multiplier (±10% max effect, config-driven weight).
+	NarrativeScore float64 `json:"narrative_score,omitempty"`
+	NarrativeKnown bool    `json:"narrative_known,omitempty"`
 }
 
 // FeatureConfidence holds per-feature confidence scores.
