@@ -52,11 +52,12 @@ const MarketDataEnrichedEventType = "market_data_enriched"
 // every inbound market_data_event and emits a market_data_enriched
 // event. With zero probes registered it acts as pass-through.
 type MarketProbesWorker struct {
-	adapter     database.Adapter
-	probes      []probes.MarketProbe
-	logger      *slog.Logger
-	knownTokens map[string]struct{} // copycat detection list (lowercase + trimmed)
-	seenNames   sync.Map            // in-process cache: "chain:normalizedName" → struct{}
+	adapter          database.Adapter
+	probes           []probes.MarketProbe
+	logger           *slog.Logger
+	nameDedupEnabled bool                // true only when WithNameDedup has been called
+	knownTokens      map[string]struct{} // copycat detection list (lowercase + trimmed)
+	seenNames        sync.Map            // in-process cache: "chain:normalizedName" → struct{}
 
 	// Probe rate limiter — caps Helius RPC HTTP calls per rolling hour.
 	// Tokens over the cap are emitted with Known=false flags; DQ's
@@ -89,9 +90,10 @@ func NewMarketProbesWorker(adapter database.Adapter, probeList []probes.MarketPr
 // probes are skipped, saving Helius credits.
 //
 // Call this after NewMarketProbesWorker and before registering the worker.
-// When not called, both the copycat list and the DB duplicate-name check are
-// still active via the session cache — only the known-token list is absent.
+// When not called, the entire name-dedup block (session cache, copycat list,
+// and DB check) is skipped — no Helius credits consumed for name checks.
 func (w *MarketProbesWorker) WithNameDedup(knownTokens []string) *MarketProbesWorker {
+	w.nameDedupEnabled = true
 	w.knownTokens = make(map[string]struct{}, len(knownTokens))
 	for _, n := range knownTokens {
 		normalized := strings.ToLower(strings.TrimSpace(n))
@@ -148,7 +150,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	//   1. In-process session cache — zero DB cost for repeat names.
 	//   2. Copycat list — O(1) map lookup against famous token names.
 	//   3. DB query — covers cross-restart duplicate detection.
-	if md.Name != "" {
+	if w.nameDedupEnabled && md.Name != "" {
 		normalizedName := strings.ToLower(strings.TrimSpace(md.Name))
 		if normalizedName != "" {
 			cacheKey := md.Chain + ":" + normalizedName

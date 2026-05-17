@@ -20,6 +20,7 @@ import (
 	"crypto-sniping-bot/internal/modules/execution"
 	"crypto-sniping-bot/internal/modules/execution_solana"
 	"crypto-sniping-bot/internal/modules/ingestion_solana"
+	"crypto-sniping-bot/internal/modules/learning"
 	"crypto-sniping-bot/internal/modules/price_oracle"
 	"crypto-sniping-bot/internal/modules/probes"
 	"crypto-sniping-bot/internal/orchestrator"
@@ -124,10 +125,10 @@ func runServer() {
 	if cfg.Probes.Enabled {
 		probeList := buildMarketProbes(cfg, solanaRPCClient, solUsdSource, logger)
 		probeWorker := workers.NewMarketProbesWorker(db, probeList, logger)
-		if cfg.DataQualityRuntime.NameDedup.Enabled && len(cfg.DataQualityRuntime.NameDedup.KnownTokens) > 0 {
-			probeWorker.WithNameDedup(cfg.DataQualityRuntime.NameDedup.KnownTokens)
+		if cfg.NameDedup.Enabled && len(cfg.NameDedup.KnownTokens) > 0 {
+			probeWorker.WithNameDedup(cfg.NameDedup.KnownTokens)
 			logger.Info("market_probes_name_dedup_enabled",
-				"known_token_count", len(cfg.DataQualityRuntime.NameDedup.KnownTokens),
+				"known_token_count", len(cfg.NameDedup.KnownTokens),
 			)
 		}
 		if cfg.Probes.MaxProbesPerHour > 0 {
@@ -228,6 +229,47 @@ func runServer() {
 				if err := workers.RunRollbackWatchdog(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
 					logger.Error("rollback_watchdog_failed", "error", err)
 				}
+			}
+		}
+	}()
+
+	// Learning recorder — builds LearningRecordDTOs from exited positions and
+	// enriches FP/FN records with AI loss explanations (fail-open when AI disabled).
+	var lossExplainer *learning.LossExplainer
+	if cfg.AIEnrichment.Enabled && cfg.AIEnrichment.LossExplainer.Enabled {
+		explainAICfg := ai.Config{
+			Enabled:          true,
+			Endpoint:         cfg.AIEnrichment.Endpoint,
+			Model:            cfg.AIEnrichment.Model,
+			TimeoutMs:        cfg.AIEnrichment.TimeoutMs,
+			MaxRetries:       cfg.AIEnrichment.MaxRetries,
+			MaxResponseBytes: cfg.AIEnrichment.MaxResponseBytes,
+			RateLimitPerMin:  cfg.AIEnrichment.RateLimitPerMin,
+			MaxPromptChars:   cfg.AIEnrichment.MaxPromptChars,
+		}
+		explainClient, explainErr := ai.NewGroqClient(explainAICfg, logger)
+		if explainErr != nil {
+			logger.Warn("loss_explainer_ai_skip", "reason", explainErr.Error())
+		} else {
+			explainClient.StartRateLimiter()
+			lossExplainer = learning.NewLossExplainer(explainClient, logger)
+			logger.Info("loss_explainer_registered", "model", explainAICfg.Model)
+		}
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := workers.RunLearningRecord(ctx, db, cfg, lossExplainer, logger); err != nil && err != ctx.Err() {
+				logger.Error("learning_recorder_failed", "error", err)
+			}
+			select {
+			case <-time.After(100 * time.Millisecond):
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -551,8 +593,8 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 
 	// AI narrative probe — registered last so it sees the fully-enriched DTO
 	// (social links, creator reputation) produced by all prior probes.
-	// Requires GITHUB_COPILOT_TOKEN env var. Skipped (with a warning) when
-	// the token is absent or the API client fails to initialise.
+	// Requires GROQ_API_KEY env var. Skipped (with a warning) when
+	// the key is absent or the API client fails to initialise.
 	if cfg.AIEnrichment.Enabled && cfg.AIEnrichment.NarrativeProbe.Enabled {
 		aiCfg := ai.Config{
 			Enabled:          true,

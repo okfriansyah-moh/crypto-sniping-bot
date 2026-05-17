@@ -66,6 +66,11 @@ type Config struct {
 	// Auth token read exclusively from GROQ_API_KEY env var.
 	AIEnrichment AIEnrichmentConfig `yaml:"ai_enrichment"`
 
+	// NameDedup configures the pre-probe name-deduplication guard in the
+	// MarketProbesWorker. Maps to the top-level name_dedup: block in
+	// config/data_quality.yaml (top-level, NOT nested under data_quality:).
+	NameDedup NameDedupConfig `yaml:"name_dedup"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
 }

@@ -12,6 +12,10 @@
 -- Compatible with PostgreSQL 13+ (lower() expression on text column).
 -- ON CONFLICT DO NOTHING semantics: index creation is idempotent.
 
+BEGIN;
+
 CREATE INDEX IF NOT EXISTS idx_market_data_name_chain
     ON market_data (lower(trim(name)), chain)
     WHERE name IS NOT NULL AND name <> '';
+
+COMMIT;

@@ -62,7 +62,9 @@ INSERT INTO market_data (
     liquidity_usd, lp_stats_known, wash_stats_known,
     tx_count_1m, unique_wallets_1m, wallet_entropy, repeat_ratio_1m,
     holder_dist_known, holder_count, top5_holder_pct, pool_age_seconds,
-    creator_address
+    creator_address,
+    metadata_description, narrative_known, narrative_score, scam_probability_score,
+    is_copy_paste_desc, is_impersonation, narrative_type, narrative_reason
 ) VALUES (
     $1,  $2,  $3,  $4,  $5,
     $6,  $7,  $8,  $9,  $10, $11,
@@ -75,13 +77,18 @@ INSERT INTO market_data (
     $32, $33, $34,
     $35, $36, $37, $38,
     $39, $40, $41, $42,
-    $43
+    $43,
+    $44, $45, $46, $47,
+    $48, $49, $50, $51
 )
 ON CONFLICT (event_id) DO NOTHING
 `
 	causationID := nullableString(dto.CausationID)
 	expiresAt := nullableString(dto.ExpiresAt)
 	creatorAddress := nullableString(dto.CreatorAddress)
+	metadataDesc := nullableString(dto.MetadataDescription)
+	narrativeType := nullableString(dto.NarrativeType)
+	narrativeReason := nullableString(dto.NarrativeReason)
 
 	_, err := d.pool.ExecContext(ctx, q,
 		dto.EventID, dto.TraceID, dto.CorrelationID, causationID, dto.VersionID,
@@ -96,6 +103,8 @@ ON CONFLICT (event_id) DO NOTHING
 		dto.TxCount1m, dto.UniqueWallets1m, dto.WalletEntropy, dto.RepeatRatio1m,
 		dto.HolderDistKnown, dto.HolderCount, dto.Top5HolderPct, dto.PoolAgeSeconds,
 		creatorAddress,
+		metadataDesc, dto.NarrativeKnown, dto.NarrativeScore, dto.ScamProbabilityScore,
+		dto.IsCopyPasteDesc, dto.IsImpersonation, narrativeType, narrativeReason,
 	)
 	if err != nil {
 		return fmt.Errorf("insert market data: %w", err)
@@ -125,7 +134,15 @@ SELECT
     COALESCE(holder_dist_known, FALSE),
     COALESCE(holder_count, 0),
     COALESCE(top5_holder_pct, 0.0),
-    COALESCE(pool_age_seconds, 0)
+    COALESCE(pool_age_seconds, 0),
+    COALESCE(metadata_description, ''),
+    COALESCE(narrative_known, FALSE),
+    COALESCE(narrative_score, 0.0),
+    COALESCE(scam_probability_score, 0.0),
+    COALESCE(is_copy_paste_desc, FALSE),
+    COALESCE(is_impersonation, FALSE),
+    COALESCE(narrative_type, ''),
+    COALESCE(narrative_reason, '')
 FROM market_data
 WHERE event_id = $1
 `
@@ -141,6 +158,8 @@ WHERE event_id = $1
 		&dto.LiquidityUsd, &dto.LpStatsKnown, &dto.WashStatsKnown,
 		&dto.TxCount1m, &dto.UniqueWallets1m, &dto.WalletEntropy, &dto.RepeatRatio1m,
 		&dto.HolderDistKnown, &dto.HolderCount, &dto.Top5HolderPct, &dto.PoolAgeSeconds,
+		&dto.MetadataDescription, &dto.NarrativeKnown, &dto.NarrativeScore, &dto.ScamProbabilityScore,
+		&dto.IsCopyPasteDesc, &dto.IsImpersonation, &dto.NarrativeType, &dto.NarrativeReason,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

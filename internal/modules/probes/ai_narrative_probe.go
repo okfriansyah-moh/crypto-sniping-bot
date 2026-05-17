@@ -1,15 +1,15 @@
 package probes
 
-// ai_narrative_probe.go — async LLM narrative scorer (Layer 0.5 enrichment).
+// ai_narrative_probe.go — synchronous LLM narrative scorer (Layer 0.5 enrichment).
 //
-// Adds narrative-quality signals to a MarketDataDTO using the GitHub Copilot
-// API. All calls are async, fail-open: if the probe fails for any reason,
-// NarrativeKnown stays false and the token continues through the pipeline with
-// unmodified scores.
+// Adds narrative-quality signals to a MarketDataDTO using the Groq API
+// (llama-3.3-70b-versatile by default). Calls are synchronous with a bounded
+// timeout; fail-open: if the probe fails for any reason, NarrativeKnown stays
+// false and the token continues through the pipeline with unmodified scores.
 //
 // Prompt design:
 //   - System message uses caveman-mode compression (terse, no filler) to stay
-//     under context limits and minimize token usage on the PAT rate limit.
+//     under context limits and minimize token usage on the rate limit.
 //   - User message is a one-shot JSON-output prompt — no multi-turn, no CoT.
 //   - Trending narratives injected from config so the model stays current
 //     without internet access per request (static context injection).
@@ -17,7 +17,7 @@ package probes
 //     to satisfy the AIClient.MaxPromptChars guard.
 //
 // Security invariants inherited from AIClient:
-//   - Token from GITHUB_COPILOT_TOKEN env var only.
+//   - API key from GROQ_API_KEY env var only.
 //   - HTTPS-only endpoint, 4 KiB response bound.
 
 import (

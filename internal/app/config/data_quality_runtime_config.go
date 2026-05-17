@@ -17,10 +17,6 @@ type DataQualityRuntimeConfig struct {
 	Cache             DataQualityCacheConfig         `yaml:"cache"`
 	RiskWeights       DataQualityRiskWeights         `yaml:"risk_weights"`
 	FailurePolicy     DataQualityFailurePolicyConfig `yaml:"failure_policy"`
-	// NameDedup configures the pre-probe name-deduplication guard in the
-	// MarketProbesWorker. Runs before any RPC probe to skip expensive calls
-	// for duplicate-name or famous-token-copycat tokens, saving Helius credits.
-	NameDedup NameDedupConfig `yaml:"name_dedup"`
 
 	// ModeProfiles maps the active operational mode (STRICT / BALANCED /
 	// EXPLORATION / VERY_EXPLORATION) onto the threshold band that turns

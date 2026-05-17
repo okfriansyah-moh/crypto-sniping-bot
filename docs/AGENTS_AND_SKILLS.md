@@ -153,13 +153,13 @@ phase-builder → dto-guardian → integration → security-auditor → test-bui
 | traceability               | `.github/skills/traceability/SKILL.md`               | All   | TraceID/CorrelationID/CausationID/VersionID contract       |
 | profit-first               | `.github/skills/profit-first/SKILL.md`               | All   | Profit factor design framework, feature evaluation gate    |
 
-### AI Enrichment Skills (cross-layer via `internal/ai/CopilotClient`)
+### AI Enrichment Skills (cross-layer via `internal/ai/GroqClient`)
 
-AI Enrichment is an optional cross-cutting layer that uses the GitHub Copilot API to add narrative intelligence. All calls are **1-shot, fail-open, and autonomous** — the pipeline is never blocked. Model is configurable via `AI_ENRICH_MODEL` env var (default: `gpt-5.4-mini`), following the same pattern as `MODEL_HEAVY` in `scripts/run_parallel.sh`.
+AI Enrichment is a cross-cutting layer that uses the **Groq API** (`GROQ_API_KEY` env var) to add narrative intelligence. All calls are **1-shot, fail-open, and autonomous** — the pipeline is never blocked. Model is configurable via `AI_ENRICH_MODEL` env var (default: `llama-3.3-70b-versatile`), following the same pattern as `MODEL_HEAVY` in `scripts/run_parallel.sh`.
 
 | Skill                | Path                                            | Layer | Purpose                                                                    |
 | -------------------- | ----------------------------------------------- | ----- | -------------------------------------------------------------------------- |
-| `ai-narrative-probe` | `internal/modules/probes/ai_narrative_probe.go` | 0/1   | Narrative scoring 0–10; copy-paste/impersonation detection via Copilot API |
+| `ai-narrative-probe` | `internal/modules/probes/ai_narrative_probe.go` | 0/1   | Narrative scoring 0–10; copy-paste/impersonation detection via Groq API    |
 | `loss-explainer`     | `internal/modules/learning/loss_explainer.go`   | 10    | AI loss category + natural-language reason appended to `LearningRecordDTO` |
 
 **Cross-layer effects:**

@@ -67,7 +67,7 @@ Layer 9   Position Engine           (TP1/TP2/SL/TIME, adaptive per cohort)
 Layer 10  Learning Engine           (FP/FN, cohort analysis, bounded updates)
 ```
 
-AI Enrichment cross-cuts layers 0/1/3/10 via `internal/ai/CopilotClient` (1-shot, fail-open, model configurable via `AI_ENRICH_MODEL` env var — default `gpt-5.4-mini`):
+AI Enrichment cross-cuts layers 0/1/3/10 via `internal/ai/GroqClient` (1-shot, fail-open, model configurable via `AI_ENRICH_MODEL` env var — default `llama-3.3-70b-versatile`):
 
 - **L0/1** `AINarrativeProbe` — narrative scoring 0–10, copy-paste / impersonation detection
 - **L1 DQ** — soft risk bump (+0.30 copy-paste, +0.20 impersonation) via `NarrativeKnown` gate
@@ -222,9 +222,9 @@ All adaptive updates are non-negotiably:
 - **gRPC auth tokens from env vars only** — `SOLANA_GRPC_TOKEN` is read exclusively via `os.Getenv`. The field `GrpcAuthToken` is intentionally absent from `TransportConfig`, `IngestionTransportConfig`, and `config/chains.yaml`. Never add it back.
 - **API keys never in YAML** — all external API keys (`BIRDEYE_API_KEY`, `TWITTER_BEARER_TOKEN`, `COPY_TRADE_WALLETS`, `JITO_BUNDLE_URL`, `JITO_TIP_ACCOUNT`, `GITHUB_COPILOT_TOKEN`, etc.) are read via `os.Getenv` at constructor only. Never log, never config-file.
 - **Response bodies are bounded** — Jito HTTP response: 64 KiB cap. DEXScreener copy-trade: 128 KiB cap. Copilot AI response: 4 KiB cap (`max_response_bytes`). Never use `io.ReadAll` without a `LimitReader`.
-- **AI enrichment is 1-shot and autonomous** — `CopilotClient.Complete()` issues one HTTP request (plus one retry on 429/5xx) and returns immediately. No human approval gate, no interaction loop. All callers are fail-open (`NarrativeKnown=false` / `AIExplanationKnown=false` on any error). The pipeline is never blocked by AI calls.
-- **AI model is configurable, never hardcoded** — model priority: `AI_ENRICH_MODEL` env var (highest) → `ai_enrichment.model` in `config/pipeline.yaml` → built-in default `gpt-5.4-mini`. This follows the same pattern as `MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}"` in `scripts/run_parallel.sh`. Never hardcode a model name in Go source.
-- **HTTPS only for AI enrichment endpoint** — `NewCopilotClient` rejects any non-HTTPS endpoint at construction (same invariant as Jito). Default endpoint: `https://api.githubcopilot.com/chat/completions`.
+- **AI enrichment is 1-shot and autonomous** — `GroqClient.Complete()` issues one HTTP request (plus one retry on 429/5xx) and returns immediately. No human approval gate, no interaction loop. All callers are fail-open (`NarrativeKnown=false` / `AIExplanationKnown=false` on any error). The pipeline is never blocked by AI calls.
+- **AI model is configurable, never hardcoded** — model priority: `AI_ENRICH_MODEL` env var (highest) → `ai_enrichment.model` in `config/pipeline.yaml` → built-in default `llama-3.3-70b-versatile`. This follows the same pattern as `MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}"` in `scripts/run_parallel.sh`. Never hardcode a model name in Go source.
+- **HTTPS only for AI enrichment endpoint** — `NewGroqClient` rejects any non-HTTPS endpoint at construction (same invariant as Jito). Default endpoint: `https://api.groq.com/openai/v1/chat/completions`.
 - **RPC error messages are truncated** — `truncate(msg, 200)` before surfacing in returned errors or logs. Never expose raw RPC error strings of arbitrary length.
 - **Mandatory DQ hard-rejects (fail-closed, never relax)** — Layer 1 enforces three mandatory structural hard-rejects that cannot be bypassed by any operational mode, starvation condition, or profit argument:
   1. **Serial launcher dev** — any creator wallet with ≥ `max_creator_prev_token_count` prior launches is REJECTED via `serial_launcher`. When the creator reputation probe fails (`CreatorPrevTokenCountKnown=false`), reject via `unknown_creator_count` (fail-closed). Config: `reject_unknown_creator_count: true`.
