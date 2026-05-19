@@ -799,6 +799,21 @@ func (c *SolanaClient) GetDASAsset(ctx context.Context, mint string) (*DASAsset,
 		"id": mint,
 	}
 
+	// Use json.RawMessage so we can detect a null result before unmarshalling.
+	// When the DAS index has no record for this mint (very new token, not yet
+	// indexed), Helius returns {"result":null}. Unmarshalling null into a
+	// concrete struct silently succeeds with zero values, which would produce a
+	// non-nil *DASAsset with all-empty fields — breaking the (nil, nil) contract
+	// and causing the DAS probe to mark SocialLinksKnown=true with HasSocialLinks=false,
+	// incorrectly triggering the mandatory no_social_links DQ reject.
+	var rawResult json.RawMessage
+	if err := c.httpRPC(ctx, "getAsset", []interface{}{params}, &rawResult); err != nil {
+		return nil, err
+	}
+	if len(rawResult) == 0 || string(rawResult) == "null" {
+		return nil, nil // asset not in DAS index yet
+	}
+
 	var raw struct {
 		Interface string `json:"interface"`
 		TokenInfo struct {
@@ -817,8 +832,15 @@ func (c *SolanaClient) GetDASAsset(ctx context.Context, mint string) (*DASAsset,
 			} `json:"links"`
 		} `json:"content"`
 	}
-	if err := c.httpRPC(ctx, "getAsset", []interface{}{params}, &raw); err != nil {
+	if err := json.Unmarshal(rawResult, &raw); err != nil {
 		return nil, err
+	}
+	// Only return a DAS asset record for fungible tokens. Non-fungible assets
+	// (NFTs, compressed NFTs) share the same DAS endpoint but have no token_info
+	// supply/decimal fields meaningful to this pipeline.
+	if raw.Interface != "FungibleToken" && raw.Interface != "FungibleAsset" && raw.Interface != "" {
+		// Unknown interface: still return the record (fail-open) — the probe
+		// will only apply fields it can validate (supply > 0, valid social links).
 	}
 	return &DASAsset{
 		Supply:   raw.TokenInfo.Supply,

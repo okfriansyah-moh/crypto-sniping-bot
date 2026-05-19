@@ -25,8 +25,9 @@ type SolanaHolderDistConfig struct {
 	// corruption. To support a different K, a new DTO field is required.
 	TopK int `yaml:"top_k"`
 	// CacheTTLSec is how long a cached holder distribution result is served
-	// before the next probe call re-fetches from chain. Defaults to 3600 (1h).
-	// Set to 0 to disable caching.
+	// before the next probe call re-fetches from chain. Defaults to 3600 (1h)
+	// when 0 or unset. To disable caching entirely use a negative value (e.g. -1),
+	// which skips both the cache-hit fast path and the StartEviction loop.
 	CacheTTLSec int `yaml:"cache_ttl_sec"`
 }
 

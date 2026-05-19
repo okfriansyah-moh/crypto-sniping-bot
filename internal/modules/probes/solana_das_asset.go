@@ -93,6 +93,9 @@ func NewSolanaDASAssetProbe(rpc SolanaProbeRPCClient, cfg SolanaDASAssetConfig, 
 // after construction, passing the application-lifetime context. The
 // goroutine stops when ctx is cancelled.
 func (p *SolanaDASAssetProbe) StartEviction(ctx context.Context) {
+	if p.cfg.CacheTTLSec <= 0 {
+		return // caching disabled or invalid config — no eviction loop needed
+	}
 	ttl := time.Duration(p.cfg.CacheTTLSec) * time.Second
 	go func() {
 		ticker := time.NewTicker(ttl)
@@ -204,11 +207,11 @@ func (p *SolanaDASAssetProbe) buildResult(asset *DASAsset) dasAssetResult {
 
 	// Social links: apply the same validation gates as solana_metadata.go to
 	// avoid accepting DEX scanner URLs or non-profile Twitter links.
-	// We pass empty token name/symbol (not available at this probe stage)
-	// which means no name-matching guard — matching happens in DQ anyway.
-	hasTwitter := isTwitterProfileURL(asset.Twitter)
-	hasTelegram := strings.TrimSpace(asset.Telegram) != ""
-	hasWebsite := isSocialProfileURL("website", asset.Website, "", "")
+	// Pass asset.Name / asset.Symbol so the profileAssociatedWithToken guard
+	// (same logic as solana_metadata.go) can check handle/name association.
+	hasTwitter := isSocialProfileURL("twitter", asset.Twitter, asset.Name, asset.Symbol)
+	hasTelegram := isSocialProfileURL("telegram", asset.Telegram, asset.Name, asset.Symbol)
+	hasWebsite := isSocialProfileURL("website", asset.Website, asset.Name, asset.Symbol)
 	r.hasSocialLinks = hasTwitter || hasTelegram || hasWebsite
 
 	return r
