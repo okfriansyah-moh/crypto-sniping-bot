@@ -205,7 +205,12 @@ DUP_EVENT_IDS=$(jq -r 'select(
     .msg != "stage_completed" and
     .msg != "market_probe_failed" and
     .msg != "market_probes_completed" and
-    .msg != "solana_ingestion_emitted"
+    .msg != "solana_ingestion_emitted" and
+    .msg != "pre_probe_guard_skipped_all_probes" and
+    .msg != "pre_probe_rate_limit_skipped" and
+    .msg != "pre_probe_name_dedup_cache_hit" and
+    .msg != "pre_probe_name_dedup_db_hit" and
+    .msg != "pre_probe_copycat_detected"
   ) | .event_id' "$CLEAN_LOG" 2>/dev/null \
   | sort | uniq -d | wc -l | tr -d ' ')
 

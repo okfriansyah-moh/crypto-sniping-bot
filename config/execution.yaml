@@ -38,6 +38,8 @@ execution:
     confirm_timeout_ms: 15000
     receipt_poll_interval_ms: 400
     max_send_attempts: 3
+    wallet_key_paths:
+      - "${SOLANA_WALLET_KEY_1}"
 
   # Phase 10 (Reference-Repo Improvements / Task C) — adaptive priority
   # fee. mode="static" leaves the RPC-suggested fee unchanged.
@@ -50,8 +52,6 @@ execution:
     max_multiplier: 2.0
     compute_unit_limit_buffer: 20000
     priority_fee_lamports: 5000
-    wallet_key_paths:
-      - "${SOLANA_WALLET_KEY_1}"
 
   # P5: Jito bundle submission — route Solana transactions through the Jito
   # block-engine for MEV protection and priority inclusion.

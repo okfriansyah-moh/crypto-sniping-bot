@@ -32,6 +32,10 @@ func (s *stubSolanaRPC) GetTokenLargestAccounts(_ context.Context, mint, _ strin
 	return s.holders[mint], nil
 }
 
+func (s *stubSolanaRPC) GetDASAsset(_ context.Context, _ string) (*DASAsset, error) {
+	return nil, nil // not used by authorities/holder_dist/pumpfun tests
+}
+
 // buildSPLMint builds a minimal 82-byte SPL mint account with the
 // requested authority options.
 func buildSPLMint(mintOpt, freezeOpt uint32, supply uint64, decimals uint8, initialized bool) []byte {

@@ -684,6 +684,25 @@ func (a *solanaProbeRPCAdapter) GetTokenLargestAccounts(ctx context.Context, min
 	return out, nil
 }
 
+func (a *solanaProbeRPCAdapter) GetDASAsset(ctx context.Context, mint string) (*probes.DASAsset, error) {
+	asset, err := a.client.GetDASAsset(ctx, mint)
+	if err != nil {
+		return nil, err
+	}
+	if asset == nil {
+		return nil, nil
+	}
+	return &probes.DASAsset{
+		Supply:   asset.Supply,
+		Decimals: asset.Decimals,
+		Twitter:  asset.Twitter,
+		Telegram: asset.Telegram,
+		Website:  asset.Website,
+		Name:     asset.Name,
+		Symbol:   asset.Symbol,
+	}, nil
+}
+
 // solUsdProbeAdapter bridges ingestion_solana.SolUsdSource → probes.SolUsdSource.
 // Both interfaces share the same method signature; Go requires an
 // explicit adapter to convert between unrelated interface types.

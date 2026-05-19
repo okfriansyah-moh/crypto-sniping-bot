@@ -258,7 +258,7 @@ func (c *SolanaClient) markWSRateLimited(capturedIdx int, entry endpointEntry, p
 	c.logger.Warn("solana_ws_endpoint_rate_limited",
 		"program", programID,
 		"provider", entry.Dialect.Name(),
-		"url", entry.URL,
+		"url", maskURL(entry.URL),
 		"cooldown_ms", c.wsRateLimitCooldown.Milliseconds(),
 	)
 }
@@ -298,9 +298,9 @@ func (c *SolanaClient) recordWSEOFFailure(entry endpointEntry, programID string,
 				c.logger.Warn("solana_ws_provider_failover",
 					"program", programID,
 					"from_provider", entry.Dialect.Name(),
-					"from", entry.URL,
+					"from", maskURL(entry.URL),
 					"to_provider", nextEntry.Dialect.Name(),
-					"to", nextEntry.URL,
+					"to", maskURL(nextEntry.URL),
 					"consecutive_failures", newCount,
 					"threshold", c.wsFailThreshold,
 				)
@@ -316,9 +316,9 @@ func (c *SolanaClient) recordWSEOFFailure(entry endpointEntry, programID string,
 	c.logger.Warn("solana_ws_subscribe_eof_rotating",
 		"program", programID,
 		"provider", entry.Dialect.Name(),
-		"from", entry.URL,
+		"from", maskURL(entry.URL),
 		"to_provider", nextEntry.Dialect.Name(),
-		"to", nextEntry.URL,
+		"to", maskURL(nextEntry.URL),
 		"total_endpoints", len(c.wsEndpoints),
 	)
 }
@@ -354,7 +354,21 @@ type rpcError struct {
 }
 
 func (e *rpcError) Error() string {
-	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
+	msg := e.Message
+	if len(msg) > 200 {
+		msg = msg[:200] + "…"
+	}
+	return fmt.Sprintf("rpc error %d: %s", e.Code, msg)
+}
+
+// maskURL strips the query string from a URL before logging to prevent API
+// keys embedded as query parameters (e.g. ?api-key=…) from reaching log
+// aggregators. The scheme + host + path are preserved for observability.
+func maskURL(u string) string {
+	if idx := strings.IndexByte(u, '?'); idx >= 0 {
+		return u[:idx] + "?<redacted>"
+	}
+	return u
 }
 
 func (c *SolanaClient) nextID() int64 {
@@ -410,9 +424,9 @@ func (c *SolanaClient) httpRPC(ctx context.Context, method string, params []inte
 			c.logger.Warn("solana_http_rate_limited_rotating",
 				"method", method,
 				"provider", entry.Dialect.Name(),
-				"from", entry.URL,
+				"from", maskURL(entry.URL),
 				"to_provider", nextEntry.Dialect.Name(),
-				"to", nextEntry.URL,
+				"to", maskURL(nextEntry.URL),
 				"total_endpoints", len(c.httpEndpoints),
 			)
 		}
@@ -761,6 +775,60 @@ func (c *SolanaClient) GetSignaturesForAddress(ctx context.Context, programID st
 		}
 	}
 	return out, nil
+}
+
+// DASAsset is the minimal view of a Helius DAS getAsset response used by probes.
+type DASAsset struct {
+	Supply   uint64
+	Decimals int
+	Twitter  string
+	Telegram string
+	Website  string
+	Name     string
+	Symbol   string
+}
+
+// GetDASAsset fetches token metadata, supply, and social links from the
+// Helius Digital Asset Standard (DAS) getAsset RPC method. One call
+// replaces up to three separate probes (metadata URI fetch, authority
+// account decode for supply, social link extraction). Returns (nil, nil)
+// when the asset does not exist. Non-Helius endpoints may return an
+// "unsupported method" error; callers should treat any error as fail-open.
+func (c *SolanaClient) GetDASAsset(ctx context.Context, mint string) (*DASAsset, error) {
+	params := map[string]interface{}{
+		"id": mint,
+	}
+
+	var raw struct {
+		Interface string `json:"interface"`
+		TokenInfo struct {
+			Supply   uint64 `json:"supply"`
+			Decimals int    `json:"decimals"`
+		} `json:"token_info"`
+		Content struct {
+			Metadata struct {
+				Name   string `json:"name"`
+				Symbol string `json:"symbol"`
+			} `json:"metadata"`
+			Links struct {
+				Twitter  string `json:"twitter"`
+				Telegram string `json:"telegram"`
+				Website  string `json:"website"`
+			} `json:"links"`
+		} `json:"content"`
+	}
+	if err := c.httpRPC(ctx, "getAsset", []interface{}{params}, &raw); err != nil {
+		return nil, err
+	}
+	return &DASAsset{
+		Supply:   raw.TokenInfo.Supply,
+		Decimals: raw.TokenInfo.Decimals,
+		Twitter:  raw.Content.Links.Twitter,
+		Telegram: raw.Content.Links.Telegram,
+		Website:  raw.Content.Links.Website,
+		Name:     raw.Content.Metadata.Name,
+		Symbol:   raw.Content.Metadata.Symbol,
+	}, nil
 }
 
 // ── WebSocket notification types ──────────────────────────────────────────────
