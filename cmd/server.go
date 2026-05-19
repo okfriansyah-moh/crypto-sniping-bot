@@ -123,7 +123,7 @@ func runServer() {
 	// pipeline is identical to its pre-probes wiring.
 	dqInputType := "market_data_event"
 	if cfg.Probes.Enabled {
-		probeList := buildMarketProbes(cfg, solanaRPCClient, solUsdSource, logger)
+		probeList := buildMarketProbes(ctx, cfg, solanaRPCClient, solUsdSource, logger)
 		probeWorker := workers.NewMarketProbesWorker(db, probeList, logger)
 		if cfg.NameDedup.Enabled && len(cfg.NameDedup.KnownTokens) > 0 {
 			probeWorker.WithNameDedup(cfg.NameDedup.KnownTokens)
@@ -505,10 +505,14 @@ func buildWalletShards(cfg *config.Config) []execution.WalletConfig {
 // instantiated. Returns an empty slice when no probes are configured —
 // the worker then operates as pass-through.
 //
+// ctx must be the application-lifetime context; it is forwarded to
+// each probe's StartEviction goroutine so eviction loops stop cleanly
+// when the server shuts down.
+//
 // solanaRPC and solUsd may be nil — Solana probes are skipped when the
 // Solana RPC client is unconfigured. The slice ordering defines probe
 // execution order; later probes see the enrichment from earlier probes.
-func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd ingestion_solana.SolUsdSource, logger *slog.Logger) []probes.MarketProbe {
+func buildMarketProbes(ctx context.Context, cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd ingestion_solana.SolUsdSource, logger *slog.Logger) []probes.MarketProbe {
 	var out []probes.MarketProbe
 	if cfg.Probes.HoneypotSim.Enabled {
 		// rpc client is not yet wired here — production deployments
@@ -527,6 +531,18 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 	// they would always error; skip registration entirely.
 	if solanaRPC != nil {
 		probeRPC := &solanaProbeRPCAdapter{client: solanaRPC}
+		// DAS probe runs first (fast path): a single Helius getAsset call
+		// populates supply and social links so the downstream probes
+		// (pumpfun_lp, metadata) can skip their own RPC/HTTP calls when
+		// the corresponding *Known flag is already true.
+		if cfg.Probes.SolanaDASAsset.Enabled {
+			das := probes.NewSolanaDASAssetProbe(probeRPC, probes.SolanaDASAssetConfig{
+				Enabled:   true,
+				TimeoutMs: cfg.Probes.SolanaDASAsset.TimeoutMs,
+			}, logger)
+			das.StartEviction(ctx)
+			out = append(out, das)
+		}
 		if cfg.Probes.SolanaAuthorities.Enabled {
 			out = append(out, probes.NewSolanaAuthoritiesProbe(probeRPC, probes.SolanaAuthoritiesConfig{
 				Enabled:    true,
@@ -542,12 +558,14 @@ func buildMarketProbes(cfg *config.Config, solanaRPC *rpc.SolanaClient, solUsd i
 			}, logger))
 		}
 		if cfg.Probes.SolanaHolderDist.Enabled {
-			out = append(out, probes.NewSolanaHolderDistProbe(probeRPC, probes.SolanaHolderDistConfig{
+			hd := probes.NewSolanaHolderDistProbe(probeRPC, probes.SolanaHolderDistConfig{
 				Enabled:    true,
 				TimeoutMs:  cfg.Probes.SolanaHolderDist.TimeoutMs,
 				Commitment: cfg.Probes.SolanaHolderDist.Commitment,
 				TopK:       cfg.Probes.SolanaHolderDist.TopK,
-			}, logger))
+			}, logger)
+			hd.StartEviction(ctx)
+			out = append(out, hd)
 		}
 	}
 
@@ -682,6 +700,25 @@ func (a *solanaProbeRPCAdapter) GetTokenLargestAccounts(ctx context.Context, min
 		})
 	}
 	return out, nil
+}
+
+func (a *solanaProbeRPCAdapter) GetDASAsset(ctx context.Context, mint string) (*probes.DASAsset, error) {
+	asset, err := a.client.GetDASAsset(ctx, mint)
+	if err != nil {
+		return nil, err
+	}
+	if asset == nil {
+		return nil, nil
+	}
+	return &probes.DASAsset{
+		Supply:   asset.Supply,
+		Decimals: asset.Decimals,
+		Twitter:  asset.Twitter,
+		Telegram: asset.Telegram,
+		Website:  asset.Website,
+		Name:     asset.Name,
+		Symbol:   asset.Symbol,
+	}, nil
 }
 
 // solUsdProbeAdapter bridges ingestion_solana.SolUsdSource → probes.SolUsdSource.

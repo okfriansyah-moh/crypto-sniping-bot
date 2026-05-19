@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"crypto-sniping-bot/contracts"
@@ -23,15 +24,34 @@ type SolanaHolderDistConfig struct {
 	// clamped back to 5 by NewSolanaHolderDistProbe to avoid semantic
 	// corruption. To support a different K, a new DTO field is required.
 	TopK int `yaml:"top_k"`
+	// CacheTTLSec is how long a cached holder distribution result is served
+	// before the next probe call re-fetches from chain. Defaults to 3600 (1h)
+	// when 0 or unset. To disable caching entirely use a negative value (e.g. -1),
+	// which skips both the cache-hit fast path and the StartEviction loop.
+	CacheTTLSec int `yaml:"cache_ttl_sec"`
+}
+
+// holderDistResult is the cached outcome of a single probe call.
+type holderDistResult struct {
+	holderCount int32
+	top5Pct     float64
+	fetchedAt   time.Time
 }
 
 // SolanaHolderDistProbe populates HolderCount, Top5HolderPct and
 // HolderDistKnown from getTokenLargestAccounts. The Solana RPC returns
 // up to 20 entries — large pump.fun pools typically saturate this.
+//
+// Results are cached in memory for CacheTTLSec (default 1h). Holder
+// distribution changes slowly for new tokens; caching the result avoids
+// repeated getAccountInfo + getTokenLargestAccounts calls for every
+// rescan band and duplicate ingest event, saving significant Helius credits.
 type SolanaHolderDistProbe struct {
 	rpc    SolanaProbeRPCClient
 	cfg    SolanaHolderDistConfig
 	logger *slog.Logger
+	// cache maps tokenAddress (string) → holderDistResult.
+	cache sync.Map
 }
 
 func NewSolanaHolderDistProbe(rpc SolanaProbeRPCClient, cfg SolanaHolderDistConfig, logger *slog.Logger) *SolanaHolderDistProbe {
@@ -46,7 +66,39 @@ func NewSolanaHolderDistProbe(rpc SolanaProbeRPCClient, cfg SolanaHolderDistConf
 	if cfg.TopK != 5 {
 		cfg.TopK = 5
 	}
+	if cfg.CacheTTLSec == 0 {
+		cfg.CacheTTLSec = 3600 // default 1h
+	}
 	return &SolanaHolderDistProbe{rpc: rpc, cfg: cfg, logger: logger}
+}
+
+// StartEviction launches a background goroutine that periodically removes
+// expired cache entries to prevent unbounded sync.Map growth. Call once
+// after construction, passing the application-lifetime context. The
+// goroutine stops when ctx is cancelled.
+func (p *SolanaHolderDistProbe) StartEviction(ctx context.Context) {
+	if p.cfg.CacheTTLSec <= 0 {
+		return
+	}
+	ttl := time.Duration(p.cfg.CacheTTLSec) * time.Second
+	go func() {
+		ticker := time.NewTicker(ttl)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				now := time.Now()
+				p.cache.Range(func(k, v any) bool {
+					if now.Sub(v.(holderDistResult).fetchedAt) >= ttl {
+						p.cache.Delete(k)
+					}
+					return true
+				})
+			}
+		}
+	}()
 }
 
 func (p *SolanaHolderDistProbe) Name() string { return "solana_holder_dist" }
@@ -56,6 +108,15 @@ func (p *SolanaHolderDistProbe) Name() string { return "solana_holder_dist" }
 // the sum of the returned largest-holder balances as the denominator, so the
 // resulting percentage is relative to the returned holder set rather than the
 // full mint supply.
+//
+// Program-ID precheck: getTokenLargestAccounts only works for SPL Token v1
+// (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA). Calling it on a Token-2022
+// mint or an LP address returns JSON-RPC error -32602 "Invalid param: not a
+// Token mint". We detect this by inspecting the mint account's owner field
+// before the main call; if the owner is not SPL Token v1, we return the input
+// unchanged with HolderDistKnown=false (not an error — DQ degrades normally).
+const splTokenV1Program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
 func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDataDTO) (contracts.MarketDataDTO, error) {
 	if !strings.EqualFold(in.Chain, "solana") {
 		return in, nil
@@ -64,8 +125,32 @@ func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDa
 	if mint == "" {
 		return in, errors.New("probes/solana_holder_dist: empty token address")
 	}
+	// Reject addresses that are not valid Solana base58 public keys.
+	// Fail-open: malformed input should not block the pipeline.
+	if !isValidSolanaMint(mint) {
+		return in, nil
+	}
 	if p.rpc == nil {
 		return in, errors.New("probes/solana_holder_dist: nil rpc client")
+	}
+
+	// Fast path: return cached result if still within TTL.
+	if p.cfg.CacheTTLSec > 0 {
+		if cached, ok := p.cache.Load(mint); ok {
+			r := cached.(holderDistResult)
+			ttl := time.Duration(p.cfg.CacheTTLSec) * time.Second
+			if time.Since(r.fetchedAt) < ttl {
+				out := in
+				out.HolderCount = r.holderCount
+				out.Top5HolderPct = r.top5Pct
+				out.HolderDistKnown = true
+				p.logger.Info("solana_holder_dist: cache_hit",
+					"mint", mint,
+					"age_s", int(time.Since(r.fetchedAt).Seconds()),
+				)
+				return out, nil
+			}
+		}
 	}
 
 	timeout := time.Duration(p.cfg.TimeoutMs) * time.Millisecond
@@ -74,6 +159,37 @@ func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDa
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Program-ID precheck: verify the mint is owned by SPL Token v1 before
+	// calling getTokenLargestAccounts. Token-2022 mints and LP addresses are
+	// not accepted by that RPC method (error -32602).
+	//
+	// Fast path: if solana_authorities already ran successfully (SolanaAuthoritiesKnown=true),
+	// the mint is confirmed SPL v1 — that probe only succeeds on the SPL v1 mint account
+	// layout. Skip the redundant getAccountInfo call (saves 1 Helius credit per event).
+	if !in.SolanaAuthoritiesKnown {
+		acct, err := p.rpc.GetAccountInfo(cctx, mint, p.cfg.Commitment)
+		if err != nil {
+			// GetAccountInfo failure is non-fatal here — log and proceed with
+			// the holder dist call; if that also fails the error surfaces normally.
+			p.logger.Info("solana_holder_dist: account_info_precheck_failed",
+				"mint", mint,
+				"error", err,
+			)
+		} else if acct == nil || acct.Owner != splTokenV1Program {
+			// Not an SPL v1 mint (Token-2022, LP address, etc.) — skip gracefully.
+			p.logger.Info("solana_holder_dist: skipped_non_spl_v1_mint",
+				"mint", mint,
+				"owner", func() string {
+					if acct == nil {
+						return "<nil>"
+					}
+					return acct.Owner
+				}(),
+			)
+			return in, nil
+		}
+	}
 
 	holders, err := p.rpc.GetTokenLargestAccounts(cctx, mint, p.cfg.Commitment)
 	if err != nil {
@@ -137,5 +253,14 @@ func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDa
 	}
 	out.Top5HolderPct = pctF
 	out.HolderDistKnown = true
+	// Store in cache so subsequent rescan events and repeated ingest of the
+	// same mint skip the two Helius RPC calls (getAccountInfo + getTokenLargestAccounts).
+	if p.cfg.CacheTTLSec > 0 {
+		p.cache.Store(mint, holderDistResult{
+			holderCount: out.HolderCount,
+			top5Pct:     pctF,
+			fetchedAt:   time.Now(),
+		})
+	}
 	return out, nil
 }

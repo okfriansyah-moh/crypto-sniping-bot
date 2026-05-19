@@ -41,6 +41,13 @@ type ProbesConfig struct {
 	// SolanaHolderDist configures the SPL holder-concentration probe.
 	SolanaHolderDist SolanaHolderDistYAML `yaml:"solana_holder_dist"`
 
+	// SolanaDASAsset configures the Helius DAS getAsset enrichment probe.
+	// When enabled it fetches supply and social links in a single DAS call
+	// before the other Solana probes run, saving Helius credits. Disabled
+	// by default — enable only on Helius endpoints (non-Helius RPC will
+	// return an unsupported-method error which the probe treats as fail-open).
+	SolanaDASAsset SolanaProbeYAML `yaml:"solana_das_asset"`
+
 	// SolanaMetadata configures the off-chain metadata fetch probe.
 	// Fetches the MetadataURI (IPFS/Arweave/HTTPS) and sets
 	// SocialLinksKnown + HasSocialLinks. No RPC client required.
