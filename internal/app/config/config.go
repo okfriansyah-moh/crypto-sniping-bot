@@ -71,6 +71,10 @@ type Config struct {
 	// config/data_quality.yaml (top-level, NOT nested under data_quality:).
 	NameDedup NameDedupConfig `yaml:"name_dedup"`
 
+	// CreatorProfile configures the creator_profile_aggregator worker (Task 8).
+	// Maps to the creator_profile: block in config/pipeline.yaml.
+	CreatorProfile CreatorProfileConfig `yaml:"creator_profile"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
 }
@@ -754,6 +758,16 @@ type HardeningConfig struct {
 
 	// Reorg protection: max reorg depth before triggering halt.
 	MaxReorgDepth int `yaml:"max_reorg_depth"` // default: 12 for EVM
+}
+
+// CreatorProfileConfig governs the creator_profile_aggregator worker (Task 8).
+// Maps to the creator_profile: block in config/pipeline.yaml.
+type CreatorProfileConfig struct {
+	// GoldenGemPnlThresholdPct is the minimum PnL percentage (e.g. 200.0 = 2×)
+	// above which a winning trade outcome is classified as a "golden gem" rather
+	// than an ordinary "win" in the creator_profiles table. 0 disables golden-gem
+	// classification (all wins are stored as "win").
+	GoldenGemPnlThresholdPct float64 `yaml:"golden_gem_pnl_threshold_pct"`
 }
 
 // Load reads configuration from one or more YAML config files.

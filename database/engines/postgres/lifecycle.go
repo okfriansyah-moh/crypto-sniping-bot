@@ -195,10 +195,15 @@ func (d *DB) scanLifecycle(row *sql.Row) (*database.Lifecycle, error) {
 // REJECTED→DQ_PASSED: rescan re-evaluation path — the rescan worker re-emits
 // market_data_event for tokens that were previously rejected (e.g. token_too_young).
 // When the token now passes DQ the lifecycle must recover forward rather than stall.
+//
+// DQ_SKIPPED (Task 13): terminal state for EXPLORATION/VERY_EXPLORATION silent-drop.
+// The rescan worker may re-evaluate a skipped token at a later time band; the state
+// therefore allows recovery to DQ_PASSED or REJECTED.
 func isValidTransition(from, to string) bool {
 	allowed := map[string][]string{
-		"DETECTED":      {"DQ_PASSED", "REJECTED"},
-		"REJECTED":      {"DQ_PASSED"}, // rescan recovery: re-evaluated token now passes
+		"DETECTED":      {"DQ_PASSED", "REJECTED", "DQ_SKIPPED"},
+		"REJECTED":      {"DQ_PASSED", "DQ_SKIPPED"}, // rescan recovery: re-evaluated token now passes or skips
+		"DQ_SKIPPED":    {"DQ_PASSED", "REJECTED"},   // rescan re-evaluation: skipped token later passes or is rejected
 		"DQ_PASSED":     {"FEATURE_READY", "REJECTED"},
 		"FEATURE_READY": {"EDGE_DETECTED", "REJECTED"},
 		"EDGE_DETECTED": {"VALIDATED", "REJECTED"},

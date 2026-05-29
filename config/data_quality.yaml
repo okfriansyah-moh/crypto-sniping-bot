@@ -143,7 +143,19 @@ data_quality:
     # CEX within hours. Quality profile: social links present, dev 1/1 tokens,
     # LP burned, contract renounced. 15 minutes gives enough time for holder
     # distribution and wash patterns to become observable.
-    min_token_age_seconds: 900 # 15 minutes
+    #
+    # P2-B Review (Task 20 — 2026-05-29, PRODUCTION_GATE_ANALYSIS § 7 P2-B):
+    # pump.fun graduation tokens (pumpfun-amm family) have newly-created Raydium
+    # pools immediately after bonding-curve completion. Under STRICT/BALANCED the
+    # 900s floor may reject the first 15 minutes of a graduation token's lifecycle.
+    # EXPLORATION/VERY_EXPLORATION already disable this check (min_token_age_seconds: -1
+    # in the per-mode profile). Shadow-mode data will reveal whether graduation
+    # tokens consistently peak within 3–5 minutes of listing. If yes, a follow-up
+    # plan will add a per-family min_token_age_seconds override for pumpfun-amm.
+    # Action deferred: PRODUCTION_GATE_ANALYSIS § 10 explicitly defers this to a
+    # separate plan after ≥ 14 days AND ≥ 30 completed shadow trades. Do NOT lower
+    # this value or add a per-family override until that data is available.
+    min_token_age_seconds: 900 # 15 minutes — see P2-B review comment above
 
     # min_holder_count: structural hard-reject when confirmed unique holder
     # count is below this floor. A token with fewer than 50 holders after
@@ -181,6 +193,23 @@ data_quality:
     # Rug authority (Solana) — must be renounced for safe pass
     solana_require_mint_authority_renounced: true
     solana_require_freeze_authority_renounced: true
+
+    # Market cap range filter (DEXScreener data).
+    # Only applied when MarketCapUsd > 0 (i.e., pair is indexed on DEXScreener).
+    # Commented out by default — enable and tune after confirming graduation token
+    # market cap distribution in shadow mode.
+    # PRODUCTION_GATE_ANALYSIS § 10 Change 3 — guard pattern:
+    #   if MinMarketCapUsd > 0 && in.MarketCapUsd > 0 && in.MarketCapUsd < MinMarketCapUsd { reject }
+    # pump.fun graduation tokens transition at ~$69k market cap; the $20k max would
+    # reject freshly-graduated tokens. Tune in shadow mode before enabling.
+    # min_market_cap_usd: 3000.0
+    # max_market_cap_usd: 20000.0
+
+    # Volume floor (DEXScreener data).
+    # Only applied when VolumeUsd1h > 0.
+    # PRODUCTION_GATE_ANALYSIS § 10 Change 3 — guard pattern:
+    #   if MinVolumeUsd1h > 0 && in.VolumeUsd1h > 0 && in.VolumeUsd1h < MinVolumeUsd1h { reject }
+    # min_volume_usd_1h: 100.0
 
   # ── Detector cache (LRU) ──────────────────────────────────────
   # Keyed by (chain, token_address, detector_name). Bounded.
@@ -234,21 +263,48 @@ data_quality:
       risky_pass_above: 0.15
       unknown_factor: 0.5
       min_token_age_seconds: 0 # use global (900s)
+      # Serial-launcher per-mode overrides (Phase 3 — Section 9 Step 2).
+      # STRICT: sentinel 0 = use global threshold (1); behaviour unchanged.
+      max_creator_prev_token_count: 0
+      serial_launcher_requires_social_links: false
+      serial_launcher_max_risk_score: 0.0
+      serial_launcher_min_holder_count: 0
     balanced:
       reject_above: 0.50
       risky_pass_above: 0.25
       unknown_factor: 0.35 # was 0.0 — unknown detectors now contribute risk (profit-first)
       min_token_age_seconds: 0 # use global (900s)
+      # Serial-launcher per-mode overrides (Phase 3 — Section 9 Step 2).
+      # BALANCED: sentinel 0 = use global threshold (1); behaviour unchanged.
+      max_creator_prev_token_count: 0
+      serial_launcher_requires_social_links: false
+      serial_launcher_max_risk_score: 0.0
+      serial_launcher_min_holder_count: 0
     exploration:
       reject_above: 0.65
       risky_pass_above: 0.35
       unknown_factor: 0.0
       min_token_age_seconds: -1 # disabled — new-launch sniping catches tokens at creation
+      # Serial-launcher per-mode overrides (Phase 3 — Section 9 Step 2).
+      # EXPLORATION: serial launchers up to 5 prior tokens may pass via RISKY_PASS
+      # when all quality gates pass; otherwise SKIP (silent drop, no event).
+      max_creator_prev_token_count: 5
+      serial_launcher_requires_social_links: true
+      serial_launcher_max_risk_score: 0.40
+      serial_launcher_min_holder_count: 50
     very_exploration:
       reject_above: 0.75
       risky_pass_above: 0.45
       unknown_factor: 0.0
       min_token_age_seconds: -1 # disabled — maximally permissive, age is irrelevant
+      # Serial-launcher per-mode overrides (Phase 3 — Section 9 Step 2).
+      # VERY_EXPLORATION: serial launchers up to 10 prior tokens may pass via
+      # RISKY_PASS when all quality gates pass; otherwise SKIP. Looser holder
+      # floor (25 vs 50) and slightly higher risk-score ceiling (0.45 vs 0.40).
+      max_creator_prev_token_count: 10
+      serial_launcher_requires_social_links: true
+      serial_launcher_max_risk_score: 0.45
+      serial_launcher_min_holder_count: 25
 
   # ── Etherscan / BscScan v2 API ────────────────────────────────
   contract_verified_api:

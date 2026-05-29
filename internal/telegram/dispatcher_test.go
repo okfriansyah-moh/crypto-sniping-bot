@@ -426,6 +426,17 @@ func (s *dispatcherStubAdapter) UpsertCreatorRugObservation(_ context.Context, _
 func (s *dispatcherStubAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
 }
+
+// Task 8: Creator Profiles stubs.
+func (s *dispatcherStubAdapter) UpsertCreatorProfileOnLaunch(_ context.Context, _, _ string) error {
+	return nil
+}
+func (s *dispatcherStubAdapter) IncrementCreatorOutcome(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (s *dispatcherStubAdapter) GetCreatorProfile(_ context.Context, _, _ string) (contracts.CreatorProfile, bool, error) {
+	return contracts.CreatorProfile{}, false, nil
+}
 func (s *dispatcherStubAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
 	return 0, 0, nil
 }

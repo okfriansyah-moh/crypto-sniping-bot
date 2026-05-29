@@ -120,8 +120,23 @@ solana:
   programs:
     - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
       family: raydium-v4
+      # PRODUCTION_GATE_ANALYSIS § 5 Option 3: switch from logsSubscribe to
+      # transactionSubscribe with accountInclude on the Raydium V4 pool-creation
+      # authority account. logsSubscribe fires for every swap (~2M credits/day);
+      # transactionSubscribe fires only for new-pool initialization transactions
+      # (~500/day × ~2 credits = ~1k credits/day — 99.95% credit reduction).
+      # 5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1 is the Raydium V4 pool
+      # creation authority — a required signer for Initialize2 but not for swaps.
+      subscription_method: "transactionSubscribe"
+      account_filter: "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"
     - program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
       family: pumpfun
+      # PRODUCTION_GATE_ANALYSIS § 5 Option 1 + § 3 Problem B: the factory
+      # CreatorAddress resolves to this program ID (not a human wallet), causing
+      # 100% hard-reject events and wasting Helius credits on every bonding-curve
+      # launch. Disable this subscription to eliminate the wasteful WS stream.
+      # pumpfun-amm below remains active to capture graduation events.
+      disabled: true
     # P4: PumpFun AMM (graduation events — token migrates from bonding curve to AMM)
     - program_id: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
       family: pumpfun-amm
@@ -129,8 +144,11 @@ solana:
     # Helius Developer (Enhanced WS) supports unlimited concurrent logsSubscribe
     # connections — no 3-slot cap. These AMMs generate rare new-pool events that
     # cover PumpFun graduation (raydium-clmm) and high-quality Orca/Meteora
-    # launches. Credit cost is minimal: ≤300 getTransaction calls/day × 100
-    # credits = 900k credits/month worst-case (well within 10M budget).
+    # launches. Credit cost is minimal: ≤300 getTransaction calls/day × 1
+    # credit = ~9k credits/month worst-case (well within 10M budget).
+    # getTransaction is 1 credit per Helius docs (helius.dev/docs/billing/credits).
+    # The 100-credit figure refers to the Enhanced TX API (getTransactionsForAddress),
+    # which this bot does not call.
     - program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
       family: raydium-clmm
     - program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"

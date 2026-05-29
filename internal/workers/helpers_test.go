@@ -821,3 +821,10 @@ func (s *stubAdapter) ListHistoricalProfiles(_ context.Context) ([]contracts.His
 func (s *stubAdapter) GetExecutionLog(_ context.Context, _ int) ([]database.ExecutionLogRow, error) {
 	return nil, nil
 }
+
+// Task 8: Creator Profiles stubs.
+func (s *stubAdapter) UpsertCreatorProfileOnLaunch(_ context.Context, _, _ string) error { return nil }
+func (s *stubAdapter) IncrementCreatorOutcome(_ context.Context, _, _, _ string) error   { return nil }
+func (s *stubAdapter) GetCreatorProfile(_ context.Context, _, _ string) (contracts.CreatorProfile, bool, error) {
+	return contracts.CreatorProfile{}, false, nil
+}

@@ -32,6 +32,13 @@ type DataQualityRuntimeConfig struct {
 
 // DataQualityModeProfile is the per-mode decision band (Layer 1 fix).
 // Applied to the aggregated RiskScore by the Data Quality Engine.
+//
+// Serial-launcher override fields (Phase 3 — Section 9 Step 1):
+// STRICT and BALANCED leave MaxCreatorPrevTokenCount at 0, which means
+// "use the global threshold (1)" — behaviour is unchanged for those modes.
+// EXPLORATION sets it to 5 and VERY_EXPLORATION sets it to 10, enabling
+// conditional RISKY_PASS (with serial_launcher_monitored flag) when all
+// quality gates pass, or SKIP when any gate fails. See §7.9 of the plan.
 type DataQualityModeProfile struct {
 	// RejectAbove: RiskScore ≥ this → Decision = REJECT.
 	RejectAbove float64 `yaml:"reject_above"`
@@ -49,6 +56,43 @@ type DataQualityModeProfile struct {
 	// EXPLORATION / VERY_EXPLORATION set this to 0 (disable) because
 	// new-launch token sniping targets tokens at the moment of creation.
 	MinTokenAgeSeconds int32 `yaml:"min_token_age_seconds"`
+
+	// ── Serial-launcher per-mode overrides (Section 9 Step 1) ────────────
+
+	// MaxCreatorPrevTokenCount overrides the global serial-launcher rejection
+	// threshold for this mode.
+	//   0 → use the global thresholds.max_creator_prev_token_count (sentinel
+	//       for "keep STRICT/BALANCED behaviour unchanged").
+	//   > 0 → exploration-mode override: tokens whose creator has launched
+	//       fewer than this many previous tokens proceed to the quality gates
+	//       below. When the count is known and >= this value, the mode-aware
+	//       path applies (RISKY_PASS or SKIP) instead of a hard REJECT.
+	// STRICT and BALANCED MUST keep this at 0. EXPLORATION = 5,
+	// VERY_EXPLORATION = 10 per §7.9.
+	MaxCreatorPrevTokenCount int32 `yaml:"max_creator_prev_token_count"`
+
+	// SerialLauncherRequiresSocialLinks is a quality gate for the
+	// EXPLORATION / VERY_EXPLORATION serial-launcher conditional path.
+	// When true (required for both exploration modes), a serial-launcher
+	// token must have HasSocialLinks=true AND SocialLinksKnown=true to
+	// receive RISKY_PASS; otherwise SKIP is issued.
+	// STRICT and BALANCED: leave at false (unused when MaxCreatorPrevTokenCount=0).
+	SerialLauncherRequiresSocialLinks bool `yaml:"serial_launcher_requires_social_links"`
+
+	// SerialLauncherMaxRiskScore is the upper risk-score bound for the
+	// serial-launcher conditional path. A serial-launcher token in
+	// EXPLORATION/VERY_EXPLORATION with aggregated RiskScore >= this value
+	// fails the quality gate and receives SKIP instead of RISKY_PASS.
+	// 0 → gate disabled for this mode (not recommended for exploration modes).
+	// EXPLORATION = 0.40, VERY_EXPLORATION = 0.45 per §7.9.
+	SerialLauncherMaxRiskScore float64 `yaml:"serial_launcher_max_risk_score"`
+
+	// SerialLauncherMinHolderCount is the minimum confirmed unique holder
+	// count required for a serial-launcher token to pass the quality gate
+	// in EXPLORATION / VERY_EXPLORATION mode.
+	// 0 → gate disabled for this mode.
+	// EXPLORATION = 50, VERY_EXPLORATION = 25 per §7.9.
+	SerialLauncherMinHolderCount int32 `yaml:"serial_launcher_min_holder_count"`
 }
 
 // DataQualityDetectorFlags toggles individual detectors at runtime.
@@ -182,6 +226,38 @@ type DataQualityDetectorThresholds struct {
 	// alignment) is allowed — for meme tokens the narrative IS the edge.
 	// 0 → built-in default of 6.0 is used.
 	AICopyPasteDescMinNarrativeScore float64 `yaml:"ai_copy_paste_desc_min_narrative_score"`
+
+	// ── Market-cap & volume structural filters (Section 10) ──────────────
+	//
+	// These three fields gate the DEXScreener-sourced market-cap and volume
+	// values from MarketDataDTO. The guard logic MUST check BOTH that the
+	// threshold is > 0 AND that the input field is > 0 before applying the
+	// filter — brand-new tokens not yet indexed by DEXScreener report 0 for
+	// both fields and must NEVER be falsely rejected by these thresholds.
+	//
+	// All three default to 0 (filter disabled). They are intentionally
+	// commented out in config/data_quality.yaml until shadow-mode data
+	// confirms the graduation-token market-cap distribution (pump.fun
+	// graduates at ~$69k, which may exceed a $20k cap immediately).
+	// Enable and tune only after accumulating shadow-mode observations.
+	//
+	// See §7.11 of docs/plans/2026-05-29-production-gate-hardening-plan.md
+	// and PRODUCTION_GATE_ANALYSIS.md § 10 Change 3 for tuning guidance.
+
+	// MinMarketCapUsd rejects tokens whose MarketCapUsd is below this floor.
+	// 0 = filter disabled. Only evaluated when in.MarketCapUsd > 0.
+	// Starting reference value (comment out until shadow mode): 3000.0
+	MinMarketCapUsd float64 `yaml:"min_market_cap_usd"`
+
+	// MaxMarketCapUsd rejects tokens whose MarketCapUsd exceeds this ceiling.
+	// 0 = filter disabled. Only evaluated when in.MarketCapUsd > 0.
+	// Starting reference value (comment out until shadow mode): 20000.0
+	MaxMarketCapUsd float64 `yaml:"max_market_cap_usd"`
+
+	// MinVolumeUsd1h rejects tokens whose 1-hour USD volume is below this
+	// floor. 0 = filter disabled. Only evaluated when in.VolumeUsd1h > 0.
+	// Starting reference value (comment out until shadow mode): 100.0
+	MinVolumeUsd1h float64 `yaml:"min_volume_usd_1h"`
 }
 
 // DataQualityCacheConfig bounds per-detector cache footprints.

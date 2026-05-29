@@ -7,13 +7,59 @@ import (
 )
 
 // canonicalProfile is the fallback decision band used when YAML omits a
-// `mode_profiles.<mode>` entry. Values come from the data-quality-engine
-// skill — STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION canonical thresholds.
+// `mode_profiles.<mode>` entry. Values must exactly match config/data_quality.yaml
+// defaults (Tasks 12 + 14). Updated to include per-mode serial-launcher override
+// fields (Phase 3 — Section 9 Step 4).
+//
+// STRICT and BALANCED: MaxCreatorPrevTokenCount=0 (sentinel → use global=1);
+// serial-launcher hard-reject behaviour is UNCHANGED for those modes.
+// EXPLORATION: up to 5 prior launches, quality gates: social=true, max_risk=0.40, min_holders=50.
+// VERY_EXPLORATION: up to 10 prior launches, quality gates: social=true, max_risk=0.45, min_holders=25.
 var canonicalProfile = map[string]config.DataQualityModeProfile{
-	"STRICT":           {RejectAbove: 0.30, RiskyPassAbove: 0.15, UnknownFactor: 0.5},
-	"BALANCED":         {RejectAbove: 0.50, RiskyPassAbove: 0.25, UnknownFactor: 0.0},
-	"EXPLORATION":      {RejectAbove: 0.65, RiskyPassAbove: 0.35, UnknownFactor: 0.0, MinTokenAgeSeconds: -1},
-	"VERY_EXPLORATION": {RejectAbove: 0.75, RiskyPassAbove: 0.45, UnknownFactor: 0.0, MinTokenAgeSeconds: -1},
+	"STRICT": {
+		RejectAbove:    0.30,
+		RiskyPassAbove: 0.15,
+		UnknownFactor:  0.5,
+		// Serial-launcher sentinel: 0 = use global threshold (1) → hard REJECT unchanged.
+		MaxCreatorPrevTokenCount:          0,
+		SerialLauncherRequiresSocialLinks: false,
+		SerialLauncherMaxRiskScore:        0.0,
+		SerialLauncherMinHolderCount:      0,
+	},
+	"BALANCED": {
+		RejectAbove:    0.50,
+		RiskyPassAbove: 0.25,
+		UnknownFactor:  0.0,
+		// Serial-launcher sentinel: 0 = use global threshold (1) → hard REJECT unchanged.
+		MaxCreatorPrevTokenCount:          0,
+		SerialLauncherRequiresSocialLinks: false,
+		SerialLauncherMaxRiskScore:        0.0,
+		SerialLauncherMinHolderCount:      0,
+	},
+	"EXPLORATION": {
+		RejectAbove:        0.65,
+		RiskyPassAbove:     0.35,
+		UnknownFactor:      0.0,
+		MinTokenAgeSeconds: -1,
+		// Serial-launcher conditional path: RISKY_PASS when all quality gates pass,
+		// SKIP when any gate fails. Up to 5 prior launches allowed.
+		MaxCreatorPrevTokenCount:          5,
+		SerialLauncherRequiresSocialLinks: true,
+		SerialLauncherMaxRiskScore:        0.40,
+		SerialLauncherMinHolderCount:      50,
+	},
+	"VERY_EXPLORATION": {
+		RejectAbove:        0.75,
+		RiskyPassAbove:     0.45,
+		UnknownFactor:      0.0,
+		MinTokenAgeSeconds: -1,
+		// Serial-launcher conditional path: same as EXPLORATION with looser gates.
+		// Up to 10 prior launches allowed.
+		MaxCreatorPrevTokenCount:          10,
+		SerialLauncherRequiresSocialLinks: true,
+		SerialLauncherMaxRiskScore:        0.45,
+		SerialLauncherMinHolderCount:      25,
+	},
 }
 
 // resolveProfile returns the operational-mode profile used to gate the

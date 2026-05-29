@@ -50,13 +50,24 @@ func DefaultConfig(cfg *config.Config) Config {
 	return out
 }
 
+// CreatorProfileReader is the read-only interface for creator history lookups.
+// It is defined in the consuming module per Go dependency-inversion idiom.
+// The adapter-backed implementation lives outside this package (internal/workers/).
+// Fail-closed contract: when known==false or err!=nil, callers MUST NOT change
+// existing CreatorPrevTokenCountKnown semantics — the serial-launcher check
+// degrades as if no profile data were available.
+type CreatorProfileReader interface {
+	GetCount(ctx context.Context, chain, creator string) (count int32, known bool, err error)
+}
+
 // Module is the data quality engine.
 // It is a pure function: no state, no DB, no side effects on shared mutable state.
 type Module struct {
-	cfg       Config
-	runtime   *config.DataQualityRuntimeConfig // Phase 9 (§ 9.1) — optional runtime config.
-	logger    *slog.Logger
-	providers *dqproviders.Aggregator // optional external provider layer (P1)
+	cfg                  Config
+	runtime              *config.DataQualityRuntimeConfig // Phase 9 (§ 9.1) — optional runtime config.
+	logger               *slog.Logger
+	providers            *dqproviders.Aggregator // optional external provider layer (P1)
+	creatorProfileReader CreatorProfileReader    // optional creator profile reader (Task 9)
 }
 
 // New creates a new data quality Module.
@@ -84,6 +95,15 @@ func (m *Module) WithProviders(agg *dqproviders.Aggregator) *Module {
 	return m
 }
 
+// WithCreatorProfileReader attaches an optional reader for the creator_profiles
+// table (Task 9). When non-nil, ProcessForMode augments the serial-launcher
+// check with the accumulated per-wallet token count from the persistent table.
+// Calling with nil is a no-op — the module falls back to probe-only semantics.
+func (m *Module) WithCreatorProfileReader(r CreatorProfileReader) *Module {
+	m.creatorProfileReader = r
+	return m
+}
+
 // Process evaluates a MarketDataDTO and returns a DataQualityDTO.
 //
 // This is the back-compat entry point — it routes through ProcessForMode
@@ -106,10 +126,20 @@ func (m *Module) Process(ctx context.Context, in contracts.MarketDataDTO) (contr
 //
 // Hard-reject flags (HONEYPOT_SELL_FAIL, SELL_BLOCKED, HONEYPOT_BUY_FAIL)
 // always force Decision = REJECT regardless of the aggregated score.
+//
+// Task 13 — Mode-aware serial launcher:
+// STRICT/BALANCED (profile.MaxCreatorPrevTokenCount==0) → hard REJECT (unchanged).
+// EXPLORATION/VERY_EXPLORATION (profile.MaxCreatorPrevTokenCount>0) → RISKY_PASS or SKIP.
+// SKIP outcome must NOT emit a data_quality_event and MUST NOT contribute to reject-rate.
 func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO, mode string) (contracts.DataQualityDTO, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	profileName, profile := resolveProfile(mode, m.runtime)
+
+	// serialLauncherPendingRiskCheck is set to true when an EXPLORATION/
+	// VERY_EXPLORATION token has passed the non-risk quality gates and is
+	// awaiting the post-aggregation riskScore gate (SerialLauncherMaxRiskScore).
+	var serialLauncherPendingRiskCheck bool
 
 	// ── Structural rejects (cheap pre-checks) ───────────────────────────
 	var rejectReasons []string
@@ -165,29 +195,120 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 			)
 		}
 	}
-	// Structural reject: serial launcher (mandatory criterion).
-	// When CreatorPrevTokenCountKnown=true (populated by the
-	// solana_creator_reputation probe) and the count meets or exceeds the
-	// threshold, reject immediately — the dev-reputation weight alone (0.25)
-	// cannot push the aggregate over the BALANCED 0.50 barrier.
-	if m.runtime != nil &&
-		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
-		in.CreatorPrevTokenCountKnown &&
-		in.CreatorPrevTokenCount >= m.runtime.Thresholds.MaxCreatorPrevTokenCount {
-		rejectReasons = append(rejectReasons, "serial_launcher")
+	// Creator-profile enrichment (Task 9): augment CreatorPrevTokenCount
+	// from the persistent creator_profiles table before the serial-launcher
+	// check. This path runs ONLY when the injected reader is present and the
+	// creator address is known. Fail-closed: any error or known==false leaves
+	// CreatorPrevTokenCountKnown unchanged — the downstream check degrades
+	// as if no profile data were available.
+	if m.creatorProfileReader != nil && in.CreatorAddress != "" {
+		profileCount, profileKnown, profileErr := m.creatorProfileReader.GetCount(ctx, in.Chain, in.CreatorAddress)
+		if profileErr != nil {
+			m.logger.Warn("dq_creator_profile_read_failed",
+				"token", in.TokenAddress,
+				"creator", in.CreatorAddress,
+				"chain", in.Chain,
+				"error", profileErr,
+			)
+			// Fail-closed: leave CreatorPrevTokenCountKnown unchanged.
+		} else if profileKnown {
+			// Use the larger of probe count vs persistent profile count.
+			// The profile aggregator counts every ingested market_data_event
+			// for this creator — it may already know about more launches than
+			// the probe reported (especially for non-pump.fun creators).
+			if profileCount > in.CreatorPrevTokenCount {
+				in.CreatorPrevTokenCount = profileCount
+				in.CreatorPrevTokenCountKnown = true
+			} else if !in.CreatorPrevTokenCountKnown && profileCount > 0 {
+				// Profile knows this creator even if the probe did not set Known.
+				in.CreatorPrevTokenCount = profileCount
+				in.CreatorPrevTokenCountKnown = true
+			}
+		}
+		// profileKnown==false: leave CreatorPrevTokenCountKnown unchanged (fail-closed).
 	}
-	// Structural reject: unknown creator history (mandatory fail-closed).
-	// When CreatorPrevTokenCountKnown=false (probe timed out, API error, or
-	// probe not yet run) and RejectUnknownCreatorCount=true, reject rather than
-	// silently treating the creator as a first-time launcher. In BALANCED mode
-	// UnknownFactor=0 means an unknown creator contributes 0 risk — a serial
-	// developer with 382 tokens becomes indistinguishable from a first-timer.
-	// This is the critical fail-closed gap: probe failure must not equal approval.
-	if m.runtime != nil &&
-		m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 &&
-		m.runtime.Thresholds.RejectUnknownCreatorCount &&
-		!in.CreatorPrevTokenCountKnown {
-		rejectReasons = append(rejectReasons, "unknown_creator_count")
+
+	// ── Mode-aware serial launcher check (Task 13) ───────────────────────
+	// effectiveMax is the per-mode serial-launcher threshold.
+	//   STRICT/BALANCED:         profile.MaxCreatorPrevTokenCount==0 → use global (=1)
+	//   EXPLORATION:             profile.MaxCreatorPrevTokenCount==5
+	//   VERY_EXPLORATION:        profile.MaxCreatorPrevTokenCount==10
+	//
+	// STRICT/BALANCED behaviour is UNCHANGED: hard REJECT for known serial
+	// launchers and fail-closed REJECT for unknown creator history.
+	//
+	// EXPLORATION/VERY_EXPLORATION: tokens whose creator count ≥ effectiveMax
+	// are evaluated against quality gates:
+	//   • Social links confirmed (HasSocialLinks+SocialLinksKnown=true)
+	//   • HolderCount ≥ SerialLauncherMinHolderCount
+	//   • RiskScore < SerialLauncherMaxRiskScore  ← deferred to post-aggregation
+	// All non-risk gates pass → set serialLauncherPendingRiskCheck=true and continue.
+	// Any non-risk gate fails → return buildSkipResult immediately (SKIP, no event).
+	// Unknown creator in EXPLORATION → SKIP (not a quality failure, not a reject).
+	if m.runtime != nil && m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 {
+		effectiveMax := profile.MaxCreatorPrevTokenCount
+		usingGlobal := effectiveMax == 0
+		if usingGlobal {
+			effectiveMax = m.runtime.Thresholds.MaxCreatorPrevTokenCount
+		}
+
+		if in.CreatorPrevTokenCountKnown && in.CreatorPrevTokenCount >= effectiveMax {
+			if usingGlobal {
+				// STRICT/BALANCED: hard REJECT — unchanged from prior behaviour.
+				// The dev-reputation weight alone (0.25) cannot push the aggregate
+				// over the BALANCED 0.50 barrier, so a structural reject is required.
+				rejectReasons = append(rejectReasons, "serial_launcher")
+			} else {
+				// EXPLORATION/VERY_EXPLORATION: check non-risk quality gates.
+				// Social links must be confirmed present.
+				socialLinksOK := !profile.SerialLauncherRequiresSocialLinks ||
+					(in.SocialLinksKnown && in.HasSocialLinks)
+				// Holder count must be confirmed ≥ threshold. Unknown count fails closed
+				// because we cannot verify the token has genuine holder distribution.
+				holderCountOK := profile.SerialLauncherMinHolderCount == 0 ||
+					(in.HolderDistKnown && in.HolderCount >= profile.SerialLauncherMinHolderCount)
+
+				if !socialLinksOK || !holderCountOK {
+					m.logger.Info("serial_launcher_skip",
+						"token", in.TokenAddress,
+						"chain", in.Chain,
+						"creator", in.CreatorAddress,
+						"creator_count", in.CreatorPrevTokenCount,
+						"effective_max", effectiveMax,
+						"social_links_ok", socialLinksOK,
+						"holder_count_ok", holderCountOK,
+						"mode", profileName,
+					)
+					return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkipped}, profileName), nil
+				}
+				// Non-risk gates passed; defer the SerialLauncherMaxRiskScore check
+				// to post-aggregation (riskScore is not yet computed at this point).
+				serialLauncherPendingRiskCheck = true
+			}
+		}
+
+		// Unknown creator history: mode-aware fail-closed handling.
+		if !in.CreatorPrevTokenCountKnown {
+			if usingGlobal {
+				// STRICT/BALANCED: probe failure must not equal approval.
+				// An unknown dev in BALANCED mode contributes 0 risk (UnknownFactor=0),
+				// making a serial developer with hundreds of launches look like a new dev.
+				if m.runtime.Thresholds.RejectUnknownCreatorCount {
+					rejectReasons = append(rejectReasons, "unknown_creator_count")
+				}
+			} else {
+				// EXPLORATION/VERY_EXPLORATION: unknown history is not a quality failure —
+				// the mode explicitly tolerates more risk. Drop silently so the token does
+				// not pollute reject-rate statistics in Layer 10.
+				m.logger.Info("serial_launcher_skip_unknown",
+					"token", in.TokenAddress,
+					"chain", in.Chain,
+					"creator", in.CreatorAddress,
+					"mode", profileName,
+				)
+				return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkipped}, profileName), nil
+			}
+		}
 	}
 	// Structural reject: confirmed no social links (mandatory criterion).
 	// When SocialLinksKnown=true (metadata probe ran) and HasSocialLinks=false
@@ -258,6 +379,46 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 			age := tokenAgeSeconds(in.BlockTimestamp, in.IngestedAt)
 			if age >= 0 && age < int64(effectiveMinAge) {
 				rejectReasons = append(rejectReasons, "token_too_young")
+			}
+		}
+	}
+
+	// Optional: market cap range filter.
+	// Guards on > 0 on the input field ensure brand-new tokens not yet indexed
+	// by DEXScreener are not incorrectly rejected.
+	if m.runtime != nil {
+		thresholds := m.runtime.Thresholds
+		if thresholds.MinMarketCapUsd > 0 && in.MarketCapUsd > 0 {
+			if in.MarketCapUsd < thresholds.MinMarketCapUsd {
+				m.logger.Info("market_cap_reject",
+					"token", in.TokenAddress,
+					"chain", in.Chain,
+					"market_cap_usd", in.MarketCapUsd,
+					"min_market_cap_usd", thresholds.MinMarketCapUsd,
+				)
+				rejectReasons = append(rejectReasons, "market_cap_too_low")
+			}
+		}
+		if thresholds.MaxMarketCapUsd > 0 && in.MarketCapUsd > 0 {
+			if in.MarketCapUsd > thresholds.MaxMarketCapUsd {
+				m.logger.Info("market_cap_reject",
+					"token", in.TokenAddress,
+					"chain", in.Chain,
+					"market_cap_usd", in.MarketCapUsd,
+					"max_market_cap_usd", thresholds.MaxMarketCapUsd,
+				)
+				rejectReasons = append(rejectReasons, "market_cap_too_high")
+			}
+		}
+		if thresholds.MinVolumeUsd1h > 0 && in.VolumeUsd1h > 0 {
+			if in.VolumeUsd1h < thresholds.MinVolumeUsd1h {
+				m.logger.Info("volume_reject",
+					"token", in.TokenAddress,
+					"chain", in.Chain,
+					"volume_usd_1h", in.VolumeUsd1h,
+					"min_volume_usd_1h", thresholds.MinVolumeUsd1h,
+				)
+				rejectReasons = append(rejectReasons, "volume_too_low")
 			}
 		}
 	}
@@ -416,6 +577,38 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		riskScore = 1
 	}
 
+	// ── Post-aggregation serial launcher risk score gate (Task 13) ────────
+	// SerialLauncherMaxRiskScore requires the aggregated riskScore which is
+	// only available here, after all detectors and external providers have run.
+	// This block fires only for EXPLORATION/VERY_EXPLORATION tokens that passed
+	// the non-risk quality gates in the pre-check block above.
+	if serialLauncherPendingRiskCheck {
+		maxRisk := profile.SerialLauncherMaxRiskScore
+		if maxRisk > 0 && riskScore >= maxRisk {
+			m.logger.Info("serial_launcher_skip_risk",
+				"token", in.TokenAddress,
+				"chain", in.Chain,
+				"creator_count", in.CreatorPrevTokenCount,
+				"risk_score", riskScore,
+				"max_risk", maxRisk,
+				"mode", profileName,
+			)
+			return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkipped}, profileName), nil
+		}
+		// All gates passed: add the monitoring flag.
+		// makeDecision will produce PASS or RISKY_PASS based on riskScore;
+		// we force RISKY_PASS minimum below (see "Promote PASS → RISKY_PASS").
+		flags = append(flags, contracts.FlagSerialLauncherMonitored)
+		m.logger.Info("serial_launcher_monitored",
+			"token", in.TokenAddress,
+			"chain", in.Chain,
+			"creator", in.CreatorAddress,
+			"creator_count", in.CreatorPrevTokenCount,
+			"risk_score", riskScore,
+			"mode", profileName,
+		)
+	}
+
 	// ── External providers (P1) ────────────────────────────────────────
 	extScore := 0.0
 	providerFlags := []string{}
@@ -523,6 +716,14 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	if len(rejectReasons) > 0 {
 		decision = "REJECT"
 		sort.Strings(rejectReasons)
+	}
+
+	// Promote PASS → RISKY_PASS for serial-launcher-monitored tokens (Task 13).
+	// The creator has launched previous tokens which represents elevated baseline
+	// risk even when the aggregate score falls below the RISKY_PASS threshold.
+	// This forces Layer 7 to apply a smaller allocation and Layer 9 tighter exits.
+	if containsString(flags, contracts.FlagSerialLauncherMonitored) && decision == contracts.DecisionPass {
+		decision = contracts.DecisionRiskyPass
 	}
 
 	eventID := contracts.ContentIDFromString(fmt.Sprintf("dq:%s:%s:%s", in.EventID, profileName, decision))
@@ -642,4 +843,31 @@ func tokenAgeSeconds(blockTimestamp, ingestedAt string) int64 {
 		return 0
 	}
 	return age
+}
+
+// buildSkipResult constructs a DataQualityDTO with Decision=SKIP (Task 13).
+// Called by ProcessForMode when EXPLORATION/VERY_EXPLORATION mode determines
+// that a serial-launcher token should be silently dropped rather than rejected.
+//
+// SKIP contract (enforced by the calling worker, not this function):
+//   - No data_quality_event is emitted (unlike REJECT or PASS).
+//   - Does NOT contribute to reject-rate statistics in Layer 10.
+//   - token_lifecycle transitions to DQ_SKIPPED (terminal state, audit trail preserved).
+//   - RejectionReasons is always nil for SKIP — it is not a quality failure.
+func buildSkipResult(in contracts.MarketDataDTO, flags []string, profileName string) contracts.DataQualityDTO {
+	return contracts.DataQualityDTO{
+		EventID:          contracts.ContentIDFromString(fmt.Sprintf("dq-skip:%s:%s", in.EventID, profileName)),
+		TraceID:          in.TraceID,
+		CorrelationID:    in.CorrelationID,
+		CausationID:      in.EventID,
+		VersionID:        in.VersionID,
+		TokenLifecycleID: contracts.ContentIDFromString(in.TokenAddress + ":" + in.Chain),
+		TokenAddress:     in.TokenAddress,
+		Chain:            in.Chain,
+		Decision:         contracts.DecisionSkip,
+		Flags:            flags,
+		RejectReasons:    nil, // SKIP is not a quality failure; no rejection reasons.
+		Profile:          profileName,
+		EvaluatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+	}
 }

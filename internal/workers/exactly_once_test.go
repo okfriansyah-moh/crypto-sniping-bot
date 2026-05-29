@@ -250,3 +250,14 @@ func (a *exactlyOnceAdapter) UpsertCreatorRugObservation(_ context.Context, _ da
 func (a *exactlyOnceAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
 }
+
+// Task 8: Creator Profiles stubs.
+func (a *exactlyOnceAdapter) UpsertCreatorProfileOnLaunch(_ context.Context, _, _ string) error {
+	return nil
+}
+func (a *exactlyOnceAdapter) IncrementCreatorOutcome(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (a *exactlyOnceAdapter) GetCreatorProfile(_ context.Context, _, _ string) (contracts.CreatorProfile, bool, error) {
+	return contracts.CreatorProfile{}, false, nil
+}

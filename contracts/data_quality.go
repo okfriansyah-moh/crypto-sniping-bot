@@ -1,5 +1,44 @@
 package contracts
 
+// Decision values for DataQualityDTO.Decision.
+//
+// PASS          — token meets all quality gates; emit data_quality_event with full DTO.
+// RISKY_PASS    — token passes but with elevated risk; capital engine applies smaller allocation.
+// REJECT        — token fails one or more gates; emit data_quality_event; contributes to reject-rate.
+// SKIP (NEW)    — token silently dropped (mode-aware serial launcher); do NOT emit data_quality_event;
+//
+//	do NOT contribute to reject-rate; token_lifecycle transitions to `skipped`.
+//	Used exclusively by EXPLORATION / VERY_EXPLORATION modes when a serial-launcher
+//	token fails the quality gate (see PRODUCTION_GATE_ANALYSIS §9).
+//	SKIP must NOT contribute to reject-rate statistics in Layer 10.
+const (
+	DecisionPass      = "PASS"
+	DecisionRiskyPass = "RISKY_PASS"
+	DecisionReject    = "REJECT"
+	// DecisionSkip is the silent-drop decision for EXPLORATION/VERY_EXPLORATION mode.
+	// Tokens assigned SKIP are dropped without emitting a data_quality_event and
+	// without counting toward reject-rate metrics. The token_lifecycle is updated to
+	// the terminal `skipped` state so traceability is preserved.
+	DecisionSkip = "SKIP"
+)
+
+// Canonical flag values emitted in DataQualityDTO.Flags.
+//
+// serial_launcher_monitored — emitted alongside a RISKY_PASS decision when the
+//
+//	creator has launched previous tokens but remains below the hard-reject threshold
+//	in EXPLORATION/VERY_EXPLORATION mode. Layer 7 applies a smaller allocation;
+//	Layer 9 applies tighter TP1, tighter trailing stop, and kill-switch priority.
+//
+// serial_launcher_skipped — emitted alongside a SKIP decision when the creator
+//
+//	exceeds the serial-launcher threshold in EXPLORATION/VERY_EXPLORATION mode.
+//	Informational only; not used by downstream layers (token is dropped silently).
+const (
+	FlagSerialLauncherMonitored = "serial_launcher_monitored"
+	FlagSerialLauncherSkipped   = "serial_launcher_skipped"
+)
+
 // DataQualityDTO carries the pass/reject decision with risk attribution.
 // Emitted after static and heuristic checks in Layer 1.
 //
@@ -17,7 +56,7 @@ type DataQualityDTO struct {
 	TokenAddress     string `json:"token_address"`
 	Chain            string `json:"chain"`
 
-	Decision  string  `json:"decision"`   // PASS | REJECT | RISKY_PASS
+	Decision  string  `json:"decision"`   // PASS | REJECT | RISKY_PASS | SKIP
 	RiskScore float64 `json:"risk_score"` // [0.0, 1.0] — higher = riskier
 
 	IsHoneypot      bool `json:"is_honeypot"`

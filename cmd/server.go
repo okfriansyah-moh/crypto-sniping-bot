@@ -328,6 +328,48 @@ func runServer() {
 		}
 	}()
 
+	// Creator profile aggregator — maintains per-creator launch history in
+	// creator_profiles from market_data_event (new launch) and
+	// learning_record_event (outcome). Used by Task 9 serial-launcher DQ check.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := workers.RunCreatorProfileAggregator(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+				logger.Error("creator_profile_aggregator_failed", "error", err)
+			}
+			select {
+			case <-time.After(100 * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Creator stats responder — consumes creator_stats_request events (emitted
+	// by the /devstats Telegram command) and emits a telegram_event with the
+	// formatted creator profile stats so the Dispatcher can relay them.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := workers.RunCreatorStatsResponder(ctx, db, logger); err != nil && err != ctx.Err() {
+				logger.Error("creator_stats_responder_failed", "error", err)
+			}
+			select {
+			case <-time.After(100 * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// Solana ingestion — subscribes to Raydium v4 + PumpFun program logs and
 	// emits market_data_event DTOs into the shared pipeline.
 	// Gracefully noops when cfg.Solana.Programs is empty (Solana not configured)
