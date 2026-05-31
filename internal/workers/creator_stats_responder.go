@@ -127,6 +127,9 @@ func RunCreatorStatsResponder(
 		Payload:       payloadBytes,
 		TraceID:       evt.TraceID,
 		CorrelationID: evt.CorrelationID,
+		// VersionID is required by Postgres InsertEvent validation
+		// (database/engines/postgres/events.go) — propagate from source request.
+		VersionID: evt.VersionID,
 	}
 	if cid := evt.EventID; cid != "" {
 		outEvt.CausationID = &cid

@@ -1148,6 +1148,12 @@ func buildDevStatsFn(db database.Adapter) func(ctx context.Context, chain, creat
 			EventID:   eventID,
 			EventType: "creator_stats_request",
 			Payload:   payload,
+			// Operator-originated root event: trace == correlation == eventID.
+			// VersionID required by Postgres InsertEvent validation
+			// (database/engines/postgres/events.go).
+			TraceID:       eventID,
+			CorrelationID: eventID,
+			VersionID:     "telegram-devstats-v1",
 		}
 		if err := db.InsertEvent(ctx, evt); err != nil {
 			return "", fmt.Errorf("devstats: emit request: %w", err)
