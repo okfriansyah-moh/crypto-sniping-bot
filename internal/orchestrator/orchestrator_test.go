@@ -502,6 +502,13 @@ func (m *mockAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.
 func (m *mockAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
 }
+
+// Task 8: Creator Profiles stubs.
+func (m *mockAdapter) UpsertCreatorProfileOnLaunch(_ context.Context, _, _ string) error { return nil }
+func (m *mockAdapter) IncrementCreatorOutcome(_ context.Context, _, _, _ string) error   { return nil }
+func (m *mockAdapter) GetCreatorProfile(_ context.Context, _, _ string) (contracts.CreatorProfile, bool, error) {
+	return contracts.CreatorProfile{}, false, nil
+}
 func (m *mockAdapter) GetAdaptiveDQStats(_ context.Context, _ int) (int, int, error) {
 	return 0, 0, nil
 }

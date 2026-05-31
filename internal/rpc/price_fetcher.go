@@ -105,18 +105,68 @@ func (c *DEXScreenerPriceClient) GetTokenPrice(ctx context.Context, tokenAddress
 	return price, nil
 }
 
-// dexScreenerResponse is a minimal unmarshal target for the DEXScreener
+// dexScreenerResponse is an unmarshal target for the DEXScreener
 // GET /latest/dex/tokens/{address} response.
 //
 // Full schema: https://docs.dexscreener.com/api/reference
-// We only extract the first pair's priceNative; all other fields are ignored.
+// Fields captured: priceNative (L9 position monitor), fdv/marketCap, and
+// volume (m5/h1/h6/h24) — used for observability and the L1 DQ probe.
 type dexScreenerResponse struct {
 	Pairs []struct {
 		PriceNative string `json:"priceNative"`
-		Liquidity   *struct {
+		// MarketCap is the token's circulating-supply market cap in USD as
+		// reported by DEXScreener. Zero when the token is not yet indexed.
+		MarketCap float64 `json:"marketCap"`
+		// FDV is the fully-diluted valuation in USD. Used as primary market-cap
+		// signal; falls back to MarketCap when FDV is zero.
+		FDV       float64 `json:"fdv"`
+		Liquidity *struct {
 			USD float64 `json:"usd"`
 		} `json:"liquidity"`
+		// Volume captures the trading volume in USD across multiple time windows.
+		Volume *struct {
+			M5  float64 `json:"m5"`
+			H1  float64 `json:"h1"`
+			H6  float64 `json:"h6"`
+			H24 float64 `json:"h24"`
+		} `json:"volume"`
 	} `json:"pairs"`
+}
+
+// dexScreenerMarketData holds the market-cap and volume snapshot extracted from
+// a DEXScreener response. Zero values mean the token is not yet indexed.
+type dexScreenerMarketData struct {
+	// MarketCapUsd is FDV when available, falling back to MarketCap.
+	MarketCapUsd float64
+	VolumeUsd5m  float64
+	VolumeUsd1h  float64
+	VolumeUsd24h float64
+}
+
+// parseDEXScreenerMarketData extracts market-cap and volume from the first pair.
+// Returns a zero-value struct when no pairs are present — this is not an error;
+// it means the token is not yet indexed by DEXScreener.
+func parseDEXScreenerMarketData(body []byte) (dexScreenerMarketData, error) {
+	var r dexScreenerResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		return dexScreenerMarketData{}, fmt.Errorf("json unmarshal: %w", err)
+	}
+	if len(r.Pairs) == 0 {
+		return dexScreenerMarketData{}, nil // not indexed yet — safe zero
+	}
+	p := r.Pairs[0]
+	// FDV is the preferred market-cap signal; fall back to MarketCap when zero.
+	mcap := p.FDV
+	if mcap == 0 {
+		mcap = p.MarketCap
+	}
+	md := dexScreenerMarketData{MarketCapUsd: mcap}
+	if p.Volume != nil {
+		md.VolumeUsd5m = p.Volume.M5
+		md.VolumeUsd1h = p.Volume.H1
+		md.VolumeUsd24h = p.Volume.H24
+	}
+	return md, nil
 }
 
 // parseDEXScreenerPrice extracts the first non-empty, non-zero priceNative

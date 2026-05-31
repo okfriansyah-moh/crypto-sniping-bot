@@ -98,6 +98,12 @@ type Module struct {
 	// are suppressed after receiving an RPC -32003 rate-limit error.
 	// Zero means no active backoff.
 	rateLimitUntil atomic.Int64
+
+	// Creator-identity guard counters (Task 7). Aggregate across all program
+	// subscriptions and persist across reconnects (module-level lifetime).
+	creatorGuardTotal     atomic.Int64 // factory program ID found as CreatorAddress
+	creatorGuardCorrected atomic.Int64 // corrected to event-derived fallback wallet
+	creatorGuardCleared   atomic.Int64 // cleared to "" — no valid fallback available
 }
 
 // SolUsdSource is the minimal interface the ingestion module consumes from
@@ -135,6 +141,43 @@ func (m *Module) WithSolUsdSource(s SolUsdSource) *Module {
 	return m
 }
 
+// applyCreatorGuard enforces that dto.CreatorAddress is never a known pump.fun
+// factory program ID. When a factory program is detected, it is replaced with
+// fallback (when valid) or cleared. Telemetry counters are incremented and a
+// structured log entry is emitted on every correction.
+// fallback is the event-derived human wallet from the normalizer's source event
+// (e.g. event.User / event.Creator). Pass "" when no secondary candidate exists.
+func (m *Module) applyCreatorGuard(dto *contracts.MarketDataDTO, fallback string) {
+	if dto == nil || !IsFactoryProgram(dto.CreatorAddress) {
+		return
+	}
+	original := dto.CreatorAddress
+	m.creatorGuardTotal.Add(1)
+	resolved, unresolvable := GuardCreatorAddress(dto.CreatorAddress, fallback)
+	dto.CreatorAddress = resolved
+	if unresolvable {
+		m.creatorGuardCleared.Add(1)
+		m.logger.Warn("ingestion_creator_identity_unresolved",
+			"chain", dto.Chain,
+			"token", dto.TokenAddress,
+			"program_id", original,
+			"market", dto.Market,
+			"tx", dto.TxHash,
+			"note", "factory_program_as_creator_cleared",
+		)
+	} else {
+		m.creatorGuardCorrected.Add(1)
+		m.logger.Debug("ingestion_creator_identity_corrected",
+			"chain", dto.Chain,
+			"token", dto.TokenAddress,
+			"original_program_id", original,
+			"corrected_creator", resolved,
+			"market", dto.Market,
+			"tx", dto.TxHash,
+		)
+	}
+}
+
 // resolveSolPriceUsd returns the SOL/USD price to use for the next
 // normalization. It prefers the live provider, falls back to the static
 // config value when the provider is absent or returns ok=false.
@@ -170,6 +213,14 @@ func (m *Module) Start(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	for i, prog := range m.cfg.Programs {
+		if prog.Disabled {
+			m.logger.Info("ingestion_program_skipped",
+				"program_id", prog.ProgramID,
+				"family", prog.Family,
+				"reason", "disabled_in_config",
+			)
+			continue
+		}
 		prog := prog // capture
 		stagger := time.Duration(i) * time.Duration(m.cfg.WsSubscribeStaggerMs) * time.Millisecond
 		wg.Add(1)
@@ -255,6 +306,40 @@ func workerCount(cfg config.SolanaConfig) int {
 // Isolated as a var so tests can override for deterministic ingest_at fields.
 var nowUTC = func() string { return time.Now().UTC().Format(time.RFC3339) }
 
+// pumpFunFactoryProgramIDs is the set of pump.fun platform-level program IDs
+// that must never appear as MarketDataDTO.CreatorAddress. These identify the
+// pump.fun protocol itself, not the human wallet that initiated the transaction.
+// Per PRODUCTION_GATE_ANALYSIS § 3 Problem B — Task 7 ingestion guard.
+var pumpFunFactoryProgramIDs = map[string]struct{}{
+	"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": {}, // bonding-curve factory program
+	"pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": {}, // AMM graduation factory program
+}
+
+// IsFactoryProgram reports whether addr is a known pump.fun factory program ID.
+// Factory programs are platform-level identities, not human wallets, and must
+// never propagate downstream as a token creator identity.
+func IsFactoryProgram(addr string) bool {
+	_, ok := pumpFunFactoryProgramIDs[addr]
+	return ok
+}
+
+// GuardCreatorAddress enforces that the creator identity is never a known
+// pump.fun factory program. Returns the resolved address and whether resolution
+// failed (unresolvable=true means the caller should clear the field).
+//
+//   - creator is not a factory program → (creator, false) — no change.
+//   - creator IS factory AND fallback is a valid non-factory address → (fallback, false).
+//   - creator IS factory AND no valid fallback → ("", true).
+func GuardCreatorAddress(creator, fallback string) (resolved string, unresolvable bool) {
+	if !IsFactoryProgram(creator) {
+		return creator, false
+	}
+	if fallback != "" && !IsFactoryProgram(fallback) {
+		return fallback, false
+	}
+	return "", true
+}
+
 // runSubscribeLoop opens a single logsSubscribe session and processes events.
 //
 // Two processing paths run inside this loop:
@@ -271,9 +356,52 @@ var nowUTC = func() string { return time.Now().UTC().Format(time.RFC3339) }
 //     single slow getTransaction from blocking the WS read loop and lets
 //     concurrent fetches drain the rate-limiter in parallel.
 func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgramConfig) error {
-	notifs, err := m.client.SubscribeLogs(ctx, prog.ProgramID)
-	if err != nil {
-		return fmt.Errorf("subscribe_logs: %w", err)
+	// Open the subscription channel. Programs with subscription_method:
+	// "transactionSubscribe" use the Helius-extended transactionSubscribe path
+	// (reduces credit burn by 99.95% for high-volume programs like Raydium V4).
+	// All other programs use the standard logsSubscribe path.
+	var notifs <-chan LogsNotification
+	var subscribeErr error
+
+	if prog.SubscriptionMethod == "transactionSubscribe" {
+		ts, ok := m.client.(TransactionSubscriber)
+		if !ok {
+			// Client does not implement TransactionSubscriber (e.g. a basic test
+			// mock). Fall back to logsSubscribe so the program loop keeps running;
+			// in production SolanaClient always satisfies TransactionSubscriber.
+			m.logger.Warn("ingestion_subscribe_method_fallback",
+				"program_id", prog.ProgramID,
+				"family", prog.Family,
+				"requested_method", "transactionSubscribe",
+				"fallback", "logsSubscribe",
+				"reason", "client_does_not_implement_TransactionSubscriber",
+			)
+			notifs, subscribeErr = m.client.SubscribeLogs(ctx, prog.ProgramID)
+			if subscribeErr != nil {
+				return fmt.Errorf("subscribe_logs_fallback: %w", subscribeErr)
+			}
+		} else {
+			notifs, subscribeErr = ts.SubscribeTransactions(ctx, prog.ProgramID, prog.AccountFilter)
+			if subscribeErr != nil {
+				return fmt.Errorf("subscribe_transactions: %w", subscribeErr)
+			}
+			m.logger.Info("ingestion_subscription_method",
+				"program_id", prog.ProgramID,
+				"family", prog.Family,
+				"method", "transactionSubscribe",
+				"account_filter", prog.AccountFilter,
+			)
+		}
+	} else {
+		notifs, subscribeErr = m.client.SubscribeLogs(ctx, prog.ProgramID)
+		if subscribeErr != nil {
+			return fmt.Errorf("subscribe_logs: %w", subscribeErr)
+		}
+		m.logger.Info("ingestion_subscription_method",
+			"program_id", prog.ProgramID,
+			"family", prog.Family,
+			"method", "logsSubscribe",
+		)
 	}
 
 	var totalNotifs, failedTx, emitted atomic.Int64
@@ -334,8 +462,9 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				"in_flight", len(sem),
 				"events_emitted", emitted.Load(),
 				"events_emitted_from_logs", emittedFromLogs.Load(),
-				"path", pathLabel(logPath),
-				"version_id", m.versionID,
+				"creator_guard_total", m.creatorGuardTotal.Load(),
+				"creator_guard_corrected", m.creatorGuardCorrected.Load(),
+				"creator_guard_cleared", m.creatorGuardCleared.Load(),
 			)
 
 		case notif, ok := <-notifs:
@@ -426,6 +555,10 @@ func (m *Module) handlePumpfunFromLogs(
 	if dto == nil {
 		return
 	}
+	// Guard: factory program IDs must never propagate as creator identity.
+	// event.User is already in dto.CreatorAddress; pass "" as no separate
+	// fallback exists when the event-derived user IS the factory program.
+	m.applyCreatorGuard(dto, "")
 	if err := m.emit(ctx, *dto); err != nil {
 		processErrors.Add(1)
 		m.logger.Warn("solana_ingestion_emit_error",
@@ -585,6 +718,11 @@ func (m *Module) processNotification(
 			dtoNilSkip.Add(1)
 			continue
 		}
+		// Guard: factory program IDs must never propagate as creator identity.
+		// Applied after every normalizer in the tx-fetch path so that future
+		// decoder changes cannot bypass it. No fallback is available at this
+		// call site — the normalizer already consumed the raw accounts.
+		m.applyCreatorGuard(dto, "")
 
 		if err := m.emit(ctx, *dto); err != nil {
 			return fmt.Errorf("emit %s: %w", dto.EventID, err)

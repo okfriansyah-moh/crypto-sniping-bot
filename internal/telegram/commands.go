@@ -34,6 +34,7 @@ const (
 	CmdDq             CommandType = "/dq"
 	CmdDlq            CommandType = "/dlq"
 	CmdExecutions     CommandType = "/executions"
+	CmdDevStats       CommandType = "/devstats"
 	CmdHelp           CommandType = "/help"
 )
 
@@ -70,7 +71,7 @@ func ParseCommand(text string, issuerID string) (*CommandRequest, error) {
 	case CmdStatus, CmdPnl, CmdPositions, CmdPosition, CmdHealth,
 		CmdForceClose, CmdEnableTrading,
 		CmdKill, CmdResume, CmdVersion, CmdMode, CmdPipeline, CmdRescanPipeline,
-		CmdRescan, CmdRescanStatus, CmdDq, CmdDlq, CmdExecutions, CmdHelp:
+		CmdRescan, CmdRescanStatus, CmdDq, CmdDlq, CmdExecutions, CmdDevStats, CmdHelp:
 		return &CommandRequest{
 			Type:     cmd,
 			Args:     parts[1:],
@@ -103,6 +104,7 @@ type Handler struct {
 	dqFn             func(ctx context.Context, hours int) (string, error)
 	dlqFn            func(ctx context.Context) (string, error)
 	executionsFn     func(ctx context.Context) (string, error)
+	devStatsFn       func(ctx context.Context, chain, creatorAddr string) (string, error)
 	allowedUserIDs   map[string]struct{} // nil means unconfigured
 	logger           *slog.Logger
 }
@@ -127,6 +129,9 @@ type HandlerOptions struct {
 	DqFn             func(ctx context.Context, hours int) (string, error)
 	DlqFn            func(ctx context.Context) (string, error)
 	ExecutionsFn     func(ctx context.Context) (string, error)
+	// DevStatsFn queries the creator_profiles table and returns formatted stats
+	// for the given (chain, creatorAddr) pair.
+	DevStatsFn func(ctx context.Context, chain, creatorAddr string) (string, error)
 
 	// AllowedUserIDs is the set of Telegram user IDs permitted to issue commands.
 	// When non-empty, any issuer NOT in the list is rejected for ALL commands.
@@ -164,6 +169,7 @@ func NewHandler(opts HandlerOptions) *Handler {
 		dqFn:             opts.DqFn,
 		dlqFn:            opts.DlqFn,
 		executionsFn:     opts.ExecutionsFn,
+		devStatsFn:       opts.DevStatsFn,
 		allowedUserIDs:   allowedSet(opts.AllowedUserIDs),
 		logger:           logger,
 	}
@@ -435,6 +441,25 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 		}
 		return &CommandResult{Text: text}, nil
 
+	case CmdDevStats:
+		if len(req.Args) == 0 {
+			return &CommandResult{Text: "Usage: /devstats &lt;creator_address&gt; [chain]\nExample: /devstats 5n3LYFe... solana"}, nil
+		}
+		creatorAddr := req.Args[0]
+		// Default chain is "solana"; operator can specify explicitly as second arg.
+		chain := "solana"
+		if len(req.Args) > 1 {
+			chain = strings.ToLower(req.Args[1])
+		}
+		if h.devStatsFn == nil {
+			return &CommandResult{Text: "devstats: not configured"}, nil
+		}
+		text, err := h.devStatsFn(ctx, chain, creatorAddr)
+		if err != nil {
+			return nil, fmt.Errorf("commands: devstats: %w", err)
+		}
+		return &CommandResult{Text: text}, nil
+
 	case CmdHelp:
 		return &CommandResult{Text: helpText()}, nil
 	}
@@ -457,6 +482,7 @@ func helpText() string {
 		"/dq [hours] — Data quality decision stats: total, rug rate, pass rate\n" +
 		"/dlq — Dead-letter queue: failed events, reason breakdown\n" +
 		"/executions — Last 20 tokens that reached execution (success + failed) with full CA\n" +
+		"/devstats &lt;creator_address&gt; [chain] — Creator profile stats: total tokens, rug/migrate/golden-gem rates\n" +
 		"/version — Active strategy version ID and status\n\n" +
 		"<b>⚙️ Operational</b>\n" +
 		"/mode strict — Switch to STRICT mode (conservative thresholds)\n" +

@@ -21,8 +21,8 @@ type ProbesConfig struct {
 	//   350 probes/hr × 3 credits × 720 hr = 756k credits/month for probes
 	//   + Pyth getAccountInfo (30s TTL):       86k credits/month
 	//   + trades (15/day × 28 credits):        13k credits/month
-	//   + raydium-v4 getTransaction (300/day): ~45–900k credits/month
-	//   Total range: ~900k–1.75M credits/month
+	//   + raydium-v4 getTransaction (300/day): ~9k credits/month  (1 cr/call)
+	//   Total range: ~864k credits/month
 	//
 	// Set to 0 to disable the cap (unlimited probes). Not recommended on
 	// Helius free tier — observed rate without filtering is ~65k credits/hr.
@@ -43,9 +43,11 @@ type ProbesConfig struct {
 
 	// SolanaDASAsset configures the Helius DAS getAsset enrichment probe.
 	// When enabled it fetches supply and social links in a single DAS call
-	// before the other Solana probes run, saving Helius credits. Disabled
-	// by default — enable only on Helius endpoints (non-Helius RPC will
-	// return an unsupported-method error which the probe treats as fail-open).
+	// before the other Solana probes run. DAS getAsset costs 10 credits per
+	// call (helius.dev/docs/billing/credits) — more expensive than standard
+	// RPC methods (1 credit), but consolidates 2+ separate lookups into one.
+	// Disabled by default — enable only on Helius endpoints (non-Helius RPC
+	// will return an unsupported-method error which the probe treats as fail-open).
 	SolanaDASAsset SolanaProbeYAML `yaml:"solana_das_asset"`
 
 	// SolanaMetadata configures the off-chain metadata fetch probe.

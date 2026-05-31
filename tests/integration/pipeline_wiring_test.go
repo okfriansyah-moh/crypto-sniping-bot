@@ -844,6 +844,13 @@ func (m *memAdapter) UpsertCreatorRugObservation(_ context.Context, _ database.C
 func (m *memAdapter) GetCreatorBlacklistEntry(_ context.Context, _ string, _ string) (*database.CreatorBlacklistEntry, error) {
 	return nil, nil
 }
+
+// Task 8: Creator Profiles stubs.
+func (m *memAdapter) UpsertCreatorProfileOnLaunch(_ context.Context, _, _ string) error { return nil }
+func (m *memAdapter) IncrementCreatorOutcome(_ context.Context, _, _, _ string) error   { return nil }
+func (m *memAdapter) GetCreatorProfile(_ context.Context, _, _ string) (contracts.CreatorProfile, bool, error) {
+	return contracts.CreatorProfile{}, false, nil
+}
 func (m *memAdapter) CountTokensByCreator(_ context.Context, _ string, _ string) (int32, error) {
 	return 0, nil
 }

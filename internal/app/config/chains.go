@@ -51,7 +51,19 @@ type SolanaRPCEndpoint struct {
 // SolanaProgramConfig is a tracked Solana program (Raydium, Pump.fun, etc.).
 type SolanaProgramConfig struct {
 	ProgramID string `yaml:"program_id"`
-	Family    string `yaml:"family"` // raydium-v4 | pumpfun | raydium-clmm
+	Family    string `yaml:"family"`   // raydium-v4 | pumpfun | raydium-clmm
+	Disabled  bool   `yaml:"disabled"` // when true the WS subscription is skipped at startup
+	// SubscriptionMethod controls the WebSocket subscription type for this program.
+	// Empty or "logsSubscribe" uses the standard logsSubscribe path.
+	// "transactionSubscribe" switches to a Helius-extended transactionSubscribe
+	// filtered by AccountFilter, reducing credit burn for high-volume programs
+	// (e.g. Raydium V4 switches from ~2M credits/day via logsSubscribe to ~1k/day).
+	SubscriptionMethod string `yaml:"subscription_method"`
+	// AccountFilter is the account public key passed to accountInclude when
+	// SubscriptionMethod is "transactionSubscribe". Must be the required-signer
+	// account for pool-creation transactions (not a swap-only account) so that
+	// only new-pool initialization events are received. Ignored for logsSubscribe.
+	AccountFilter string `yaml:"account_filter"`
 }
 
 // SolanaHealthConfig holds endpoint health-scoring parameters.

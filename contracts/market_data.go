@@ -7,6 +7,12 @@ package contracts
 // Source file: contracts/market_data.go
 // Producer:    internal/modules/ingestion
 // Consumer:    internal/modules/data_quality
+//
+// Market-cap and volume fields (MarketCapUsd, VolumeUsd*) are additive fields
+// populated by the DEXScreener probe (see PRODUCTION_GATE_ANALYSIS §10, Task 17).
+// All four are zero-value-safe: a zero value means the data was not yet available
+// (token too new, pair not yet indexed). A zero value disables the corresponding
+// DQ threshold filter so brand-new tokens are not incorrectly rejected.
 type MarketDataDTO struct {
 	EventID       string `json:"event_id"`
 	TraceID       string `json:"trace_id"`
@@ -211,4 +217,26 @@ type MarketDataDTO struct {
 	// ─────────────────────────────────────────────────────────────────────
 	IsNameDuplicate bool `json:"is_name_duplicate,omitempty"`
 	IsCopycat       bool `json:"is_copycat,omitempty"`
+
+	// ─────────────────────────────────────────────────────────────────────
+	// Market-cap and volume fields — populated by the DEXScreener probe at
+	// Layer 0.5 / Layer 1 (PRODUCTION_GATE_ANALYSIS §10, Task 17).
+	//
+	// Zero means the data was not available yet (token too new, pair not yet
+	// indexed by DEXScreener). A zero value disables the corresponding DQ
+	// threshold filter so brand-new tokens are not incorrectly rejected.
+	// All consumers MUST guard with `> 0` before applying min/max gates.
+	// ─────────────────────────────────────────────────────────────────────
+
+	// MarketCapUsd is the token's total market capitalisation in USD at the
+	// time the DEXScreener probe ran. Zero means the data was not available
+	// yet (token too new, pair not yet indexed). A zero value disables the
+	// market cap filter so brand-new tokens are not incorrectly rejected.
+	MarketCapUsd float64 `json:"market_cap_usd,omitempty"`
+
+	// VolumeUsd5m / VolumeUsd1h / VolumeUsd24h are cumulative USD trading
+	// volume over each window, sourced from DEXScreener. Zero means not available.
+	VolumeUsd5m  float64 `json:"volume_usd_5m,omitempty"`
+	VolumeUsd1h  float64 `json:"volume_usd_1h,omitempty"`
+	VolumeUsd24h float64 `json:"volume_usd_24h,omitempty"`
 }

@@ -594,6 +594,27 @@ type Adapter interface {
 	// Includes full token address, symbol, chain, lifecycle state, execution
 	// status, error code, and tx hash. Used by the /executions Telegram command.
 	GetExecutionLog(ctx context.Context, limit int) ([]ExecutionLogRow, error)
+
+	// ── Creator Profiles (Task 8) ─────────────────────────────────────────────
+
+	// UpsertCreatorProfileOnLaunch increments total_tokens by 1 and refreshes
+	// last_seen_at for (chain, creator_address). Inserts the row on first
+	// encounter. Idempotent via ON CONFLICT (chain, creator_address) DO UPDATE
+	// with a monotonic counter increment — calling twice for the same token
+	// is safe only when the caller processes each market_data_event at most once
+	// (enforced by the event-bus ClaimNextEvent / MarkEventProcessed contract).
+	// Returns nil when creator is empty — the call is silently skipped.
+	UpsertCreatorProfileOnLaunch(ctx context.Context, chain, creator string) error
+
+	// IncrementCreatorOutcome increments one named outcome bucket for (chain,
+	// creator_address). outcome must be one of: "rug", "migrated", "golden",
+	// "win", "loss". Unrecognised outcome strings are silently ignored (safe
+	// degradation — the caller should log unknown values).
+	IncrementCreatorOutcome(ctx context.Context, chain, creator, outcome string) error
+
+	// GetCreatorProfile returns the full creator profile DTO for (chain, creator).
+	// Returns (contracts.CreatorProfile{}, false, nil) when no row exists yet.
+	GetCreatorProfile(ctx context.Context, chain, creator string) (contracts.CreatorProfile, bool, error)
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────

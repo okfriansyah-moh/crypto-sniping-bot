@@ -605,6 +605,162 @@ func (c *SolanaClient) SubscribeLogs(ctx context.Context, programID string) (<-c
 	return ch, nil
 }
 
+// SubscribeTransactions opens a transactionSubscribe WebSocket subscription
+// filtered by accountFilter (passed as accountInclude). This satisfies the
+// ingestion_solana.TransactionSubscriber optional interface.
+//
+// The Helius-extended transactionSubscribe fires only when accountFilter is a
+// required signer of the transaction, not for every transaction mentioning the
+// program. For Raydium V4, accountFilter 5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1
+// is the pool-creation authority — required only for Initialize2, not for swaps.
+// This reduces credit burn from ~2M/day (logsSubscribe, all swaps) to ~1k/day
+// (only new-pool creation transactions).
+//
+// The returned LogsNotification channel is populated with values extracted from
+// meta.logMessages so the existing downstream log-decode and tx-fetch paths
+// work without modification.
+func (c *SolanaClient) SubscribeTransactions(ctx context.Context, programID string, accountFilter string) (<-chan ingestion_solana.LogsNotification, error) {
+	if len(c.wsEndpoints) == 0 {
+		return nil, fmt.Errorf("solana_client: no WebSocket endpoint configured")
+	}
+	wsEntry, capturedIdx := c.activeWSEntry()
+	if wsEntry.URL == "" {
+		return nil, fmt.Errorf("solana_client: no WebSocket endpoint configured")
+	}
+
+	conn, err := dialWS(wsEntry.URL, solanaWSConnectTimeout)
+	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 429") {
+			c.markWSRateLimited(capturedIdx, wsEntry, programID)
+		}
+		return nil, fmt.Errorf("solana_client: ws connect: %w", err)
+	}
+
+	// Send transactionSubscribe request with accountInclude filter.
+	// commitment "confirmed" aligns with logsSubscribe; encoding "jsonParsed"
+	// ensures meta.logMessages is populated in the notification.
+	subReq := rpcRequest{
+		JSONRPC: "2.0",
+		ID:      c.nextID(),
+		Method:  "transactionSubscribe",
+		Params: []interface{}{
+			map[string]interface{}{
+				"accountInclude": []string{accountFilter},
+			},
+			map[string]interface{}{
+				"commitment":                     "confirmed",
+				"encoding":                       "jsonParsed",
+				"transactionDetails":             "full",
+				"maxSupportedTransactionVersion": 0,
+			},
+		},
+	}
+	if err := conn.WriteJSON(subReq); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("solana_client: send transactionSubscribe: %w", err)
+	}
+
+	// Read subscription confirmation.
+	_ = conn.setDeadline(time.Now().Add(solanaWSReadDeadline))
+	var subResp struct {
+		JSONRPC string    `json:"jsonrpc"`
+		ID      int64     `json:"id"`
+		Result  int64     `json:"result"` // subscription ID
+		Error   *rpcError `json:"error"`
+	}
+	if err := conn.ReadJSON(&subResp); err != nil {
+		conn.Close()
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			c.recordWSEOFFailure(wsEntry, programID, capturedIdx)
+		}
+		return nil, fmt.Errorf("solana_client: read transactionSubscribe response: %w", err)
+	}
+	if subResp.Error != nil {
+		conn.Close()
+		if wsEntry.Dialect.IsRateLimited(subResp.Error.Code) {
+			c.markWSRateLimited(capturedIdx, wsEntry, programID)
+		}
+		return nil, fmt.Errorf("solana_client: transactionSubscribe: %w", subResp.Error)
+	}
+	_ = conn.setDeadline(time.Time{})
+	conn.readDeadline = solanaWSReadDeadline
+
+	c.resetWSFailCount(capturedIdx)
+
+	subID := subResp.Result
+	ch := make(chan ingestion_solana.LogsNotification, 256)
+
+	go func() {
+		defer conn.Close()
+		defer close(ch)
+		c.logger.Info("solana_ws_subscribed_transactions",
+			"program", programID,
+			"account_filter", accountFilter,
+			"provider", wsEntry.Dialect.Name(),
+			"subscription_id", subID,
+		)
+
+		// Keepalive: send pings at the provider's recommended interval.
+		go func() {
+			ticker := time.NewTicker(wsEntry.Dialect.WSPingInterval())
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := conn.writePing(); err != nil {
+						return
+					}
+				}
+			}
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			_ = conn.setDeadline(time.Now().Add(solanaWSReadDeadline))
+
+			var notif txNotificationEnvelope
+			if err := conn.ReadJSON(&notif); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				c.logger.Warn("solana_ws_read_error",
+					"program", programID,
+					"error", err,
+				)
+				return
+			}
+
+			if notif.Method != "transactionNotification" {
+				continue
+			}
+			if notif.Params.Subscription != subID {
+				continue
+			}
+
+			r := notif.Params.Result
+			select {
+			case ch <- ingestion_solana.LogsNotification{
+				Signature: r.Signature,
+				Logs:      r.Transaction.Meta.LogMessages,
+				Slot:      r.Slot,
+				Err:       r.Transaction.Meta.Err,
+			}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return ch, nil
+}
+
 // GetTransaction fetches the full transaction by signature.
 // Returns nil if the transaction is not yet visible at the configured commitment.
 func (c *SolanaClient) GetTransaction(ctx context.Context, signature string) (*ingestion_solana.TransactionResult, error) {
@@ -870,6 +1026,27 @@ type logsNotificationEnvelope struct {
 				Logs      []string    `json:"logs"`
 				Err       interface{} `json:"err"`
 			} `json:"value"`
+		} `json:"result"`
+	} `json:"params"`
+}
+
+// txNotificationEnvelope is the JSON shape of a Helius transactionNotification.
+// The result.transaction.meta.logMessages field maps to LogsNotification.Logs so
+// the existing downstream log-decode and tx-fetch paths work without modification.
+type txNotificationEnvelope struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  struct {
+		Subscription int64 `json:"subscription"`
+		Result       struct {
+			Signature   string `json:"signature"`
+			Slot        uint64 `json:"slot"`
+			Transaction struct {
+				Meta struct {
+					LogMessages []string    `json:"logMessages"`
+					Err         interface{} `json:"err"`
+				} `json:"meta"`
+			} `json:"transaction"`
 		} `json:"result"`
 	} `json:"params"`
 }

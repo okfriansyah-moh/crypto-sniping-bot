@@ -235,7 +235,16 @@ models:
     max_multiplier: 2.0
 
 execution:
-  mode: "live" # "live" | "shadow" (Phase 5 placeholder)
+  # Shadow mode enabled 2026-05-29 (Task 20 — P2-A).
+  # Generates buy/sell signals and records execution_results rows with mode='shadow'
+  # using a simulated fill price from the live DEXScreener price at decision time.
+  # No on-chain transactions are submitted; no wallet keys are loaded.
+  # Gating before advancing to live: ≥ 30 completed shadow trades AND positive
+  # aggregate realized_pnl_bps over the most recent 14-day window
+  # (per PRODUCTION_GATE_ANALYSIS § 8 Change 6, step 13).
+  # To re-enable live trading, change mode back to "live".
+  mode: "shadow" # "live" | "shadow" — PRODUCTION_GATE_ANALYSIS § 7 P2-A
+  # mode: "live"  # uncomment after ≥14 days shadow + ≥30 trades + positive PnL
   private_route_threshold_usd: 0 # 0 disables private routing in Phase 4
   private_endpoints: []
 
@@ -519,3 +528,12 @@ ai_enrichment:
   loss_explainer:
     enabled: false
     min_records_per_batch: 5
+
+# ── Creator Profile Aggregator (Task 8) ───────────────────────────────────────
+# Configures the creator_profile_aggregator worker that maintains the
+# creator_profiles table for the serial-launcher check (Task 9).
+creator_profile:
+  # golden_gem_pnl_threshold_pct: wins with PnL above this percentage are stored
+  # as "golden" in creator_profiles.golden_gem_tokens instead of "win".
+  # 200.0 = 2× return (triple your money). 0 disables golden-gem classification.
+  golden_gem_pnl_threshold_pct: 200.0

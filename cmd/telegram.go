@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -78,6 +79,7 @@ func buildTelegramComponents(
 		DqFn:             buildDqFn(db),
 		DlqFn:            buildDlqFn(db),
 		ExecutionsFn:     buildExecutionsFn(db),
+		DevStatsFn:       buildDevStatsFn(db),
 		AllowedUserIDs:   allowedIDs,
 		Logger:           logger,
 	})
@@ -1113,5 +1115,60 @@ func buildExecutionsFn(db database.Adapter) func(ctx context.Context) (string, e
 		}
 
 		return sb.String(), nil
+	}
+}
+
+// buildDevStatsFn returns a command handler for /devstats <creator_address> [chain].
+//
+// Design: the handler emits a creator_stats_request event and immediately
+// returns an acknowledgment message. The RunCreatorStatsResponder worker picks
+// up the request, queries GetCreatorProfile, and emits a telegram_event that
+// the Dispatcher forwards to the operator chat. This keeps the synchronous
+// command handler path fast and preserves the event-bus-only Telegram invariant.
+//
+// Content-addressable event ID: SHA256("creator_stats_request:" ‖ chain ‖ "|" ‖ creatorAddr)[:8].
+func buildDevStatsFn(db database.Adapter) func(ctx context.Context, chain, creatorAddr string) (string, error) {
+	return func(ctx context.Context, chain, creatorAddr string) (string, error) {
+		// Build a content-addressable event ID so duplicate requests for the
+		// same (chain, creator) are deduped by the event bus's ON CONFLICT DO NOTHING.
+		raw := fmt.Sprintf("creator_stats_request:%s|%s", chain, creatorAddr)
+		h := sha256.Sum256([]byte(raw))
+		eventID := hex.EncodeToString(h[:8])
+
+		type reqPayload struct {
+			Chain       string `json:"chain"`
+			CreatorAddr string `json:"creator_address"`
+		}
+		payload, err := json.Marshal(reqPayload{Chain: chain, CreatorAddr: creatorAddr})
+		if err != nil {
+			return "", fmt.Errorf("devstats: marshal payload: %w", err)
+		}
+
+		evt := database.Event{
+			EventID:   eventID,
+			EventType: "creator_stats_request",
+			Payload:   payload,
+			// Operator-originated root event: trace == correlation == eventID.
+			// VersionID required by Postgres InsertEvent validation
+			// (database/engines/postgres/events.go).
+			TraceID:       eventID,
+			CorrelationID: eventID,
+			VersionID:     "telegram-devstats-v1",
+		}
+		if err := db.InsertEvent(ctx, evt); err != nil {
+			return "", fmt.Errorf("devstats: emit request: %w", err)
+		}
+
+		// Show only the first 20 chars of the address to keep the ack short.
+		short := creatorAddr
+		if len(short) > 20 {
+			short = short[:20] + "…"
+		}
+		return fmt.Sprintf(
+			"⏳ Fetching creator stats for <code>%s</code> on chain <code>%s</code>...\n"+
+				"<i>Stats will follow in a moment.</i>",
+			html.EscapeString(short),
+			html.EscapeString(chain),
+		), nil
 	}
 }

@@ -28,7 +28,8 @@ func NewDataQualityWorker(adapter database.Adapter, cfg *config.Config, logger *
 		logger = slog.Default()
 	}
 	mod := data_quality.New(data_quality.DefaultConfig(cfg), logger).
-		WithRuntimeConfig(&cfg.DataQualityRuntime)
+		WithRuntimeConfig(&cfg.DataQualityRuntime).
+		WithCreatorProfileReader(newAdapterCreatorProfileReader(adapter))
 
 	// ── External providers (P1) ─────────────────────────────────────────
 	// Build the optional provider aggregator when providers are enabled.
@@ -187,12 +188,31 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 	}
 	fromState := lc.CurrentState
 
-	// Guard: only DETECTED and REJECTED are DQ-eligible entry states.
+	// Guard: only DETECTED, REJECTED, and DQ_SKIPPED are DQ-eligible entry states.
 	// Tokens that already advanced past DQ (FEATURE_READY and beyond)
 	// are drained idempotently — no re-scoring of already-accepted tokens.
-	if fromState != "DETECTED" && fromState != "REJECTED" {
+	// DQ_SKIPPED is included so rescan workers can re-evaluate a previously
+	// skipped token (e.g., after holder count or social links are populated).
+	if fromState != "DETECTED" && fromState != "REJECTED" && fromState != "DQ_SKIPPED" {
 		return nil, fmt.Errorf("dq_worker: lifecycle %s already past DQ (state=%s): %w",
 			lifecycleID, fromState, database.ErrLifecycleAlreadyAdvanced)
+	}
+
+	// SKIP: silent drop — do NOT emit data_quality_event; do NOT contribute to
+	// reject-rate statistics. Transition token_lifecycle to DQ_SKIPPED so the
+	// audit trail is preserved for replay and debugging.
+	if dqDTO.Decision == contracts.DecisionSkip {
+		w.logger.Info("dq_skip",
+			"token", dqDTO.TokenAddress,
+			"chain", dqDTO.Chain,
+			"flags", dqDTO.Flags,
+			"profile", dqDTO.Profile,
+			"trace_id", dqDTO.TraceID,
+		)
+		if err := doMandatoryTransition(ctx, w.adapter, lifecycleID, fromState, "DQ_SKIPPED", "serial_launcher_skip", "dq_worker"); err != nil {
+			return nil, fmt.Errorf("dq_worker: skip_transition: %w", err)
+		}
+		return nil, nil // No downstream event — SKIP is silent.
 	}
 
 	// Lifecycle transition: fromState → DQ_PASSED or REJECTED.
