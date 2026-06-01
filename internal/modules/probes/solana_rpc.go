@@ -83,3 +83,46 @@ type SolanaProbeRPCClient interface {
 	// endpoints; other providers return an "unsupported method" error.
 	GetDASAsset(ctx context.Context, mint string) (*DASAsset, error)
 }
+
+// SolanaTokenAccount is one SPL token account entry from getProgramAccounts.
+// Amount is the raw uint64 (atomic units, not decimal-adjusted).
+type SolanaTokenAccount struct {
+	Pubkey string
+	Amount uint64
+}
+
+// RPCProgramAccountsFilter is one filter clause for getProgramAccounts.
+// Exactly one of DataSize or Memcmp must be set per filter object.
+type RPCProgramAccountsFilter struct {
+	// DataSize filters by exact account data size in bytes.
+	DataSize int
+	// Memcmp filters by a byte pattern at a given offset within account data.
+	Memcmp *RPCProgramAccountsMemcmp
+}
+
+// RPCProgramAccountsMemcmp is the memcmp sub-filter for getProgramAccounts.
+type RPCProgramAccountsMemcmp struct {
+	// Offset is the byte offset into the account data to compare.
+	Offset int
+	// Bytes is the base58-encoded expected bytes to match.
+	Bytes string
+}
+
+// holderDistFallbackClient is the supplemental interface the fallback path in
+// solana_holder_dist.go requires. It is satisfied at runtime by the
+// *solanaProbeRPCAdapter in cmd/server.go, which wraps *rpc.SolanaClient.
+//
+// Using a separate local interface (rather than extending SolanaProbeRPCClient)
+// keeps existing test stubs compilable without modification — the primary
+// interface is unchanged. The fallback is activated via a type assertion
+// on the injected SolanaProbeRPCClient: if it also satisfies this interface
+// the fallback runs; otherwise the probe fails closed (HolderDistKnown=false).
+type holderDistFallbackClient interface {
+	// GetTokenSupply returns the raw total supply (u64 atomic units) and
+	// decimal count for mint. Used as the denominator for Top5HolderPct.
+	GetTokenSupply(ctx context.Context, mint, commitment string) (supply uint64, decimals int, err error)
+	// GetProgramAccounts returns SPL token accounts owned by programID
+	// that match all provided filters. The adapter applies jsonParsed
+	// encoding so amounts are available without binary decoding.
+	GetProgramAccounts(ctx context.Context, programID, commitment string, filters []RPCProgramAccountsFilter) ([]SolanaTokenAccount, error)
+}

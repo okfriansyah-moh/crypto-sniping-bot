@@ -968,15 +968,16 @@ type DLQFilter struct {
 // All filters are applied server-side in a single parameterised SQL statement.
 // See database/engines/postgres/rescan.go for the implementation.
 type RescanQuery struct {
-	Chain             string  // optional chain filter; "" = all chains
-	MinAgeSeconds     int     // lower bound of age window (inclusive)
-	MaxAgeSeconds     int     // upper bound of age window (exclusive)
-	MaxHoneypotScore  float64 // latest DQ honeypot_score must be ≤ this
-	MaxRugScore       float64 // latest DQ rug_score must be ≤ this
-	MaxBuyTaxBps      int32   // latest DQ buy_tax_bps must be ≤ this
-	IncludePassed     bool    // include decision IN ('PASS','RISKY_PASS') alongside REJECT
-	SkipOpenPositions bool    // exclude tokens in POSITION_OPEN / EXECUTION_PENDING / etc.
-	Limit             int     // max rows returned; 0 = 100
+	Chain                  string  // optional chain filter; "" = all chains
+	MinAgeSeconds          int     // lower bound of age window (inclusive)
+	MaxAgeSeconds          int     // upper bound of age window (exclusive)
+	MaxHoneypotScore       float64 // latest DQ honeypot_score must be ≤ this
+	MaxRugScore            float64 // latest DQ rug_score must be ≤ this
+	MaxBuyTaxBps           int32   // latest DQ buy_tax_bps must be ≤ this
+	IncludePassed          bool    // include decision IN ('PASS','RISKY_PASS') alongside REJECT
+	SkipOpenPositions      bool    // exclude tokens in POSITION_OPEN / EXECUTION_PENDING / etc.
+	IncludeSkippedForRetry bool    // include SKIP'd tokens with probe-failure cause (holder_dist_known=false)
+	Limit                  int     // max rows returned; 0 = 100
 }
 
 // LatencyEvent is one raw execution latency sample written to latency_events.

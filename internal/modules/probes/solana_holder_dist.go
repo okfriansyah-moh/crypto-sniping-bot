@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,20 @@ type SolanaHolderDistConfig struct {
 	// when 0 or unset. To disable caching entirely use a negative value (e.g. -1),
 	// which skips both the cache-hit fast path and the StartEviction loop.
 	CacheTTLSec int `yaml:"cache_ttl_sec"`
+	// FallbackEnabled controls whether the fallback path (getTokenSupply +
+	// getProgramAccounts) is attempted when getTokenLargestAccounts times out
+	// or returns an error. Defaults to true. The fallback costs +11 Helius
+	// credits per invocation (1 for getTokenSupply + 10 for getProgramAccounts).
+	FallbackEnabled bool `yaml:"fallback_enabled"`
+	// FallbackTimeoutMs is the context timeout applied to each fallback RPC
+	// call. Defaults to 2500 ms. Two sequential calls are issued so the
+	// worst-case added latency is 2× this value.
+	FallbackTimeoutMs int32 `yaml:"fallback_timeout_ms"`
+	// FallbackMaxProgramAccounts caps how many token accounts getProgramAccounts
+	// may return for HolderCount computation. Defaults to 200. Higher values
+	// improve accuracy but cost more Helius credits; 200 covers virtually all
+	// relevant holder concentration cases for fresh pump.fun mints.
+	FallbackMaxProgramAccounts int32 `yaml:"fallback_max_program_accounts"`
 }
 
 // holderDistResult is the cached outcome of a single probe call.
@@ -68,6 +83,12 @@ func NewSolanaHolderDistProbe(rpc SolanaProbeRPCClient, cfg SolanaHolderDistConf
 	}
 	if cfg.CacheTTLSec == 0 {
 		cfg.CacheTTLSec = 3600 // default 1h
+	}
+	if cfg.FallbackTimeoutMs == 0 {
+		cfg.FallbackTimeoutMs = 2500 // default 2.5 s
+	}
+	if cfg.FallbackMaxProgramAccounts == 0 {
+		cfg.FallbackMaxProgramAccounts = 200
 	}
 	return &SolanaHolderDistProbe{rpc: rpc, cfg: cfg, logger: logger}
 }
@@ -193,7 +214,25 @@ func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDa
 
 	holders, err := p.rpc.GetTokenLargestAccounts(cctx, mint, p.cfg.Commitment)
 	if err != nil {
-		return in, fmt.Errorf("probes/solana_holder_dist: get_token_largest_accounts: %w", err)
+		errMsg := err.Error()
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200]
+		}
+		p.logger.Info("solana_holder_dist: primary_failed",
+			"mint", mint,
+			"error", errMsg,
+		)
+		// Attempt fallback via getTokenSupply + getProgramAccounts if:
+		//   1. FallbackEnabled is true (config-driven gate), AND
+		//   2. The injected RPC client also satisfies holderDistFallbackClient
+		//      (production: *solanaProbeRPCAdapter in cmd/server.go; test stubs
+		//      that don't need fallback simply won't satisfy the type assertion).
+		if p.cfg.FallbackEnabled {
+			if frc, ok := p.rpc.(holderDistFallbackClient); ok {
+				return p.fallback(ctx, in, mint, frc)
+			}
+		}
+		return in, fmt.Errorf("probes/solana_holder_dist: get_token_largest_accounts: %s", errMsg)
 	}
 	if len(holders) == 0 {
 		// No holders returned: possible for a freshly minted SPL token.
@@ -255,6 +294,138 @@ func (p *SolanaHolderDistProbe) Probe(ctx context.Context, in contracts.MarketDa
 	out.HolderDistKnown = true
 	// Store in cache so subsequent rescan events and repeated ingest of the
 	// same mint skip the two Helius RPC calls (getAccountInfo + getTokenLargestAccounts).
+	if p.cfg.CacheTTLSec > 0 {
+		p.cache.Store(mint, holderDistResult{
+			holderCount: out.HolderCount,
+			top5Pct:     pctF,
+			fetchedAt:   time.Now(),
+		})
+	}
+	return out, nil
+}
+
+// fallback computes holder distribution via getTokenSupply + getProgramAccounts
+// when the primary getTokenLargestAccounts call fails (typically timeout on
+// fresh pump.fun mints in their first 60 seconds). Costs +11 Helius credits
+// per invocation (1 for getTokenSupply, 10 for getProgramAccounts).
+//
+// Fail-closed: any RPC error during the fallback leaves HolderDistKnown=false
+// so the downstream DQ engine applies the configured unknown-field policy.
+func (p *SolanaHolderDistProbe) fallback(ctx context.Context, in contracts.MarketDataDTO, mint string, frc holderDistFallbackClient) (contracts.MarketDataDTO, error) {
+	timeout := time.Duration(p.cfg.FallbackTimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 2500 * time.Millisecond
+	}
+	fctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Step 1: getTokenSupply — 1 Helius credit. Provides the authoritative
+	// total-supply denominator for Top5HolderPct. Decimal value is ignored here;
+	// the supply field is the raw atomic-unit u64 matching holder amounts.
+	supply, _, supplyErr := frc.GetTokenSupply(fctx, mint, p.cfg.Commitment)
+	if supplyErr != nil {
+		errMsg := supplyErr.Error()
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200]
+		}
+		p.logger.Info("solana_holder_dist: fallback_supply_failed",
+			"mint", mint,
+			"error", errMsg,
+		)
+		return in, nil // fail-closed: HolderDistKnown=false
+	}
+
+	// Step 2: getProgramAccounts — 10 Helius credits. Filters by:
+	//   - dataSize=165: SPL token account layout (initialized, non-multisig)
+	//   - memcmp offset=0 bytes=<mint>: first 32 bytes of SPL account = mint field
+	maxAccounts := int(p.cfg.FallbackMaxProgramAccounts)
+	if maxAccounts <= 0 {
+		maxAccounts = 200
+	}
+	filters := []RPCProgramAccountsFilter{
+		{DataSize: 165},
+		{Memcmp: &RPCProgramAccountsMemcmp{Offset: 0, Bytes: mint}},
+	}
+	accounts, err := frc.GetProgramAccounts(fctx, splTokenV1Program, p.cfg.Commitment, filters)
+	if err != nil {
+		errMsg := err.Error()
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200]
+		}
+		p.logger.Info("solana_holder_dist: fallback_program_accounts_failed",
+			"mint", mint,
+			"error", errMsg,
+		)
+		return in, nil // fail-closed: HolderDistKnown=false
+	}
+
+	// Collect non-zero balances, capped at maxAccounts to bound credit cost.
+	capacity := len(accounts)
+	if capacity > maxAccounts {
+		capacity = maxAccounts
+	}
+	balances := make([]uint64, 0, capacity)
+	for _, a := range accounts {
+		if a.Amount > 0 {
+			balances = append(balances, a.Amount)
+		}
+		if len(balances) >= maxAccounts {
+			break
+		}
+	}
+	if len(balances) == 0 {
+		return in, nil // no holders — leave HolderDistKnown=false
+	}
+
+	// Sort descending for deterministic top-K selection.
+	sort.Slice(balances, func(i, j int) bool { return balances[i] > balances[j] })
+
+	topK := p.cfg.TopK
+	if topK > len(balances) {
+		topK = len(balances)
+	}
+	var topSum uint64
+	for i := 0; i < topK; i++ {
+		topSum += balances[i]
+	}
+
+	out := in
+	out.HolderCount = int32(len(balances))
+
+	// Denominator priority: DTO TotalSupply (exact) → RPC supply → sum of
+	// returned balances (biased low, never > 1.0).
+	var denom float64
+	if in.TotalSupplyKnown && in.TotalSupply > 0 {
+		denom = in.TotalSupply
+	} else if supply > 0 {
+		denom = float64(supply)
+	} else {
+		var fullSum uint64
+		for _, b := range balances {
+			fullSum += b
+		}
+		denom = float64(fullSum)
+	}
+
+	var pctF float64
+	if denom > 0 {
+		pctF = float64(topSum) / denom
+		if pctF < 0 {
+			pctF = 0
+		}
+		if pctF > 1 {
+			pctF = 1
+		}
+	}
+	out.Top5HolderPct = pctF
+	out.HolderDistKnown = true
+
+	p.logger.Info("solana_holder_dist: fallback_success",
+		"mint", mint,
+		"holder_count", out.HolderCount,
+		"top5_pct", pctF,
+		"source", "fallback",
+	)
 	if p.cfg.CacheTTLSec > 0 {
 		p.cache.Store(mint, holderDistResult{
 			holderCount: out.HolderCount,

@@ -601,10 +601,13 @@ func buildMarketProbes(ctx context.Context, cfg *config.Config, solanaRPC *rpc.S
 		}
 		if cfg.Probes.SolanaHolderDist.Enabled {
 			hd := probes.NewSolanaHolderDistProbe(probeRPC, probes.SolanaHolderDistConfig{
-				Enabled:    true,
-				TimeoutMs:  cfg.Probes.SolanaHolderDist.TimeoutMs,
-				Commitment: cfg.Probes.SolanaHolderDist.Commitment,
-				TopK:       cfg.Probes.SolanaHolderDist.TopK,
+				Enabled:                    true,
+				TimeoutMs:                  cfg.Probes.SolanaHolderDist.TimeoutMs,
+				Commitment:                 cfg.Probes.SolanaHolderDist.Commitment,
+				TopK:                       cfg.Probes.SolanaHolderDist.TopK,
+				FallbackEnabled:            cfg.Probes.SolanaHolderDist.FallbackEnabled,
+				FallbackTimeoutMs:          cfg.Probes.SolanaHolderDist.FallbackTimeoutMs,
+				FallbackMaxProgramAccounts: cfg.Probes.SolanaHolderDist.FallbackMaxProgramAccounts,
 			}, logger)
 			hd.StartEviction(ctx)
 			out = append(out, hd)
@@ -761,6 +764,48 @@ func (a *solanaProbeRPCAdapter) GetDASAsset(ctx context.Context, mint string) (*
 		Name:     asset.Name,
 		Symbol:   asset.Symbol,
 	}, nil
+}
+
+// GetTokenSupply satisfies probes.holderDistFallbackClient so the fallback path
+// in SolanaHolderDistProbe can call getTokenSupply via *rpc.SolanaClient.
+func (a *solanaProbeRPCAdapter) GetTokenSupply(ctx context.Context, mint, commitment string) (uint64, int, error) {
+	return a.client.GetTokenSupply(ctx, mint, commitment)
+}
+
+// GetProgramAccounts satisfies probes.holderDistFallbackClient so the fallback
+// path in SolanaHolderDistProbe can call getProgramAccounts via *rpc.SolanaClient.
+// Converts probes.RPCProgramAccountsFilter → JSON-serialisable wire format and
+// translates rpc.ProgramAccountTokenEntry → probes.SolanaTokenAccount.
+func (a *solanaProbeRPCAdapter) GetProgramAccounts(ctx context.Context, programID, commitment string, filters []probes.RPCProgramAccountsFilter) ([]probes.SolanaTokenAccount, error) {
+	// Build JSON-serialisable filter slice for the rpc package (no import cycle).
+	wireFilters := make([]map[string]interface{}, 0, len(filters))
+	for _, f := range filters {
+		if f.Memcmp != nil {
+			wireFilters = append(wireFilters, map[string]interface{}{
+				"memcmp": map[string]interface{}{
+					"offset":   f.Memcmp.Offset,
+					"bytes":    f.Memcmp.Bytes,
+					"encoding": "base58",
+				},
+			})
+		} else if f.DataSize > 0 {
+			wireFilters = append(wireFilters, map[string]interface{}{
+				"dataSize": f.DataSize,
+			})
+		}
+	}
+	accounts, err := a.client.GetProgramAccounts(ctx, programID, commitment, wireFilters)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]probes.SolanaTokenAccount, 0, len(accounts))
+	for _, acct := range accounts {
+		out = append(out, probes.SolanaTokenAccount{
+			Pubkey: acct.Pubkey,
+			Amount: acct.Amount,
+		})
+	}
+	return out, nil
 }
 
 // solUsdProbeAdapter bridges ingestion_solana.SolUsdSource → probes.SolUsdSource.

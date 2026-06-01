@@ -25,6 +25,7 @@ type rescanAdapter struct {
 	systemState   *contracts.SystemStateDTO
 	queryResult   []contracts.MarketDataDTO
 	queryErr      error
+	lastQuery     database.RescanQuery // captured for IncludeSkippedForRetry assertions
 	activeVersion *database.StrategyVersion
 }
 
@@ -48,9 +49,10 @@ func (a *rescanAdapter) GetSystemState(_ context.Context) (*contracts.SystemStat
 	return a.systemState, nil
 }
 
-func (a *rescanAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuery) ([]contracts.MarketDataDTO, error) {
+func (a *rescanAdapter) GetTokensForRescan(_ context.Context, q database.RescanQuery) ([]contracts.MarketDataDTO, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.lastQuery = q // capture for IncludeSkippedForRetry pass-through assertion
 	if a.queryErr != nil {
 		return nil, a.queryErr
 	}
@@ -372,4 +374,45 @@ func (a *perTokenFailAdapter) InsertMarketData(_ context.Context, dto contracts.
 		return context.DeadlineExceeded // any error
 	}
 	return a.rescanAdapter.InsertMarketData(context.Background(), dto)
+}
+
+// TestRescanWorker_IncludeSkippedForRetryPassedToQuery verifies that the
+// IncludeSkippedForRetry config flag is propagated to the RescanQuery sent
+// to the adapter.
+func TestRescanWorker_IncludeSkippedForRetryPassedToQuery(t *testing.T) {
+	t.Parallel()
+	dtos := []contracts.MarketDataDTO{sampleDTO("0xToken1")}
+	adapter := newRescanAdapter(dtos)
+	cfg := minRescanConfig(true)
+	cfg.Rescan.IncludeSkippedForRetry = true
+
+	if err := runRescanTick(context.Background(), adapter, cfg, "v-test-1", time.Now(), nil); err != nil {
+		t.Fatalf("runRescanTick error: %v", err)
+	}
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if !adapter.lastQuery.IncludeSkippedForRetry {
+		t.Error("expected IncludeSkippedForRetry=true to be passed through to RescanQuery")
+	}
+}
+
+// TestRescanWorker_IncludeSkippedForRetryDefaultFalse verifies that when the
+// config flag is not set (default), IncludeSkippedForRetry is false in the query.
+func TestRescanWorker_IncludeSkippedForRetryDefaultFalse(t *testing.T) {
+	t.Parallel()
+	dtos := []contracts.MarketDataDTO{sampleDTO("0xToken1")}
+	adapter := newRescanAdapter(dtos)
+	cfg := minRescanConfig(true)
+	// IncludeSkippedForRetry is zero-value (false) — not explicitly set.
+
+	if err := runRescanTick(context.Background(), adapter, cfg, "v-test-1", time.Now(), nil); err != nil {
+		t.Fatalf("runRescanTick error: %v", err)
+	}
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.lastQuery.IncludeSkippedForRetry {
+		t.Error("expected IncludeSkippedForRetry=false (default disabled) in RescanQuery")
+	}
 }

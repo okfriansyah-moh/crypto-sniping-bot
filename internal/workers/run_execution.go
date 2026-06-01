@@ -194,6 +194,17 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 
 	if alloc.Rejected {
 		result = rejectedExecResult(alloc, now)
+	} else if w.cfg != nil && w.cfg.Execution.Mode == "shadow" {
+		// Shadow mode (Task 20 / Task 24): produce a simulated confirmed fill without
+		// on-chain submission. execution.mode is set to "shadow" in config/pipeline.yaml.
+		// simulatedExecResult produces Success=true with a placeholder entry price so
+		// the Position Engine opens a trackable slot for TIME-exit learning.
+		w.logger.Info("execution_worker_shadow_simulated",
+			"execution_id", alloc.ExecutionID,
+			"chain", alloc.Chain,
+			"trace_id", alloc.TraceID,
+		)
+		result = simulatedExecResult(alloc, now)
 	} else if alloc.Chain == "solana" {
 		// Solana execution path (Phase 7).
 		result = w.processSolanaAlloc(ctx, alloc, now)
@@ -379,10 +390,11 @@ func (w *ExecutionWorker) processSolanaAlloc(ctx context.Context, alloc contract
 	return result
 }
 
-// simulatedExecResult is retained for any future legitimate paper-trading
-// mode that produces a fully-formed synthetic fill (with realistic
-// RealizedEntryPrice). It is NOT used for the execution-disabled fallback —
-// see executionDisabledResult.
+// simulatedExecResult produces a fully-formed synthetic confirmed fill for shadow
+// mode (execution.mode: "shadow"). Success=true with a non-empty RealizedEntryPrice
+// so the Position Engine opens a trackable Status="open" slot that the TIME exit
+// can close after MaxHoldSeconds, producing position_state_event → evaluation_event
+// → learning_record_event (L9–L10 pipeline proof).
 func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {
 	eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-sim:%s", alloc.EventID))
 	return contracts.ExecutionResultDTO{
@@ -396,12 +408,13 @@ func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.Ex
 		ExecutionID:      alloc.ExecutionID,
 		AllocationID:     alloc.EventID,
 
-		Status:        "confirmed",
-		Success:       true,
-		Simulated:     true,
-		MempoolRoute:  "public",
-		WalletAddress: alloc.WalletAddress,
-		CompletedAt:   now,
+		Status:             "confirmed",
+		Success:            true,
+		Simulated:          true,
+		RealizedEntryPrice: "0.000001", // Placeholder shadow fill price; lazy init anchors real price on first poll.
+		MempoolRoute:       "public",
+		WalletAddress:      alloc.WalletAddress,
+		CompletedAt:        now,
 	}
 }
 

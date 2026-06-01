@@ -91,6 +91,11 @@ type Module struct {
 	// error, normalization falls back to cfg.SolEstimatedPriceUsd.
 	solUsdSource SolUsdSource
 
+	// preFilterReader is the optional Task-25 creator profile reader used by
+	// the L0 pre-cohort filter. When nil the filter is fully disabled and all
+	// tokens pass through to DQ (fail-open). Injected via WithCreatorProfileReader.
+	preFilterReader CreatorProfileReader
+
 	mu     sync.Mutex
 	stopFn context.CancelFunc
 
@@ -104,6 +109,10 @@ type Module struct {
 	creatorGuardTotal     atomic.Int64 // factory program ID found as CreatorAddress
 	creatorGuardCorrected atomic.Int64 // corrected to event-derived fallback wallet
 	creatorGuardCleared   atomic.Int64 // cleared to "" — no valid fallback available
+
+	// preFilterDropped counts tokens dropped by the L0 pre-cohort filter (Task 25).
+	// Visible in every heartbeat for observability.
+	preFilterDropped atomic.Int64
 }
 
 // SolUsdSource is the minimal interface the ingestion module consumes from
@@ -112,6 +121,19 @@ type Module struct {
 // caller can fall back to the static config estimate without confusion.
 type SolUsdSource interface {
 	SolUsd(ctx context.Context) (price float64, ok bool)
+}
+
+// CreatorProfileReader is the minimal interface the ingestion module uses to
+// consult the creator_profiles cache for the L0 pre-cohort filter (Task 25).
+// The interface is defined here (not imported from another module) so that the
+// ingestion module remains decoupled — the adapter-backed implementation is
+// wired by the orchestrator.
+//
+// GetCount returns the total prior token launches for (chain, creator).
+// When known=false (row absent or probe pending) the caller MUST fail-open
+// and emit the MarketDataDTO normally — DQ remains the authoritative gate.
+type CreatorProfileReader interface {
+	GetCount(ctx context.Context, chain, creator string) (count int32, known bool, err error)
 }
 
 // New creates a Module ready to Start.
@@ -138,6 +160,14 @@ func (m *Module) WithClient(c SolanaRPCClient) *Module {
 // LiquidityUsd derived from cfg.SolEstimatedPriceUsd.
 func (m *Module) WithSolUsdSource(s SolUsdSource) *Module {
 	m.solUsdSource = s
+	return m
+}
+
+// WithCreatorProfileReader injects the Task-25 pre-cohort filter reader.
+// When r is nil (or this method is never called) the filter is disabled and
+// every token passes through to DQ unchanged (fail-open).
+func (m *Module) WithCreatorProfileReader(r CreatorProfileReader) *Module {
+	m.preFilterReader = r
 	return m
 }
 
@@ -176,6 +206,55 @@ func (m *Module) applyCreatorGuard(dto *contracts.MarketDataDTO, fallback string
 			"tx", dto.TxHash,
 		)
 	}
+}
+
+// applyPreFilter checks the L0 pre-cohort filter (Task 25) for a DTO that has
+// already passed applyCreatorGuard. Returns true when the token should be
+// dropped (market_data_event MUST NOT be emitted); false when the token passes.
+//
+// Fail-open contract: if the reader is nil, the creator address is empty, the
+// filter is disabled in config, or the profile is not yet known, the function
+// returns false — DQ remains the authoritative gate and no token is silently
+// lost due to a probe or DB issue.
+//
+// When dropping, a structured log entry keyed "ingestion_pre_filter_drop" is
+// written (this is the observability "system_event" for this L0 gate) and the
+// module-level preFilterDropped counter is incremented (visible in heartbeat).
+func (m *Module) applyPreFilter(ctx context.Context, dto *contracts.MarketDataDTO) (dropped bool) {
+	cfg := m.cfg.PreFilter
+	// Fast path: filter disabled in config or threshold unset.
+	if !cfg.Enabled || cfg.MaxCreatorPrevTokenCount == 0 {
+		return false
+	}
+	// Fail-open: no reader injected.
+	if m.preFilterReader == nil {
+		return false
+	}
+	// Fail-open: no creator to check.
+	if dto == nil || dto.CreatorAddress == "" {
+		return false
+	}
+
+	count, known, err := m.preFilterReader.GetCount(ctx, dto.Chain, dto.CreatorAddress)
+	if err != nil || !known {
+		// Fail-open: probe failed or row absent — DQ handles it.
+		return false
+	}
+
+	if count > cfg.MaxCreatorPrevTokenCount {
+		m.preFilterDropped.Add(1)
+		m.logger.Warn("ingestion_pre_filter_drop",
+			"token", dto.TokenAddress,
+			"creator", dto.CreatorAddress,
+			"creator_total_tokens", count,
+			"max_allowed", cfg.MaxCreatorPrevTokenCount,
+			"reason", "creator_above_pre_filter_cap",
+			"chain", dto.Chain,
+			"market", dto.Market,
+		)
+		return true
+	}
+	return false
 }
 
 // resolveSolPriceUsd returns the SOL/USD price to use for the next
@@ -465,6 +544,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				"creator_guard_total", m.creatorGuardTotal.Load(),
 				"creator_guard_corrected", m.creatorGuardCorrected.Load(),
 				"creator_guard_cleared", m.creatorGuardCleared.Load(),
+				"pre_filter_dropped", m.preFilterDropped.Load(),
 			)
 
 		case notif, ok := <-notifs:
@@ -559,6 +639,11 @@ func (m *Module) handlePumpfunFromLogs(
 	// event.User is already in dto.CreatorAddress; pass "" as no separate
 	// fallback exists when the event-derived user IS the factory program.
 	m.applyCreatorGuard(dto, "")
+	// Pre-cohort filter (Task 25): drop serial launchers at L0 before probe calls.
+	// Fail-open: if reader unavailable or creator unknown, emit normally.
+	if m.applyPreFilter(ctx, dto) {
+		return
+	}
 	if err := m.emit(ctx, *dto); err != nil {
 		processErrors.Add(1)
 		m.logger.Warn("solana_ingestion_emit_error",
@@ -723,6 +808,11 @@ func (m *Module) processNotification(
 		// decoder changes cannot bypass it. No fallback is available at this
 		// call site — the normalizer already consumed the raw accounts.
 		m.applyCreatorGuard(dto, "")
+		// Pre-cohort filter (Task 25): drop serial launchers at L0.
+		// Fail-open: if reader unavailable or creator unknown, emit normally.
+		if m.applyPreFilter(ctx, dto) {
+			continue
+		}
 
 		if err := m.emit(ctx, *dto); err != nil {
 			return fmt.Errorf("emit %s: %w", dto.EventID, err)

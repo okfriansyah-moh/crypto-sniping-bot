@@ -237,3 +237,15 @@ solana:
     grpc_endpoint: ""
     fallback_on_error: true
     fallback_error_n: 5
+  # Task 25 — Pre-cohort filter: drop pump.fun graduates whose creator has
+  # launched more than max_creator_prev_token_count prior tokens BEFORE issuing
+  # Helius probe calls or running the DQ engine.  The threshold (25) is
+  # intentionally above VERY_EXPLORATION's max_creator_prev_token_count=10 so
+  # this filter never overrides a DQ mode decision — it only drops the strict
+  # super-set that always SKIP/REJECT under every mode (e.g. creator_count=49).
+  # Disabled by default — flip to true after Task 24 PIPELINE_PROOF passes and
+  # at least 24 hours of shadow trading confirm the filter does not drop valid tokens.
+  # PRODUCTION_GATE_ANALYSIS § 3 + §7.20.
+  pre_filter:
+    enabled: false
+    max_creator_prev_token_count: 25

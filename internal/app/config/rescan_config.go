@@ -10,13 +10,14 @@ import "fmt"
 // Disabled by default — operators must set enabled: true in pipeline.yaml.
 // See docs/PLAN.md § Task 1 for full design rationale.
 type RescanConfig struct {
-	Enabled           bool                         `yaml:"enabled"`
-	IntervalSeconds   int                          `yaml:"interval_seconds"`
-	MaxPerBandPerTick int                          `yaml:"max_per_band_per_tick"`
-	SkipOpenPositions bool                         `yaml:"skip_open_positions"`
-	Eligibility       RescanEligibility            `yaml:"eligibility"`
-	Bands             []RescanBand                 `yaml:"bands"`
-	ModeOverrides     map[string]RescanEligibility `yaml:"mode_overrides"`
+	Enabled                bool                         `yaml:"enabled"`
+	IntervalSeconds        int                          `yaml:"interval_seconds"`
+	MaxPerBandPerTick      int                          `yaml:"max_per_band_per_tick"`
+	SkipOpenPositions      bool                         `yaml:"skip_open_positions"`
+	IncludeSkippedForRetry bool                         `yaml:"include_skipped_for_retry"`
+	Eligibility            RescanEligibility            `yaml:"eligibility"`
+	Bands                  []RescanBand                 `yaml:"bands"`
+	ModeOverrides          map[string]RescanEligibility `yaml:"mode_overrides"`
 }
 
 // RescanEligibility defines the DQ sub-score thresholds that a token must

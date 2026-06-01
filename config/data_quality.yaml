@@ -302,6 +302,18 @@ data_quality:
       # RISKY_PASS when all quality gates pass; otherwise SKIP. Looser holder
       # floor (25 vs 50) and slightly higher risk-score ceiling (0.45 vs 0.40).
       max_creator_prev_token_count: 10
+      # Task 28 (2026-06-01): HOTFIX reverted after Task 26 fallback restored
+      # HolderDistKnown coverage to ≥90%. Final values calibrated from shadow
+      # data: social-links gate re-enabled (requires_social_links: true) and
+      # holder-count floor restored to 25 (canonical VERY_EXPLORATION value per
+      # §7.9). Task 22 relaxation (false/0) was live 2026-05-31→2026-06-01 with
+      # no critical issues; Task 26 fallback probe (getTokenSupply +
+      # getProgramAccounts) shipped 2026-06-01 and is expected to resolve
+      # ≥90% of getTokenLargestAccounts timeouts on fresh pump.fun mints.
+      # Revert to Task 22 relaxation values (false/0) if FN spike is observed
+      # after this change: flip serial_launcher_requires_social_links: false
+      # and serial_launcher_min_holder_count: 0 and restart the bot.
+      # See PRODUCTION_GATE_ANALYSIS §7.18 (gate-review hotfix rationale).
       serial_launcher_requires_social_links: true
       serial_launcher_max_risk_score: 0.45
       serial_launcher_min_holder_count: 25

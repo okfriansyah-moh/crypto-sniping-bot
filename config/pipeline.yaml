@@ -374,6 +374,13 @@ probes:
     timeout_ms: 1000 # increased from 300ms — Helius RPC needs headroom under load
     commitment: confirmed
     top_k: 5
+    # Fallback: when getTokenLargestAccounts times out (common in the first 60s
+    # for fresh pump.fun mints), retry via getTokenSupply + getProgramAccounts.
+    # Costs +11 Helius credits per fallback invocation (1 + 10). Disable here
+    # if credit burn must be minimised at the cost of more HolderDistKnown=false.
+    fallback_enabled: true
+    fallback_timeout_ms: 2500
+    fallback_max_program_accounts: 200
   # Uniswap-V2 getReserves probe — replaces ingestion-time per-swap flow
   # values with live pool depth. Default disabled until an EVM RPC client
   # is wired in cmd/server.go.
@@ -413,6 +420,7 @@ rescan:
   interval_seconds: 60
   max_per_band_per_tick: 30
   skip_open_positions: true
+  include_skipped_for_retry: false # opt-in; flip true to retry SKIP'd tokens whose probes timed out
   eligibility:
     max_honeypot_score: 0.5
     max_rug_score: 0.65

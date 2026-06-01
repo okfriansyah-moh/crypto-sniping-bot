@@ -1009,6 +1009,118 @@ func (c *SolanaClient) GetDASAsset(ctx context.Context, mint string) (*DASAsset,
 	}, nil
 }
 
+// GetTokenSupply returns the raw total supply (uint64 atomic units) and decimal
+// count for an SPL mint. Used by the solana_holder_dist fallback path to compute
+// Top5HolderPct when getTokenLargestAccounts times out. Costs 1 Helius credit.
+func (c *SolanaClient) GetTokenSupply(ctx context.Context, mint, commitment string) (supply uint64, decimals int, err error) {
+	if commitment == "" {
+		commitment = "confirmed"
+	}
+	params := []interface{}{
+		mint,
+		map[string]interface{}{"commitment": commitment},
+	}
+
+	var result struct {
+		Value struct {
+			Amount   string `json:"amount"`
+			Decimals int    `json:"decimals"`
+		} `json:"value"`
+	}
+	if err := c.httpRPC(ctx, "getTokenSupply", params, &result); err != nil {
+		return 0, 0, err
+	}
+	var supplyInt uint64
+	for _, ch := range result.Value.Amount {
+		if ch < '0' || ch > '9' {
+			return 0, 0, fmt.Errorf("solana_client: getTokenSupply: non-numeric amount %q", result.Value.Amount)
+		}
+		supplyInt = supplyInt*10 + uint64(ch-'0')
+	}
+	return supplyInt, result.Value.Decimals, nil
+}
+
+// getProgramAccountsFilter is the JSON shape sent to getProgramAccounts filters.
+// This local type prevents import cycles (the probes package defines the public
+// RPCProgramAccountsFilter; the rpc package defines its own wire representation).
+type getProgramAccountsFilter struct {
+	DataSize *int                      `json:"dataSize,omitempty"`
+	Memcmp   *getProgramAccountsMemcmp `json:"memcmp,omitempty"`
+}
+
+type getProgramAccountsMemcmp struct {
+	Offset   int    `json:"offset"`
+	Bytes    string `json:"bytes"`
+	Encoding string `json:"encoding"`
+}
+
+// ProgramAccountTokenEntry is one SPL token account returned by GetProgramAccounts.
+// Amount is the raw uint64 (atomic units).
+type ProgramAccountTokenEntry struct {
+	Pubkey string
+	Amount uint64
+}
+
+// GetProgramAccounts fetches SPL token accounts owned by programID that match all
+// provided filters. Uses jsonParsed encoding so the amount is available without
+// binary decoding. Used by the solana_holder_dist fallback path. Costs 10 Helius
+// credits per call. Filters are expressed as (dataSize, memcmp) pairs.
+//
+// filterSpecs mirrors probes.RPCProgramAccountsFilter but is defined locally
+// to keep the rpc package a leaf with no dependency on internal/modules/probes.
+func (c *SolanaClient) GetProgramAccounts(ctx context.Context, programID, commitment string, filterSpecs interface{}) ([]ProgramAccountTokenEntry, error) {
+	if commitment == "" {
+		commitment = "confirmed"
+	}
+	params := []interface{}{
+		programID,
+		map[string]interface{}{
+			"encoding":   "jsonParsed",
+			"commitment": commitment,
+			"filters":    filterSpecs,
+		},
+	}
+
+	var rawResults []json.RawMessage
+	if err := c.httpRPC(ctx, "getProgramAccounts", params, &rawResults); err != nil {
+		return nil, err
+	}
+
+	out := make([]ProgramAccountTokenEntry, 0, len(rawResults))
+	for _, raw := range rawResults {
+		var entry struct {
+			Pubkey  string `json:"pubkey"`
+			Account struct {
+				Data struct {
+					Parsed struct {
+						Info struct {
+							TokenAmount struct {
+								Amount string `json:"amount"`
+							} `json:"tokenAmount"`
+						} `json:"info"`
+					} `json:"parsed"`
+				} `json:"data"`
+			} `json:"account"`
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue // skip malformed entries — fail-open on individual records
+		}
+		var amount uint64
+		for _, ch := range entry.Account.Data.Parsed.Info.TokenAmount.Amount {
+			if ch < '0' || ch > '9' {
+				amount = 0
+				break
+			}
+			amount = amount*10 + uint64(ch-'0')
+		}
+		out = append(out, ProgramAccountTokenEntry{
+			Pubkey: entry.Pubkey,
+			Amount: amount,
+		})
+	}
+	return out, nil
+}
+
 // ── WebSocket notification types ──────────────────────────────────────────────
 
 // logsNotificationEnvelope is the JSON shape of a Solana logsNotification.

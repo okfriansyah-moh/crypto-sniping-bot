@@ -88,6 +88,13 @@ type SolanaHolderDistYAML struct {
 	TimeoutMs  int    `yaml:"timeout_ms"`
 	Commitment string `yaml:"commitment"`
 	TopK       int    `yaml:"top_k"`
+	// FallbackEnabled activates the getTokenSupply + getProgramAccounts fallback
+	// when getTokenLargestAccounts times out. Costs +11 Helius credits per use.
+	FallbackEnabled bool `yaml:"fallback_enabled"`
+	// FallbackTimeoutMs is the timeout per fallback RPC call (default 2500 ms).
+	FallbackTimeoutMs int32 `yaml:"fallback_timeout_ms"`
+	// FallbackMaxProgramAccounts caps accounts processed during fallback (default 200).
+	FallbackMaxProgramAccounts int32 `yaml:"fallback_max_program_accounts"`
 }
 
 // EVMPairReservesYAML configures the Uniswap-V2 pair getReserves probe.

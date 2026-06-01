@@ -149,14 +149,15 @@ func runRescanTick(
 	// 3. Process bands in ascending min_age order (already enforced by Validate).
 	for _, band := range cfg.Rescan.Bands {
 		rows, err := adapter.GetTokensForRescan(ctx, database.RescanQuery{
-			MinAgeSeconds:     band.MinAgeSeconds,
-			MaxAgeSeconds:     band.MaxAgeSeconds,
-			MaxHoneypotScore:  *eligibility.MaxHoneypotScore,
-			MaxRugScore:       *eligibility.MaxRugScore,
-			MaxBuyTaxBps:      *eligibility.MaxBuyTaxBps,
-			IncludePassed:     eligibility.IncludePassed,
-			SkipOpenPositions: cfg.Rescan.SkipOpenPositions,
-			Limit:             cfg.Rescan.MaxPerBandPerTick,
+			MinAgeSeconds:          band.MinAgeSeconds,
+			MaxAgeSeconds:          band.MaxAgeSeconds,
+			MaxHoneypotScore:       *eligibility.MaxHoneypotScore,
+			MaxRugScore:            *eligibility.MaxRugScore,
+			MaxBuyTaxBps:           *eligibility.MaxBuyTaxBps,
+			IncludePassed:          eligibility.IncludePassed,
+			SkipOpenPositions:      cfg.Rescan.SkipOpenPositions,
+			IncludeSkippedForRetry: cfg.Rescan.IncludeSkippedForRetry,
+			Limit:                  cfg.Rescan.MaxPerBandPerTick,
 		})
 		if err != nil {
 			return fmt.Errorf("band %s: query: %w", band.Name, err)
