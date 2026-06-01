@@ -209,6 +209,13 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 			"profile", dqDTO.Profile,
 			"trace_id", dqDTO.TraceID,
 		)
+		// Idempotent: token already DQ_SKIPPED — no transition needed.
+		// This occurs when a rescan re-emits an event for a token that was
+		// already silently dropped in a prior cycle (same skip criteria still
+		// apply). Drain cleanly without retrying a forbidden self-transition.
+		if fromState == "DQ_SKIPPED" {
+			return nil, nil
+		}
 		if err := doMandatoryTransition(ctx, w.adapter, lifecycleID, fromState, "DQ_SKIPPED", "serial_launcher_skip", "dq_worker"); err != nil {
 			return nil, fmt.Errorf("dq_worker: skip_transition: %w", err)
 		}

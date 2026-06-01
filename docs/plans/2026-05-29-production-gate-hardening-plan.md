@@ -1539,38 +1539,167 @@ observed shadow-mode evidence — NOT executed blindly.
 
 ---
 
+### Task 29 — Production Readiness: Enable Shadow-Gated Features + Fix L2–L5 Dead Workers + Resolve Duplicate event_ids
+
+**Goal:** Promote the bot from PIPELINE_PROOF to production-ready by (a) fixing the two
+BLOCKERs identified in the 2026-06-01 gate review — dead L2–L5 workers and 181 duplicate
+`event_id`s — and (b) enabling all shadow-gated features that are safe for live
+operation: `bottom_detection`, `dynamic_trailing`, `loss_explainer`,
+`reject_unknown_holder_count`, `max_positions_per_creator`, and
+`include_skipped_for_retry`. Also uncomments the calibrated market-cap/volume filters
+in `data_quality.yaml` now that operational evidence exists to set safe values.
+
+**Layer(s) affected:** L0.5 (rescan), L1 (DQ config), L2 (feature — worker wiring), L3
+(edge — worker wiring), L4 (probability — worker wiring), L5 (validation — worker
+wiring), L9 (position — dynamic trailing), L10 (learning — loss explainer), Config,
+Platform (app startup).
+
+**Files to create/modify:**
+
+- `internal/app/app.go` (modify) — **BLOCKER 2 fix**
+  - Audit the worker startup sequence; confirm Feature, Edge, Probability, Validation,
+    and Learning workers are registered via `app.RegisterWorker(...)` or equivalent
+  - If any worker is missing from the registration list, add it in the correct
+    dependency order: Feature → Edge → Probability → Validation → Selection → Capital →
+    Execution → Position → Learning
+  - No logic change to the workers themselves — this is a wiring-only fix
+  - Add a startup log line `"pipeline_workers_registered"` with a count field so future
+    gate reviews can confirm all workers are live
+
+- `internal/workers/` (investigate) — **BLOCKER 1 fix: duplicate event_ids**
+  - Search every `EmitEvent` / `InsertEvent` call site for any `event_id` constructed
+    from a non-content source (timestamp, UUID, counter, `time.Now()`, `rand.*`)
+  - If found: replace with `SHA256(content_signature)[:16]` per §7.5 pattern
+  - Confirm `ON CONFLICT DO NOTHING` is present on every `events` INSERT
+  - If all existing event_ids are already content-addressable, document the finding and
+    close as benign (WS-reconnect replay deduplicated at DB level)
+  - Expected root cause: the 181 duplicates in the gate report are the same
+    `market_data_event` tokens re-delivered by the WebSocket on reconnect — this is
+    normal Helius behaviour; `ON CONFLICT DO NOTHING` should silently absorb them.
+    Confirm with: `SELECT event_id, COUNT(*) FROM events GROUP BY event_id HAVING COUNT(*) > 1 LIMIT 5;`
+
+- `config/pipeline.yaml` (modify) — **Enable shadow-gated features**
+  - `edge.bottom_detection`: set `enabled: true`, `shadow_mode: false`
+    — V-shape bottom detection is a profit factor for L3; gating it in shadow mode
+    permanently means it never influences live decisions.
+  - `position.dynamic_trailing`: set `enabled: true`, `shadow_mode: false`
+    — trailing stop tiers protect realized gains; keeping them shadow-only means the
+    bot always exits with a fixed SL, leaving upside on the table.
+  - `position.dynamic_trailing.tiers` — keep existing tier values unchanged (they are
+    conservative: 2x/3x/5x triggers with 20%/15%/10% trail widths).
+  - `selection.max_positions_per_creator: 2` — prevents concentration in a single
+    creator wallet; `0` (current) means unlimited concurrent positions from one creator.
+  - `rescan.include_skipped_for_retry: true` — enables the rescan worker (Task 27) to
+    retry probe-timeout SKIP'd tokens; Task 26 fallback now makes this low-cost.
+  - `ai_enrichment.loss_explainer.enabled: true` — enables AI-powered loss
+    categorisation in Learning (Layer 10); `min_records_per_batch: 5` is already set.
+
+- `config/data_quality.yaml` (modify) — **Enable production-grade DQ gates**
+  - `thresholds.reject_unknown_holder_count: true` — now that Task 26's fallback
+    restores `HolderDistKnown=true` for ≥ 90% of tokens, fail-open here is a quality
+    hole. Flip to `true` to reject tokens whose holder distribution genuinely cannot
+    be determined after both primary and fallback probes.
+  - Uncomment `min_market_cap_usd: 3000.0` — pump.fun graduation tokens list at ~$69k
+    market cap; a $3k floor is safe (well below graduation threshold, rejects only
+    sub-$3k micro-cap shells with zero traction). Keep `max_market_cap_usd` commented
+    out — the $20k ceiling would reject graduation tokens.
+  - Uncomment `min_volume_usd_1h: 100.0` — the guard pattern (`if MinVolumeUsd1h > 0
+&& in.VolumeUsd1h > 0 && in.VolumeUsd1h < MinVolumeUsd1h`) means this only fires
+    when DEXScreener has populated the field; tokens without 1h data are unaffected.
+    $100/hr is a minimal floor that rejects ghost tokens with no real trading activity.
+
+**Invariant check:**
+
+- [x] BLOCKER 2 fix is wiring-only — no module logic changed, no cross-module imports
+- [x] BLOCKER 1 fix uses content-addressable `SHA256(content)[:16]` event_ids — determinism preserved
+- [x] `ON CONFLICT DO NOTHING` remains on all `events` INSERTs — idempotency preserved
+- [x] `bottom_detection` and `dynamic_trailing` are existing implemented features — enabling them does not introduce new code paths, only lifts the shadow gate
+- [x] `max_positions_per_creator: 2` is a selection-layer cap, not a DQ gate — does not bypass any Layer-1 hard reject
+- [x] `reject_unknown_holder_count: true` requires Task 26 (fallback probe) to already be deployed — pre-flight check enforced below
+- [x] `min_market_cap_usd: 3000.0` uses the `> 0 guard` pattern from Task 18 — tokens with `MarketCapUsd == 0` (DEXScreener not yet indexed) are unaffected
+- [x] `max_market_cap_usd` stays commented out — graduation tokens at ~$69k would be rejected otherwise
+- [x] `loss_explainer` calls `GroqClient.Complete()` — fail-open, no pipeline blocking, `GROQ_API_KEY` must be set in env
+- [x] All config values remain in YAML — zero hardcoded thresholds in Go
+- [x] Three mandatory Layer-1 hard rejects (serial_launcher STRICT/BALANCED, no_social_links, high_total_supply) unchanged
+- [x] No new migrations — all schema already exists from Tasks 5–27
+- [x] No Telegram direct API calls — all observability via event bus
+- [x] Security invariants preserved: HTTPS-only, API keys via env vars, bounded HTTP bodies
+
+**Pre-flight requirements (ALL must be confirmed before executing):**
+
+1. Task 26 (`solana_holder_dist` fallback) deployed — `HolderDistKnown=true` rate ≥ 90%
+2. Task 27 (`include_skipped_for_retry` rescan SQL) deployed and tested
+3. Task 28 (VERY_EXPLORATION gate re-tighten) completed
+4. `GROQ_API_KEY` env var is set in the deployment environment (required for `loss_explainer`)
+5. Confirm last 4h gate brief shows no new structural blockers beyond the two in the 2026-06-01 review
+
+**Validation:**
+
+- `go build ./...`: zero errors
+- `go vet ./...`: zero issues
+- `go test ./internal/app/...`: green — startup worker registration test passes
+- `go test ./internal/workers/...`: green
+- `go test ./internal/modules/data_quality/...`: green — `reject_unknown_holder_count=true` path covered by existing tests
+- Restart bot; within 5 minutes confirm in logs:
+  - `"pipeline_workers_registered"` count ≥ 10
+  - `features_extracted` events > 0 in `output/logs/gate_*`
+  - `edge_decision` events > 0
+  - `probability_scored` events > 0
+  - `validation_decision` events > 0
+- SQL post-deploy spot check:
+  ```sql
+  SELECT event_type, COUNT(*) FROM events
+  WHERE created_at > NOW() - INTERVAL '30 minutes'
+  GROUP BY event_type ORDER BY event_type;
+  -- Expect: features_extracted > 0, edge_decision > 0, probability_scored > 0,
+  --         validation_decision > 0
+  ```
+- Duplicate event_id audit:
+  ```sql
+  SELECT COUNT(*) FROM (
+    SELECT event_id FROM events GROUP BY event_id HAVING COUNT(*) > 1
+  ) dupes;
+  -- Expect: 0 (or confirm they are WS-reconnect dedupes absorbed by ON CONFLICT)
+  ```
+- `docs/PROGRESS_REPORT.md` (modify) — append Session History entry: `Task 29 — Production readiness YYYY-MM-DD: L2–L5 worker wiring confirmed; duplicate event_ids resolved; bottom_detection/dynamic_trailing/loss_explainer enabled; reject_unknown_holder_count=true; min_market_cap_usd=3000/min_volume_usd_1h=100 uncommented; max_positions_per_creator=2; include_skipped_for_retry=true`
+
+**Prompt context needed:** §7.5 Event bus pattern, §7.9 Section-9 serial-launcher, §7.18 Gate-review hotfix rationale, §7.19 Duplicate event_id triage.
+
+---
+
 ## 5. Task Summary
 
-| Task | Name                                                                   | Files (primary)                                                                                                          | Depends On | Est. Complexity |
-| ---- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------- | --------------- |
-| 1    | Fix wrong cost comments (chains.yaml + DAS audit)                      | `config/chains.yaml`                                                                                                     | —          | Low             |
-| 2    | Chains config struct: add `disabled` flag                              | `internal/app/config/chains_config.go`, `internal/modules/ingestion_solana/`                                             | Task 1     | Low             |
-| 3    | Disable raw pump.fun + Raydium V4 transactionSubscribe                 | `config/chains.yaml`, `internal/app/config/chains_config.go`, ingestion_solana                                           | Task 2     | Medium          |
-| 4    | Runbook: verify pump.fun-AMM events                                    | `docs/PROGRESS_REPORT.md` (entry only)                                                                                   | Task 3     | Low             |
-| 5    | Migration: `creator_profiles` table                                    | `database/migrations/20260101000NNN_creator_profiles.sql`                                                                | Task 4     | Low             |
-| 6    | Contracts additive: SKIP decision + MarketCap/Volume fields            | `contracts/data_quality.go`, `contracts/market_data.go`                                                                  | Task 5     | Low             |
-| 7    | Ingestion guard: reject factory-program creator identity               | `internal/modules/ingestion_solana/ingestion_solana.go`                                                                  | Task 6     | Medium          |
-| 8    | Creator profile aggregator worker                                      | `internal/workers/creator_profile_aggregator.go`, `database/adapter.go`, `contracts/creator_profile.go`                  | Task 7     | High            |
-| 9    | DQ uses creator_profiles via injected reader                           | `internal/modules/data_quality/data_quality.go`, orchestrator wiring                                                     | Task 8     | High            |
-| 10   | Telegram operator command `/devstats` via event bus                    | `internal/telegram/dispatcher.go`, `internal/workers/creator_stats_responder.go`                                         | Task 9     | Medium          |
-| 11   | Config struct: per-mode serial-launcher fields                         | `internal/app/config/data_quality_runtime_config.go`                                                                     | Task 10    | Low             |
-| 12   | data_quality.yaml: per-mode profiles                                   | `config/data_quality.yaml`                                                                                               | Task 11    | Low             |
-| 13   | ProcessForMode: mode-aware serial launcher + buildSkipResult           | `internal/modules/data_quality/data_quality.go`, orchestrator                                                            | Task 12    | High            |
-| 14   | decision.go: canonicalProfile fallback                                 | `internal/modules/data_quality/decision.go`                                                                              | Task 13    | Medium          |
-| 15   | Config struct: market-cap/volume threshold fields                      | `internal/app/config/data_quality_runtime_config.go`                                                                     | Task 14    | Low             |
-| 16   | data_quality.yaml: commented-out market-cap/volume thresholds          | `config/data_quality.yaml`                                                                                               | Task 15    | Low             |
-| 17   | Expand DEXScreener parser + probe populates MarketDataDTO              | `internal/rpc/price_fetcher.go`, `internal/modules/probes/dexscreener_probe.go`                                          | Task 16    | Medium          |
-| 18   | DQ structural rejects: market_cap_too_low/high, volume_too_low         | `internal/modules/data_quality/data_quality.go`                                                                          | Task 17    | Medium          |
-| 19   | End-to-end pipeline validation: inject test token (replay prefix)      | `scripts/inject_test_token.py`, `docs/PROGRESS_REPORT.md` entry                                                          | Task 18    | High            |
-| 20   | Enable shadow mode + review min_token_age_seconds for graduation       | `config/pipeline.yaml`, `docs/PROGRESS_REPORT.md` entry                                                                  | Task 19    | Medium          |
-| 21   | Tests + build/vet/test + PROGRESS_REPORT.md update                     | `docs/PROGRESS_REPORT.md`                                                                                                | Task 20    | Medium          |
-| 22   | Phase 6 HOTFIX: relax VERY_EXPLORATION quality gates (SKIP→RISKY_PASS) | `config/data_quality.yaml`                                                                                               | Task 21    | Low             |
-| 23   | Verify 106 duplicate event_id is benign WS-replay (diagnose only)      | `docs/PROGRESS_REPORT.md` entry (+ follow-up plan if real bug)                                                           | Task 22    | Low             |
-| 24   | Re-run inject_test_token.py — confirm L0→L10 → LearningRecordDTO       | `docs/PROGRESS_REPORT.md` entry                                                                                          | Task 23    | Medium          |
-| 25   | Pre-cohort filter: drop creator_count > 25 before DQ                   | `internal/modules/ingestion_solana/ingestion_solana.go`, `internal/app/config/ingestion_config.go`, `config/chains.yaml` | Task 24    | Medium          |
-| 26   | solana_holder_dist fallback: getTokenSupply + getProgramAccounts       | `internal/modules/probes/solana_holder_dist.go`, `internal/app/config/probes_config.go`, `config/data_quality.yaml`      | Task 25    | High            |
-| 27   | Rescan eligibility: include probe-failed SKIP tokens (mode-gated)      | `database/engines/postgres/rescan.go`, `database/adapter.go`, `internal/workers/run_rescan.go`, `config/pipeline.yaml`   | Task 26    | Medium          |
-| 28   | Re-tighten VERY_EXPLORATION gates after probe coverage ≥ 90%           | `config/data_quality.yaml`, `docs/PROGRESS_REPORT.md` entry                                                              | Task 27    | Low             |
+| Task | Name                                                                                                        | Files (primary)                                                                                                           | Depends On | Est. Complexity |
+| ---- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------- | --------------- |
+| 1    | Fix wrong cost comments (chains.yaml + DAS audit)                                                           | `config/chains.yaml`                                                                                                      | —          | Low             |
+| 2    | Chains config struct: add `disabled` flag                                                                   | `internal/app/config/chains_config.go`, `internal/modules/ingestion_solana/`                                              | Task 1     | Low             |
+| 3    | Disable raw pump.fun + Raydium V4 transactionSubscribe                                                      | `config/chains.yaml`, `internal/app/config/chains_config.go`, ingestion_solana                                            | Task 2     | Medium          |
+| 4    | Runbook: verify pump.fun-AMM events                                                                         | `docs/PROGRESS_REPORT.md` (entry only)                                                                                    | Task 3     | Low             |
+| 5    | Migration: `creator_profiles` table                                                                         | `database/migrations/20260101000NNN_creator_profiles.sql`                                                                 | Task 4     | Low             |
+| 6    | Contracts additive: SKIP decision + MarketCap/Volume fields                                                 | `contracts/data_quality.go`, `contracts/market_data.go`                                                                   | Task 5     | Low             |
+| 7    | Ingestion guard: reject factory-program creator identity                                                    | `internal/modules/ingestion_solana/ingestion_solana.go`                                                                   | Task 6     | Medium          |
+| 8    | Creator profile aggregator worker                                                                           | `internal/workers/creator_profile_aggregator.go`, `database/adapter.go`, `contracts/creator_profile.go`                   | Task 7     | High            |
+| 9    | DQ uses creator_profiles via injected reader                                                                | `internal/modules/data_quality/data_quality.go`, orchestrator wiring                                                      | Task 8     | High            |
+| 10   | Telegram operator command `/devstats` via event bus                                                         | `internal/telegram/dispatcher.go`, `internal/workers/creator_stats_responder.go`                                          | Task 9     | Medium          |
+| 11   | Config struct: per-mode serial-launcher fields                                                              | `internal/app/config/data_quality_runtime_config.go`                                                                      | Task 10    | Low             |
+| 12   | data_quality.yaml: per-mode profiles                                                                        | `config/data_quality.yaml`                                                                                                | Task 11    | Low             |
+| 13   | ProcessForMode: mode-aware serial launcher + buildSkipResult                                                | `internal/modules/data_quality/data_quality.go`, orchestrator                                                             | Task 12    | High            |
+| 14   | decision.go: canonicalProfile fallback                                                                      | `internal/modules/data_quality/decision.go`                                                                               | Task 13    | Medium          |
+| 15   | Config struct: market-cap/volume threshold fields                                                           | `internal/app/config/data_quality_runtime_config.go`                                                                      | Task 14    | Low             |
+| 16   | data_quality.yaml: commented-out market-cap/volume thresholds                                               | `config/data_quality.yaml`                                                                                                | Task 15    | Low             |
+| 17   | Expand DEXScreener parser + probe populates MarketDataDTO                                                   | `internal/rpc/price_fetcher.go`, `internal/modules/probes/dexscreener_probe.go`                                           | Task 16    | Medium          |
+| 18   | DQ structural rejects: market_cap_too_low/high, volume_too_low                                              | `internal/modules/data_quality/data_quality.go`                                                                           | Task 17    | Medium          |
+| 19   | End-to-end pipeline validation: inject test token (replay prefix)                                           | `scripts/inject_test_token.py`, `docs/PROGRESS_REPORT.md` entry                                                           | Task 18    | High            |
+| 20   | Enable shadow mode + review min_token_age_seconds for graduation                                            | `config/pipeline.yaml`, `docs/PROGRESS_REPORT.md` entry                                                                   | Task 19    | Medium          |
+| 21   | Tests + build/vet/test + PROGRESS_REPORT.md update                                                          | `docs/PROGRESS_REPORT.md`                                                                                                 | Task 20    | Medium          |
+| 22   | Phase 6 HOTFIX: relax VERY_EXPLORATION quality gates (SKIP→RISKY_PASS)                                      | `config/data_quality.yaml`                                                                                                | Task 21    | Low             |
+| 23   | Verify 106 duplicate event_id is benign WS-replay (diagnose only)                                           | `docs/PROGRESS_REPORT.md` entry (+ follow-up plan if real bug)                                                            | Task 22    | Low             |
+| 24   | Re-run inject_test_token.py — confirm L0→L10 → LearningRecordDTO                                            | `docs/PROGRESS_REPORT.md` entry                                                                                           | Task 23    | Medium          |
+| 25   | Pre-cohort filter: drop creator_count > 25 before DQ                                                        | `internal/modules/ingestion_solana/ingestion_solana.go`, `internal/app/config/ingestion_config.go`, `config/chains.yaml`  | Task 24    | Medium          |
+| 26   | solana_holder_dist fallback: getTokenSupply + getProgramAccounts                                            | `internal/modules/probes/solana_holder_dist.go`, `internal/app/config/probes_config.go`, `config/data_quality.yaml`       | Task 25    | High            |
+| 27   | Rescan eligibility: include probe-failed SKIP tokens (mode-gated)                                           | `database/engines/postgres/rescan.go`, `database/adapter.go`, `internal/workers/run_rescan.go`, `config/pipeline.yaml`    | Task 26    | Medium          |
+| 28   | Re-tighten VERY_EXPLORATION gates after probe coverage ≥ 90%                                                | `config/data_quality.yaml`, `docs/PROGRESS_REPORT.md` entry                                                               | Task 27    | Low             |
+| 29   | Production readiness: fix dead L2–L5 workers, resolve duplicate event_ids, enable all shadow-gated features | `internal/app/app.go`, `internal/workers/`, `config/pipeline.yaml`, `config/data_quality.yaml`, `docs/PROGRESS_REPORT.md` | Task 28    | High            |
 
 ---
 

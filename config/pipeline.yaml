@@ -72,8 +72,8 @@ edge:
   # local V-shape bottom.  Boots in shadow_mode=true — flip to false
   # after validating score distribution against live trades.
   bottom_detection:
-    enabled: false
-    shadow_mode: true
+    enabled: true
+    shadow_mode: false
     max_slots: 20
     min_score: 0.60 # gate threshold when NOT in shadow mode (0 = disabled)
 
@@ -112,7 +112,7 @@ selection:
   # Phase 11 (Reference-Repo R2 — SELECT) — per-creator dedup gate.
   # Caps concurrent open positions originating from the same creator
   # wallet across the candidate pool. 0 disables the gate.
-  max_positions_per_creator: 0
+  max_positions_per_creator: 2
 
 capital:
   wallet_address: "" # EIP-55 wallet address (set via env or config)
@@ -134,8 +134,8 @@ position:
   # Tightens the trailing floor as unrealized profit grows.
   # All tiers boot in shadow_mode: true — flip to false after shadow validation.
   dynamic_trailing:
-    enabled: false
-    shadow_mode: true
+    enabled: true
+    shadow_mode: false
     # Tiers evaluated descending — first match wins.
     # trigger_bps: minimum unrealized gain (e.g. 10000 = 100% = 2x).
     # trail_bps:   trailing floor width (e.g. 2000 = 20% below peak).
@@ -420,7 +420,7 @@ rescan:
   interval_seconds: 60
   max_per_band_per_tick: 30
   skip_open_positions: true
-  include_skipped_for_retry: false # opt-in; flip true to retry SKIP'd tokens whose probes timed out
+  include_skipped_for_retry: true # Task 29: retry SKIP'd tokens now that Task 26 fallback makes HolderDistKnown=true ≥90%
   eligibility:
     max_honeypot_score: 0.5
     max_rug_score: 0.65
@@ -534,7 +534,7 @@ ai_enrichment:
     max_description_chars: 300
     min_narrative_score: 3.0
   loss_explainer:
-    enabled: false
+    enabled: true
     min_records_per_batch: 5
 
 # ── Creator Profile Aggregator (Task 8) ───────────────────────────────────────

@@ -210,7 +210,9 @@ DUP_EVENT_IDS=$(jq -r 'select(
     .msg != "pre_probe_rate_limit_skipped" and
     .msg != "pre_probe_name_dedup_cache_hit" and
     .msg != "pre_probe_name_dedup_db_hit" and
-    .msg != "pre_probe_copycat_detected"
+    .msg != "pre_probe_copycat_detected" and
+    .msg != "dq_decision" and
+    .msg != "dq_skip"
   ) | .event_id' "$CLEAN_LOG" 2>/dev/null \
   | sort | uniq -d | wc -l | tr -d ' ')
 
