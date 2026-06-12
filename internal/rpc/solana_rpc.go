@@ -637,8 +637,8 @@ func (c *SolanaClient) SubscribeTransactions(ctx context.Context, programID stri
 	}
 
 	// Send transactionSubscribe request with accountInclude filter.
-	// commitment "confirmed" aligns with logsSubscribe; encoding "jsonParsed"
-	// ensures meta.logMessages is populated in the notification.
+	// commitment "confirmed" aligns with logsSubscribe; encoding "json" matches
+	// getTransaction wire format so the shared parser can decode instructions.
 	subReq := rpcRequest{
 		JSONRPC: "2.0",
 		ID:      c.nextID(),
@@ -649,7 +649,7 @@ func (c *SolanaClient) SubscribeTransactions(ctx context.Context, programID stri
 			},
 			map[string]interface{}{
 				"commitment":                     "confirmed",
-				"encoding":                       "jsonParsed",
+				"encoding":                       "json",
 				"transactionDetails":             "full",
 				"maxSupportedTransactionVersion": 0,
 			},
@@ -745,12 +745,39 @@ func (c *SolanaClient) SubscribeTransactions(ctx context.Context, programID stri
 			}
 
 			r := notif.Params.Result
+			var parsedTx *ingestion_solana.TransactionResult
+			if len(r.Transaction) > 0 {
+				var parseErr error
+				parsedTx, parseErr = ParseTransactionSubscribePayload(r.Signature, r.Slot, r.Transaction)
+				if parseErr != nil {
+					c.logger.Warn("solana_ws_tx_parse_error",
+						"program", programID,
+						"signature", r.Signature,
+						"error", parseErr,
+					)
+				}
+			}
+			var logs []string
+			var txErr interface{}
+			if len(r.Transaction) > 0 {
+				var metaOnly struct {
+					Meta struct {
+						LogMessages []string    `json:"logMessages"`
+						Err         interface{} `json:"err"`
+					} `json:"meta"`
+				}
+				if err := json.Unmarshal(r.Transaction, &metaOnly); err == nil {
+					logs = metaOnly.Meta.LogMessages
+					txErr = metaOnly.Meta.Err
+				}
+			}
 			select {
 			case ch <- ingestion_solana.LogsNotification{
-				Signature: r.Signature,
-				Logs:      r.Transaction.Meta.LogMessages,
-				Slot:      r.Slot,
-				Err:       r.Transaction.Meta.Err,
+				Signature:   r.Signature,
+				Logs:        logs,
+				Slot:        r.Slot,
+				Err:         txErr,
+				Transaction: parsedTx,
 			}:
 			case <-ctx.Done():
 				return
@@ -838,6 +865,43 @@ type AccountInfo struct {
 	Lamports   uint64   `json:"lamports"` // 0 means account does not exist
 	Slot       uint64   `json:"-"`        // populated from context.slot wrapper
 	Executable bool     `json:"executable"`
+}
+
+// GetMultipleAccounts fetches up to N accounts in a single RPC call. The returned
+// slice is aligned with pubkeys; nil entries mean the account does not exist.
+func (c *SolanaClient) GetMultipleAccounts(ctx context.Context, pubkeys []string, commitment string) ([]*AccountInfo, error) {
+	if len(pubkeys) == 0 {
+		return nil, nil
+	}
+	if commitment == "" {
+		commitment = "confirmed"
+	}
+	params := []interface{}{
+		pubkeys,
+		map[string]interface{}{
+			"commitment": commitment,
+			"encoding":   "base64",
+		},
+	}
+
+	var result struct {
+		Context struct {
+			Slot uint64 `json:"slot"`
+		} `json:"context"`
+		Value []*AccountInfo `json:"value"`
+	}
+	if err := c.httpRPC(ctx, "getMultipleAccounts", params, &result); err != nil {
+		return nil, err
+	}
+	for i, v := range result.Value {
+		if v != nil {
+			v.Slot = result.Context.Slot
+		}
+		if i >= len(pubkeys) {
+			break
+		}
+	}
+	return result.Value, nil
 }
 
 // GetAccountInfo fetches an account's raw data + owner at the given commitment.
@@ -1143,24 +1207,51 @@ type logsNotificationEnvelope struct {
 }
 
 // txNotificationEnvelope is the JSON shape of a Helius transactionNotification.
-// The result.transaction.meta.logMessages field maps to LogsNotification.Logs so
-// the existing downstream log-decode and tx-fetch paths work without modification.
 type txNotificationEnvelope struct {
 	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
 	Params  struct {
 		Subscription int64 `json:"subscription"`
 		Result       struct {
-			Signature   string `json:"signature"`
-			Slot        uint64 `json:"slot"`
-			Transaction struct {
-				Meta struct {
-					LogMessages []string    `json:"logMessages"`
-					Err         interface{} `json:"err"`
-				} `json:"meta"`
-			} `json:"transaction"`
+			Signature   string          `json:"signature"`
+			Slot        uint64          `json:"slot"`
+			Transaction json.RawMessage `json:"transaction"`
 		} `json:"result"`
 	} `json:"params"`
+}
+
+// ParseTransactionSubscribePayload converts the inner transaction object from a
+// Helius transactionNotification into a TransactionResult using the same
+// decoder as getTransaction.
+func ParseTransactionSubscribePayload(signature string, slot uint64, inner json.RawMessage) (*ingestion_solana.TransactionResult, error) {
+	if len(inner) == 0 {
+		return nil, fmt.Errorf("solana_client: empty transactionSubscribe payload for %s", signature)
+	}
+	var partial struct {
+		Transaction json.RawMessage `json:"transaction"`
+		Meta        json.RawMessage `json:"meta"`
+		BlockTime   int64           `json:"blockTime"`
+	}
+	if err := json.Unmarshal(inner, &partial); err != nil {
+		return nil, fmt.Errorf("solana_client: unmarshal transactionSubscribe %s: %w", signature, err)
+	}
+	if len(partial.Transaction) == 0 {
+		return nil, fmt.Errorf("solana_client: transactionSubscribe %s missing transaction.message", signature)
+	}
+	meta := partial.Meta
+	if len(meta) == 0 {
+		meta = json.RawMessage(`{}`)
+	}
+	composed, err := json.Marshal(map[string]interface{}{
+		"slot":        slot,
+		"blockTime":   partial.BlockTime,
+		"transaction": json.RawMessage(partial.Transaction),
+		"meta":        json.RawMessage(meta),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("solana_client: compose transactionSubscribe %s: %w", signature, err)
+	}
+	return parseGetTransactionResponse(signature, composed)
 }
 
 // ── getTransaction response parser ───────────────────────────────────────────

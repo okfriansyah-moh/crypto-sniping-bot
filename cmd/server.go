@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/database/engines/postgres"
 	"crypto-sniping-bot/internal/ai"
 	"crypto-sniping-bot/internal/app/config"
@@ -137,6 +138,20 @@ func runServer() {
 				"max_probes_per_hour", cfg.Probes.MaxProbesPerHour,
 			)
 		}
+		if cfg.Probes.BatchAccounts && solanaRPCClient != nil {
+			probeRPC := &solanaProbeRPCAdapter{client: solanaRPCClient}
+			probeWorker.WithBatchAccounts(true, probeRPC, &solUsdProbeAdapter{src: solUsdSource}, workers.BatchAccountsConfig{
+				RescanSkipPumpfunLpPhase2: cfg.Probes.RescanSkipPumpfunLpPhase2,
+				AuthoritiesEnabled:        cfg.Probes.SolanaAuthorities.Enabled,
+				PumpfunLpEnabled:          cfg.Probes.SolanaPumpfunLp.Enabled,
+				AuthoritiesTimeoutMs:      cfg.Probes.SolanaAuthorities.TimeoutMs,
+				PumpfunLpTimeoutMs:        cfg.Probes.SolanaPumpfunLp.TimeoutMs,
+				Commitment:                cfg.Probes.SolanaAuthorities.Commitment,
+			})
+			logger.Info("market_probes_batch_accounts_enabled",
+				"rescan_skip_pumpfun_lp_phase2", cfg.Probes.RescanSkipPumpfunLpPhase2,
+			)
+		}
 		orch.RegisterStage(
 			"market_probes_worker",
 			probeWorker,
@@ -164,7 +179,10 @@ func runServer() {
 	// config/pipeline.yaml capital.wallet_address / capital.wallet_private_key when no
 	// multi-wallet env vars are present.
 	walletShards := buildWalletShards(cfg)
+	priceClient := buildPriceClient(cfg, solanaRPCClient, db, logger)
+
 	execWorker := workers.NewExecutionWorker(db, cfg, nil, cfg.Capital.WalletPrivateKey, 1, "", walletShards, logger)
+	execWorker.WithPriceClient(priceClient)
 	// Wire Solana execution path when a concrete RPC client is available.
 	// Gracefully noops when solanaRPCClient is nil (Solana not configured).
 	if solanaRPCClient != nil {
@@ -185,10 +203,8 @@ func runServer() {
 	logger.Info("pipeline_workers_registered", "count", pipelineWorkerCount)
 
 	// Position poll runs as a separate goroutine (timer-driven, not event-driven).
-	// GAP-02 fix: wire a real price client so TP/SL/trailing stops can fetch
-	// live token prices. DEXScreenerPriceClient uses the free public API and
-	// returns priceNative (price in chain-native token) — same unit as EntryPrice.
-	priceClient := rpc.NewDEXScreenerPriceClient(logger)
+	// GAP-02 / PLAN Task 10: on-chain Solana pool reserves when price_oracle.mode
+	// is on_chain; DEXScreener fallback for other chains and RPC misses.
 	go func() {
 		if err := workers.RunPositionPoll(ctx, db, cfg, priceClient, logger); err != nil && err != ctx.Err() {
 			logger.Error("position_poll_failed", "error", err)
@@ -319,6 +335,65 @@ func runServer() {
 		}
 	}()
 
+	// Shadow recorder — captures rejected tokens as shadow LearningRecords (FN path).
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := workers.RunShadowRecorder(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+				logger.Error("shadow_recorder_failed", "error", err)
+			}
+			select {
+			case <-time.After(100 * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Shadow observer — polls DEXScreener prices for rejected tokens; reclassifies FN/TN.
+	go func() {
+		shadowInterval := time.Duration(cfg.Learning.ShadowPollIntervalSeconds) * time.Second
+		if shadowInterval <= 0 {
+			shadowInterval = 60 * time.Second
+		}
+		shadowTicker := time.NewTicker(shadowInterval)
+		defer shadowTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-shadowTicker.C:
+				if err := workers.RunShadowObserver(ctx, db, cfg, priceClient, logger); err != nil && err != ctx.Err() {
+					logger.Error("shadow_observer_failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// A/B promoter — promotes shadow strategy versions when bounded gate passes.
+	go func() {
+		promoteInterval := time.Duration(cfg.Learning.ShadowWindowMinutes) * time.Minute
+		if promoteInterval <= 0 {
+			promoteInterval = 60 * time.Minute
+		}
+		promoteTicker := time.NewTicker(promoteInterval)
+		defer promoteTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-promoteTicker.C:
+				if err := workers.RunABPromoter(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+					logger.Error("ab_promoter_failed", "error", err)
+				}
+			}
+		}
+	}()
+
 	// Archive worker — moves aged processed events to events_archive.
 	go func() {
 		if err := workers.RunArchive(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
@@ -380,6 +455,12 @@ func runServer() {
 	// emits market_data_event DTOs into the shared pipeline.
 	// Gracefully noops when cfg.Solana.Programs is empty (Solana not configured)
 	// or when no RPC client is injected (nil = no-op until a client is wired).
+	if cfg.Solana.PreFilter.Enabled {
+		logger.Info("solana_pre_filter_configured",
+			"max_creator_prev_token_count", cfg.Solana.PreFilter.MaxCreatorPrevTokenCount,
+			"creator_profile_reader", "adapter",
+		)
+	}
 	go func() {
 		if err := workers.RunIngestionSolana(ctx, db, cfg, solanaClient, solUsdSource, logger); err != nil && err != ctx.Err() {
 			logger.Error("solana_ingestion_failed", "error", err)
@@ -391,7 +472,7 @@ func runServer() {
 	// Start HTTP health server with read/write/idle timeouts to prevent
 	// slowloris and slow-read denial-of-service attacks.
 	addr := fmt.Sprintf(":%s", cfg.Port())
-	srv := web.NewServer(cfg, logger)
+	srv := web.NewServer(cfg, logger, db)
 	httpSrv := &http.Server{
 		Addr:         addr,
 		Handler:      srv.Router(),
@@ -456,6 +537,30 @@ func (s *pythSolUsdShim) SolUsd(ctx context.Context) (float64, bool) {
 		return 0, false
 	}
 	return q.Price, true
+}
+
+// buildPriceClient wires the L9/L8 price oracle per config/pipeline.yaml price_oracle.
+func buildPriceClient(cfg *config.Config, sol *rpc.SolanaClient, adapter database.Adapter, logger *slog.Logger) *rpc.RoutingPriceClient {
+	oracleCfg := rpc.PriceOracleModeConfig{
+		Mode:               cfg.PriceOracle.Mode,
+		CacheTTL:           time.Duration(cfg.PriceOracle.CacheTTLSeconds) * time.Second,
+		StaleMaxMultiplier: cfg.PriceOracle.StaleMaxMultiplier,
+	}
+	var poolResolver rpc.PoolResolver
+	if adapter != nil {
+		poolResolver = func(ctx context.Context, chain, token string) (string, bool, error) {
+			return adapter.GetLatestPoolAddressForToken(ctx, chain, token)
+		}
+	}
+	client := rpc.NewConfiguredPriceClient(oracleCfg, sol, poolResolver, logger)
+	if logger != nil {
+		logger.Info("price_oracle_configured",
+			"mode", cfg.PriceOracle.Mode,
+			"cache_ttl_seconds", cfg.PriceOracle.CacheTTLSeconds,
+			"solana_rpc", sol != nil,
+		)
+	}
+	return client
 }
 
 // buildSolanaExecutionModule constructs the Solana execution module from keypair files
@@ -727,14 +832,30 @@ func (a *solanaProbeRPCAdapter) GetAccountInfo(ctx context.Context, pubkey, comm
 	if err != nil {
 		return nil, err
 	}
+	return accountInfoToProbeData(acct), nil
+}
+
+func (a *solanaProbeRPCAdapter) GetMultipleAccounts(ctx context.Context, pubkeys []string, commitment string) ([]*probes.SolanaAccountData, error) {
+	accts, err := a.client.GetMultipleAccounts(ctx, pubkeys, commitment)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*probes.SolanaAccountData, len(accts))
+	for i, acct := range accts {
+		out[i] = accountInfoToProbeData(acct)
+	}
+	return out, nil
+}
+
+func accountInfoToProbeData(acct *rpc.AccountInfo) *probes.SolanaAccountData {
 	if acct == nil || len(acct.Data) == 0 {
-		return nil, nil
+		return nil
 	}
 	return &probes.SolanaAccountData{
 		DataB64: acct.Data[0],
 		Owner:   acct.Owner,
 		Slot:    acct.Slot,
-	}, nil
+	}
 }
 
 func (a *solanaProbeRPCAdapter) GetTokenLargestAccounts(ctx context.Context, mint, commitment string) ([]probes.SolanaTokenHolder, error) {

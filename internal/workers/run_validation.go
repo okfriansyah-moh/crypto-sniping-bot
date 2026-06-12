@@ -54,7 +54,8 @@ func (w *ValidationWorker) Process(ctx context.Context, evt *database.Event) (*d
 			now = t.UTC()
 		}
 	}
-	vedge, err := w.mod.ProcessWithEstimatesAt(ctx, dto, prob, slip, lat, now)
+	evThreshold := w.resolveEVThresholdBps(ctx)
+	vedge, err := w.mod.ProcessWithEstimatesAt(ctx, dto, prob, slip, lat, evThreshold, now)
 	if err != nil {
 		return nil, fmt.Errorf("validation_worker: module: %w", err)
 	}
@@ -63,6 +64,7 @@ func (w *ValidationWorker) Process(ctx context.Context, evt *database.Event) (*d
 		"token", vedge.TokenAddress,
 		"decision", vedge.Decision,
 		"ev_bps", vedge.ExpectedValueBps,
+		"ev_threshold_bps", vedge.EvThresholdApplied,
 		"probability_used", vedge.ProbabilityUsed,
 		"reject_reason", vedge.RejectReason,
 		"trace_id", vedge.TraceID,
@@ -179,4 +181,17 @@ joinLoop:
 		}
 	}
 	return prob, slip, lat
+}
+
+// resolveEVThresholdBps maps the active operational mode to ev_threshold_bps
+// from config/priority.yaml via Config.ResolveModeThresholds (docs/PLAN.md Task 2).
+func (w *ValidationWorker) resolveEVThresholdBps(ctx context.Context) int32 {
+	sysMode := w.cfg.Priority.ActiveMode
+	if sysMode == "" {
+		sysMode = "balanced"
+	}
+	if state, err := w.adapter.GetSystemState(ctx); err == nil && state != nil && state.Mode != "" {
+		sysMode = state.Mode
+	}
+	return w.cfg.ResolveModeThresholds(sysMode).EvThresholdBps
 }

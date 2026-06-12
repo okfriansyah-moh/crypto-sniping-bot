@@ -1,0 +1,3 @@
+- Single process, single repo, single database
+- Entry point: `app/main.*` (language-specific, e.g., `main.py`, `main.ts`, `main.go`)
+- No microservices, no inter-process communication, no network calls between modules

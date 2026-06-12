@@ -103,15 +103,14 @@ validation:
   join_poll_interval_ms: 20
 
 selection:
-  # Raised from 1 → 10 after F-1 (phantom position) fix verified
-  # in log-reviewer 2026-05-02. With execution disabled at boot,
-  # allocations now produce rejected (not phantom-confirmed) results,
-  # so slots cannot leak. Cap chosen for moderate concurrency on
-  # Solana pump.fun feed; tune with operator P&L data.
+  # Legacy fallback when mode thresholds are unavailable. Active Top-K cap is
+  # priority.modes.*.max_positions (see config/priority.yaml, PLAN Task 4).
   max_open_positions: 10
-  # Phase 11 (Reference-Repo R2 — SELECT) — per-creator dedup gate.
-  # Caps concurrent open positions originating from the same creator
-  # wallet across the candidate pool. 0 disables the gate.
+  # Micro-batch window (ms) — coalesce validated edges per chain before Top-K.
+  batch_window_ms: 3000
+  # 0 = use per-mode max_positions from priority.yaml.
+  top_k: 0
+  # Per-creator dedup gate — caps concurrent open positions per dev wallet.
   max_positions_per_creator: 2
 
 capital:
@@ -234,17 +233,29 @@ models:
     latency_anchor_ms: 800
     max_multiplier: 2.0
 
+# Live price oracle for Layer 9 position monitoring and Layer 8 shadow fills.
+# on_chain: Solana tokens priced from bonding-curve / AMM vault reserves (cached RPC).
+# dexscreener: DEXScreener public API for all chains (legacy default).
+price_oracle:
+  mode: on_chain
+  cache_ttl_seconds: 5
+  stale_max_multiplier: 3
+
 execution:
   # Shadow mode enabled 2026-05-29 (Task 20 — P2-A).
   # Generates buy/sell signals and records execution_results rows with mode='shadow'
-  # using a simulated fill price from the live DEXScreener price at decision time.
+  # using a simulated fill price from the live on-chain pool oracle (PLAN Task 10).
   # No on-chain transactions are submitted; no wallet keys are loaded.
   # Gating before advancing to live: ≥ 30 completed shadow trades AND positive
   # aggregate realized_pnl_bps over the most recent 14-day window
   # (per PRODUCTION_GATE_ANALYSIS § 8 Change 6, step 13).
   # To re-enable live trading, change mode back to "live".
   mode: "shadow" # "live" | "shadow" — PRODUCTION_GATE_ANALYSIS § 7 P2-A
-  # mode: "live"  # uncomment after ≥14 days shadow + ≥30 trades + positive PnL
+  # mode: "live"  # operator manual flip ONLY after shadow_gate passes (no auto-promotion)
+  shadow_gate:
+    min_trades: 30
+    min_window_days: 14
+    min_aggregate_pnl_bps: 0 # 0 = require strictly positive aggregate PnL in window
   private_route_threshold_usd: 0 # 0 disables private routing in Phase 4
   private_endpoints: []
 
@@ -350,6 +361,12 @@ probes:
   # Reduce to 350 if downgrading to Helius free tier (1M credits/month).
   # Set to 0 to disable (unlimited — not recommended).
   max_probes_per_hour: 1200
+  # batch_accounts: one getMultipleAccounts for mint + bonding curve on new
+  # tokens (saves ~1 Helius credit per pump.fun probe vs two getAccountInfo).
+  batch_accounts: true
+  # rescan_skip_pumpfun_lp_phase2: skip solana_pumpfun_lp on 12h–48h rescan
+  # bands; reserves change slowly and ingest-time LP data is sufficient.
+  rescan_skip_pumpfun_lp_phase2: true
   honeypot_sim:
     enabled: false
     simulation_contract: "" # EIP-55 address of deployed sim contract

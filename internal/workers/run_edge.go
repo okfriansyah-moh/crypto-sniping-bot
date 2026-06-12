@@ -26,6 +26,7 @@ import (
 type EdgeWorker struct {
 	adapter  database.Adapter
 	mod      *edge.Module
+	cfg      *config.Config
 	baseline *edge.BaselineStore
 	logger   *slog.Logger
 	now      func() time.Time
@@ -68,6 +69,7 @@ func NewEdgeWorker(adapter database.Adapter, cfg *config.Config, logger *slog.Lo
 	return &EdgeWorker{
 		adapter:          adapter,
 		mod:              edge.New(edgeCfg),
+		cfg:              cfg,
 		baseline:         edge.NewBaselineStore(maxLen),
 		logger:           logger,
 		now:              time.Now,
@@ -83,7 +85,8 @@ func (w *EdgeWorker) Process(ctx context.Context, evt *database.Event) (*databas
 	}
 
 	snapshot := w.baseline.Snapshot(baselineMarketKey)
-	edgeDTO, err := w.mod.ProcessWithContext(ctx, dto, snapshot, w.now().UTC())
+	edgeStrengthMin := w.resolveEdgeStrengthMin(ctx)
+	edgeDTO, err := w.mod.ProcessWithContext(ctx, dto, snapshot, edgeStrengthMin, w.now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("edge_worker: module: %w", err)
 	}
@@ -100,6 +103,7 @@ func (w *EdgeWorker) Process(ctx context.Context, evt *database.Event) (*databas
 		"token", edgeDTO.TokenAddress,
 		"edge_type", edgeDTO.EdgeType,
 		"edge_strength", edgeDTO.EdgeStrength,
+		"edge_strength_min", edgeStrengthMin,
 		"edge_confidence", edgeDTO.EdgeConfidence,
 		"momentum_score", edgeDTO.MomentumScore,
 		"threshold_applied", edgeDTO.ThresholdApplied,
@@ -129,6 +133,22 @@ func (w *EdgeWorker) Process(ctx context.Context, evt *database.Event) (*databas
 		edgeDTO.EventID, edgeDTO, "edge_event",
 		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 	)
+}
+
+// resolveEdgeStrengthMin maps the active operational mode to edge_strength_min
+// from config/priority.yaml via Config.ResolveModeThresholds (docs/PLAN.md Task 3).
+func (w *EdgeWorker) resolveEdgeStrengthMin(ctx context.Context) float64 {
+	sysMode := "balanced"
+	if w.cfg != nil && w.cfg.Priority.ActiveMode != "" {
+		sysMode = w.cfg.Priority.ActiveMode
+	}
+	if state, err := w.adapter.GetSystemState(ctx); err == nil && state != nil && state.Mode != "" {
+		sysMode = state.Mode
+	}
+	if w.cfg == nil {
+		return 0
+	}
+	return w.cfg.ResolveModeThresholds(sysMode).EdgeStrengthMin
 }
 
 // HydrateBaselines rehydrates the in-memory ring buffers from the

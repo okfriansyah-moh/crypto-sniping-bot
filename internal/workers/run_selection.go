@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
@@ -17,7 +19,24 @@ import (
 type SelectionWorker struct {
 	adapter database.Adapter
 	mod     *selection.Module
+	cfg     *config.Config
 	logger  *slog.Logger
+	now     func() time.Time
+
+	mu      sync.Mutex
+	batches map[string]*selectionChainBatch
+}
+
+type selectionChainBatch struct {
+	items []*pendingSelection
+	timer *time.Timer
+}
+
+type pendingSelection struct {
+	evt     *database.Event
+	dto     contracts.ValidatedEdgeDTO
+	chain   string
+	creator string
 }
 
 // NewSelectionWorker returns a new SelectionWorker.
@@ -28,7 +47,10 @@ func NewSelectionWorker(adapter database.Adapter, cfg *config.Config, logger *sl
 	return &SelectionWorker{
 		adapter: adapter,
 		mod:     selection.New(&cfg.Selection),
+		cfg:     cfg,
 		logger:  logger,
+		now:     time.Now,
+		batches: make(map[string]*selectionChainBatch),
 	}
 }
 
@@ -38,7 +60,6 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		return nil, fmt.Errorf("selection_worker: unmarshal: %w", err)
 	}
 
-	// Kill-switch pre-check (Phase 6): drop entry events when HALTED.
 	state, stateErr := w.adapter.GetSystemState(ctx)
 	if stateErr == nil && state != nil && state.Mode == "HALTED" {
 		w.logger.Info("selection_worker_halted",
@@ -52,58 +73,167 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		return nil, nil
 	}
 
+	chain := chainFromCorrelation(ctx, w.adapter, evt.CorrelationID, w.logger)
+	creator := creatorFromCorrelation(ctx, w.adapter, evt.CorrelationID, w.logger)
+	item := &pendingSelection{
+		evt:     evt,
+		dto:     dto,
+		chain:   chain,
+		creator: creator,
+	}
+
+	window := w.batchWindow()
+	if window <= 0 {
+		return w.flushItems(ctx, chain, []*pendingSelection{item}, evt.EventID)
+	}
+
+	w.mu.Lock()
+	batch := w.batches[chain]
+	if batch == nil {
+		batch = &selectionChainBatch{}
+		w.batches[chain] = batch
+	}
+	batch.items = append(batch.items, item)
+
+	if len(batch.items) >= 2 {
+		if batch.timer != nil {
+			batch.timer.Stop()
+			batch.timer = nil
+		}
+		items := batch.items
+		batch.items = nil
+		w.mu.Unlock()
+		return w.flushItems(ctx, chain, items, evt.EventID)
+	}
+
+	if batch.timer != nil {
+		batch.timer.Stop()
+	}
+	triggerID := evt.EventID
+	batch.timer = time.AfterFunc(window, func() {
+		w.mu.Lock()
+		items := batch.items
+		batch.items = nil
+		batch.timer = nil
+		w.mu.Unlock()
+		if len(items) == 0 {
+			return
+		}
+		if _, err := w.flushItems(context.Background(), chain, items, triggerID); err != nil {
+			w.logger.Warn("selection_batch_flush_failed", "chain", chain, "error", err)
+		}
+	})
+	w.mu.Unlock()
+
+	return nil, nil
+}
+
+func (w *SelectionWorker) batchWindow() time.Duration {
+	if w.cfg == nil || w.cfg.Selection.BatchWindowMs <= 0 {
+		return 0
+	}
+	return time.Duration(w.cfg.Selection.BatchWindowMs) * time.Millisecond
+}
+
+func (w *SelectionWorker) flushItems(
+	ctx context.Context,
+	chain string,
+	items []*pendingSelection,
+	returnEventID string,
+) (*database.Event, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+
 	openPositions, err := w.adapter.GetOpenPositions(ctx)
 	if err != nil {
 		w.logger.Warn("selection_worker_open_positions_failed", "error", err)
 		openPositions = nil
 	}
 
-	// Derive the chain for per-market isolation (arch §2.4).
-	// ValidatedEdgeDTO doesn't carry Chain, so we look it up from the event log.
-	chain := chainFromCorrelation(ctx, w.adapter, evt.CorrelationID, w.logger)
-
-	// Count only positions on the same chain/market so that a position on one
-	// market does not block selection on another.
 	chainOpenCount := 0
+	openByCreator := make(map[string]int32)
 	for _, p := range openPositions {
 		if p.Chain == chain {
 			chainOpenCount++
 		}
 	}
 
-	selDTO, err := w.mod.Process(ctx, dto, chainOpenCount)
+	thresholds := w.resolveModeThresholds(ctx)
+	batchItems := make([]selection.BatchItem, len(items))
+	for i, item := range items {
+		batchItems[i] = selection.BatchItem{
+			Edge:           item.dto,
+			CreatorAddress: item.creator,
+		}
+	}
+
+	outputs, err := w.mod.ProcessBatch(ctx, batchItems, chainOpenCount, thresholds, openByCreator)
 	if err != nil {
 		return nil, fmt.Errorf("selection_worker: module: %w", err)
 	}
 
-	w.logger.Info("selection_decision",
-		"token", selDTO.TokenAddress,
-		"selected", selDTO.Selected,
-		"rank", selDTO.Rank,
-		"combined_score", selDTO.CombinedScore,
-		"reject_reason", selDTO.RejectReason,
-		"trace_id", selDTO.TraceID,
-		"version_id", selDTO.VersionID,
-	)
+	var returnEvt *database.Event
+	for i, item := range items {
+		selDTO := outputs[i]
+		w.logger.Info("selection_decision",
+			"token", selDTO.TokenAddress,
+			"selected", selDTO.Selected,
+			"rank", selDTO.Rank,
+			"combined_score", selDTO.CombinedScore,
+			"is_exploration", selDTO.IsExploration,
+			"edge_strength_min_mode", thresholds.Mode,
+			"max_positions", thresholds.MaxPositions,
+			"reject_reason", selDTO.RejectReason,
+			"trace_id", selDTO.TraceID,
+			"version_id", selDTO.VersionID,
+		)
 
-	if err := w.adapter.InsertSelection(ctx, selDTO); err != nil {
-		w.logger.Warn("selection_worker_persist_failed", "event_id", selDTO.EventID, "error", err)
+		if err := w.adapter.InsertSelection(ctx, selDTO); err != nil {
+			w.logger.Warn("selection_worker_persist_failed", "event_id", selDTO.EventID, "error", err)
+		}
+
+		nextState := "SELECTED"
+		if !selDTO.Selected {
+			nextState = "REJECTED"
+		}
+		if err := doMandatoryTransition(ctx, w.adapter, item.dto.TokenLifecycleID, "VALIDATED", nextState, selDTO.RejectReason, "selection_worker"); err != nil {
+			return nil, fmt.Errorf("selection_worker: transition: %w", err)
+		}
+
+		if !selDTO.Selected {
+			continue
+		}
+
+		outEvt, mkErr := makeOutputEvent(
+			selDTO.EventID, selDTO, "selection_event",
+			item.evt.TraceID, item.evt.CorrelationID, item.evt.EventID, item.evt.VersionID,
+		)
+		if mkErr != nil {
+			return nil, fmt.Errorf("selection_worker: make output: %w", mkErr)
+		}
+		if item.evt.EventID == returnEventID {
+			returnEvt = outEvt
+			continue
+		}
+		if err := w.adapter.InsertEvent(ctx, *outEvt); err != nil {
+			w.logger.Warn("selection_worker_emit_failed", "event_id", selDTO.EventID, "error", err)
+		}
 	}
 
-	nextState := "SELECTED"
-	if !selDTO.Selected {
-		nextState = "REJECTED"
-	}
-	if err := doMandatoryTransition(ctx, w.adapter, dto.TokenLifecycleID, "VALIDATED", nextState, selDTO.RejectReason, "selection_worker"); err != nil {
-		return nil, fmt.Errorf("selection_worker: transition: %w", err)
-	}
+	return returnEvt, nil
+}
 
-	if !selDTO.Selected {
-		return nil, nil
+func (w *SelectionWorker) resolveModeThresholds(ctx context.Context) config.ModeThresholds {
+	sysMode := "balanced"
+	if w.cfg != nil && w.cfg.Priority.ActiveMode != "" {
+		sysMode = w.cfg.Priority.ActiveMode
 	}
-
-	return makeOutputEvent(
-		selDTO.EventID, selDTO, "selection_event",
-		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
-	)
+	if state, err := w.adapter.GetSystemState(ctx); err == nil && state != nil && state.Mode != "" {
+		sysMode = state.Mode
+	}
+	if w.cfg == nil {
+		return config.ModeThresholds{MaxPositions: 1}
+	}
+	return w.cfg.ResolveModeThresholds(sysMode)
 }

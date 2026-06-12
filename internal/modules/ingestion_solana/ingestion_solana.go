@@ -50,12 +50,16 @@ type SolanaRPCClient interface {
 	GetSignaturesForAddress(ctx context.Context, programID string, fromSlot, toSlot uint64, limit int) ([]string, error)
 }
 
-// LogsNotification is a Solana logsSubscribe event.
+// LogsNotification is a Solana logsSubscribe or transactionSubscribe event.
 type LogsNotification struct {
 	Signature string
 	Logs      []string
 	Slot      uint64
 	Err       interface{} // non-nil if the transaction failed on-chain
+	// Transaction is populated by transactionSubscribe when the WS payload
+	// includes the full transaction body. When non-nil, processNotification
+	// normalizes in-process and skips the HTTP getTransaction call.
+	Transaction *TransactionResult
 }
 
 // TransactionResult holds the decoded transaction data needed for normalization.
@@ -567,7 +571,9 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 			}
 
 			// Slow path: log pre-filter + tx fetch + normalize.
-			if !ShouldFetchTransaction(notif, prog) {
+			// Embedded WS transactions skip log heuristics — the payload is
+			// already the full tx from transactionSubscribe.
+			if notif.Transaction == nil && !ShouldFetchTransaction(notif, prog) {
 				logFilterSkip.Add(1)
 				continue
 			}
@@ -673,7 +679,7 @@ func (m *Module) handlePumpfunFromLogs(
 // so operators see real traffic without log flooding.
 const solanaLogSampleRate int64 = 100
 
-// processNotification fetches the full transaction and emits DTOs.
+// processNotification fetches (or reuses embedded) transaction data and emits DTOs.
 // seq is the monotonically increasing counter used for 1-in-sampleRate sampling.
 func (m *Module) processNotification(
 	ctx context.Context,
@@ -682,41 +688,50 @@ func (m *Module) processNotification(
 	seq int64,
 	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip, skippedUnknownInstruction *atomic.Int64,
 ) error {
-	// Circuit breaker: skip GetTransaction during an active rate-limit backoff.
-	if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
-		rateLimitSkip.Add(1)
-		return nil
-	}
+	var tx *TransactionResult
+	var err error
+	txSource := "fetched"
 
-	tx, err := m.client.GetTransaction(ctx, notif.Signature)
-	if err != nil {
-		if IsRateLimitError(err) {
-			backoff := rateLimitBackoff(m.cfg)
-			until := time.Now().Add(backoff).UnixNano()
-			m.rateLimitUntil.Store(until)
+	if notif.Transaction != nil {
+		tx = notif.Transaction
+		txSource = "ws_tx"
+	} else {
+		// Circuit breaker: skip GetTransaction during an active rate-limit backoff.
+		if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
 			rateLimitSkip.Add(1)
-			m.logger.Warn("solana_rate_limit_backoff",
-				"family", prog.Family,
-				"backoff_s", int(backoff.Seconds()),
-				"note", "getTransaction quota exhausted; suppressing calls until backoff expires",
-			)
 			return nil
 		}
-		return fmt.Errorf("get_transaction %s: %w", notif.Signature, err)
-	}
-	if tx == nil {
-		// Transaction not yet at commitment level — normal for confirmed vs finalized.
-		nilTx.Add(1)
-		if seq%solanaLogSampleRate == 0 {
-			m.logger.Info("solana_tx_sample",
-				"family", prog.Family,
-				"signature", notif.Signature,
-				"slot", notif.Slot,
-				"result", "nil_tx",
-				"note", "1-in-100 sample: tx not yet at commitment",
-			)
+
+		tx, err = m.client.GetTransaction(ctx, notif.Signature)
+		if err != nil {
+			if IsRateLimitError(err) {
+				backoff := rateLimitBackoff(m.cfg)
+				until := time.Now().Add(backoff).UnixNano()
+				m.rateLimitUntil.Store(until)
+				rateLimitSkip.Add(1)
+				m.logger.Warn("solana_rate_limit_backoff",
+					"family", prog.Family,
+					"backoff_s", int(backoff.Seconds()),
+					"note", "getTransaction quota exhausted; suppressing calls until backoff expires",
+				)
+				return nil
+			}
+			return fmt.Errorf("get_transaction %s: %w", notif.Signature, err)
 		}
-		return nil
+		if tx == nil {
+			// Transaction not yet at commitment level — normal for confirmed vs finalized.
+			nilTx.Add(1)
+			if seq%solanaLogSampleRate == 0 {
+				m.logger.Info("solana_tx_sample",
+					"family", prog.Family,
+					"signature", notif.Signature,
+					"slot", notif.Slot,
+					"result", "nil_tx",
+					"note", "1-in-100 sample: tx not yet at commitment",
+				)
+			}
+			return nil
+		}
 	}
 
 	if seq%solanaLogSampleRate == 0 {
@@ -725,7 +740,7 @@ func (m *Module) processNotification(
 			"signature", notif.Signature,
 			"slot", tx.Slot,
 			"instructions", len(tx.Instructions),
-			"result", "fetched",
+			"result", txSource,
 			"note", "1-in-100 sample",
 		)
 	}

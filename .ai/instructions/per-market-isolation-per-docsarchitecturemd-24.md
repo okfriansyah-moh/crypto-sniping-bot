@@ -1,0 +1,3 @@
+- The pipeline runs **one independent instance per market** (`eth-uniswap-v2`, `bsc-pancake-v2`, etc.)
+- No cross-market coupling — each market has isolated configs, workers, checkpoints
+- Horizontal scalability = add more market workers; no shared mutable state

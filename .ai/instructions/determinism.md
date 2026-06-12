@@ -1,0 +1,3 @@
+- Same input + same config = identical output. Always.
+- No `random`, no non-deterministic model inference, no network-dependent behavior
+- All IDs are content-addressable (derived from content, not timestamps or random values)

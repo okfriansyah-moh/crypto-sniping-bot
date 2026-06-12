@@ -1,0 +1,5 @@
+- **The database is the single source of truth** for all pipeline state
+- Define tables per domain in `docs/architecture.md`
+- Pipeline run states: `started → processing → completed | partial | failed`
+- Entity states: `created → queued → processed → completed | failed`
+- No in-memory-only state that isn't backed by the database

@@ -99,6 +99,9 @@ func (s *stubAdapter) InsertEvaluation(_ context.Context, _ contracts.Evaluation
 func (s *stubAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (s *stubAdapter) GetProbabilityForLifecycle(_ context.Context, _ string) (float64, bool, error) {
+	return 0, false, nil
+}
 func (s *stubAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error { return nil }
 func (s *stubAdapter) UpdateShadowTradeObservation(_ context.Context, _ string, _ float64, _ string) error {
 	return nil
@@ -161,6 +164,9 @@ func (s *stubAdapter) GetPosition(_ context.Context, _ string) (*contracts.Posit
 }
 func (s *stubAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
 	return nil, nil
+}
+func (s *stubAdapter) GetShadowGateStats(_ context.Context, _ int) (*database.ShadowGateStats, error) {
+	return &database.ShadowGateStats{}, nil
 }
 func (s *stubAdapter) FindPositionByPrefix(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotFound
@@ -804,6 +810,9 @@ func (s *stubAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQue
 // stubAdapter proceed through probes without hitting a DB.
 func (s *stubAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
+}
+func (s *stubAdapter) GetLatestPoolAddressForToken(_ context.Context, _, _ string) (string, bool, error) {
+	return "", false, nil
 }
 
 // ── Historical Market Profiles stubs (Approach A) ─────────────────────────────

@@ -50,6 +50,9 @@ func (a *exactlyOnceAdapter) GetExecutionByLifecycle(_ context.Context, _ string
 	}
 	return a.priorExecResult, nil
 }
+func (a *exactlyOnceAdapter) GetProbabilityForLifecycle(_ context.Context, _ string) (float64, bool, error) {
+	return 0, false, nil
+}
 
 func (a *exactlyOnceAdapter) UpsertPositionFromExecution(_ context.Context, _ contracts.PositionStateDTO) (bool, error) {
 	a.upsertPosCalls++

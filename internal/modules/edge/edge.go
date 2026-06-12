@@ -112,7 +112,7 @@ func applyDefaults(in *config.EdgeConfig) *config.EdgeConfig {
 // not yet inject a baseline. It evaluates the edge with an empty rolling
 // baseline (cold-start path) and the wall clock.
 func (m *Module) Process(ctx context.Context, in contracts.FeatureDTO) (contracts.EdgeDTO, error) {
-	return m.ProcessWithContext(ctx, in, BaselineSnapshot{}, time.Now().UTC())
+	return m.ProcessWithContext(ctx, in, BaselineSnapshot{}, 0, time.Now().UTC())
 }
 
 // ProcessWithContext is the deterministic, baseline-aware entry point.
@@ -124,6 +124,7 @@ func (m *Module) ProcessWithContext(
 	_ context.Context,
 	in contracts.FeatureDTO,
 	baseline BaselineSnapshot,
+	edgeStrengthMin float64,
 	now time.Time,
 ) (contracts.EdgeDTO, error) {
 	now = now.UTC()
@@ -187,6 +188,8 @@ func (m *Module) ProcessWithContext(
 		}
 	}
 
+	chosen = applyModeStrengthFloor(chosen, edgeStrengthMin)
+
 	// Opportunity window scales with momentum_score regardless of
 	// edge type — preserves legacy semantics expected by Layer 5.
 	opportunityWindowMs := int32(
@@ -240,6 +243,21 @@ func (m *Module) ProcessWithContext(
 		BottomDetectionScore: bottomScore,
 		SlotWindowSize:       bottomSlotsAnalysed,
 	}, nil
+}
+
+// applyModeStrengthFloor rejects a qualifying edge whose strength is below
+// the operational-mode floor from config/priority.yaml (docs/PLAN.md Task 3).
+func applyModeStrengthFloor(chosen edgeCandidate, edgeStrengthMin float64) edgeCandidate {
+	if chosen.edgeType == contracts.EdgeTypeNone || edgeStrengthMin <= 0 {
+		return chosen
+	}
+	if chosen.strength >= edgeStrengthMin {
+		return chosen
+	}
+	return edgeCandidate{
+		edgeType:     contracts.EdgeTypeNone,
+		rejectReason: fmt.Sprintf("edge_strength_below_floor:strength=%.4f,floor=%.4f", chosen.strength, edgeStrengthMin),
+	}
 }
 
 // edgeCandidate is the internal struct populated by detect* helpers.

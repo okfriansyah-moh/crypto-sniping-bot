@@ -159,6 +159,55 @@ func TestProcess_EdgeNotValidated_Rejected(t *testing.T) {
 	}
 }
 
+func TestProcessBatch_TopKSelectsHighestAmongCandidates(t *testing.T) {
+	m := New(&config.SelectionConfig{MaxOpenPositions: 10, TopK: 1})
+	thresholds := config.ModeThresholds{MaxPositions: 10, ExploreBudgetPct: 0}
+	items := []BatchItem{
+		edge("val-low", "token-z", 30, 0.5),
+		edge("val-high", "token-a", 100, 0.8),
+	}
+	outs, err := m.ProcessBatch(context.Background(), items, 0, thresholds, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outs) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(outs))
+	}
+	byID := map[string]contracts.SelectionOutputDTO{}
+	for _, o := range outs {
+		byID[o.CausationID] = o
+	}
+	if !byID["val-high"].Selected {
+		t.Fatal("expected val-high selected")
+	}
+	if byID["val-low"].Selected || byID["val-low"].RejectReason != RejectReasonBelowTopK {
+		t.Fatalf("expected val-low below_top_k, got %+v", byID["val-low"])
+	}
+}
+
+func TestProcessBatch_ExplorationModeMarksLowestPick(t *testing.T) {
+	m := New(&config.SelectionConfig{MaxOpenPositions: 10, TopK: 3})
+	thresholds := config.ModeThresholds{MaxPositions: 10, ExploreBudgetPct: 5.0}
+	items := []BatchItem{
+		edge("v1", "t-a", 100, 0.9),
+		edge("v2", "t-b", 90, 0.8),
+		edge("v3", "t-c", 80, 0.7),
+	}
+	outs, err := m.ProcessBatch(context.Background(), items, 0, thresholds, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var explore int
+	for _, o := range outs {
+		if o.Selected && o.IsExploration {
+			explore++
+		}
+	}
+	if explore != 1 {
+		t.Fatalf("expected 1 exploration pick, got %d", explore)
+	}
+}
+
 func TestProcess_RejectedEdge_EventIDDiffFromSelected(t *testing.T) {
 	// EventID encodes selected=true vs false, so they differ.
 	m := New(defaultSelCfg())

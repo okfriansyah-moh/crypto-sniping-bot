@@ -241,3 +241,39 @@ LIMIT 2`
 	}
 	return &first, rows.Err()
 }
+
+// GetShadowGateStats aggregates shadow-mode exited positions over windowSeconds.
+func (d *DB) GetShadowGateStats(ctx context.Context, windowSeconds int) (*database.ShadowGateStats, error) {
+	if windowSeconds <= 0 {
+		windowSeconds = 14 * 24 * 3600
+	}
+	since := time.Now().UTC().Add(-time.Duration(windowSeconds) * time.Second).Format(time.RFC3339Nano)
+
+	const q = `
+SELECT
+    COUNT(*)::int,
+    COALESCE(SUM(pnl_pct * 10000.0), 0),
+    COALESCE(AVG(pnl_pct * 10000.0), 0)
+FROM (
+    SELECT DISTINCT ON (p.position_id)
+        p.pnl_pct
+    FROM positions p
+    INNER JOIN execution_results e ON e.execution_id = p.execution_id
+    WHERE e.simulated = TRUE
+      AND e.success = TRUE
+      AND p.status IN ('exited', 'closed')
+      AND COALESCE(p.exited_at, p.snapshot_at) >= $1
+    ORDER BY p.position_id, p.snapshot_at DESC
+) latest`
+
+	var stats database.ShadowGateStats
+	err := d.pool.QueryRowContext(ctx, q, since).Scan(
+		&stats.TradeCount,
+		&stats.AggregatePnlBps,
+		&stats.AvgPnlBps,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get shadow gate stats: %w", err)
+	}
+	return &stats, nil
+}

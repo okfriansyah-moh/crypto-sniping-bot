@@ -73,6 +73,10 @@ type SolanaProbeRPCClient interface {
 	// base64. Returns (nil, nil) when the account does not exist.
 	GetAccountInfo(ctx context.Context, pubkey, commitment string) (*SolanaAccountData, error)
 
+	// GetMultipleAccounts fetches multiple accounts in one RPC call. The
+	// returned slice aligns with pubkeys; nil entries mean not found.
+	GetMultipleAccounts(ctx context.Context, pubkeys []string, commitment string) ([]*SolanaAccountData, error)
+
 	// GetTokenLargestAccounts returns up to 20 largest token-account
 	// holders for an SPL mint, ordered by amount descending.
 	GetTokenLargestAccounts(ctx context.Context, mint, commitment string) ([]SolanaTokenHolder, error)

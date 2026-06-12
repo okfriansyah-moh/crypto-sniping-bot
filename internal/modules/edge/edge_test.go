@@ -2,7 +2,9 @@ package edge
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/internal/app/config"
@@ -189,6 +191,34 @@ func TestProcess_LowScores_WindowReflectsMomentumScore(t *testing.T) {
 	expected := int32(5420)
 	if out.OpportunityWindowMs != expected {
 		t.Errorf("expected %d, got %d", expected, out.OpportunityWindowMs)
+	}
+}
+
+// ── Mode-aware edge strength floor (PLAN Task 3) ─────────────────────────────
+
+func TestProcessWithContext_ModeEdgeStrengthFloor_ExplorationAcceptsWeakerThanBalanced(t *testing.T) {
+	m := New(defaultEdgeCfg())
+	in := highScoreFeature()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// highScoreFeature NEW_LAUNCH strength ≈ 0.59 (between EXPLORATION 0.45 and BALANCED 0.60).
+	outBalanced, err := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0.60, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outBalanced.EdgeType != contracts.EdgeTypeNone {
+		t.Errorf("BALANCED floor 0.60 should reject strength ~0.59, got edge_type=%q", outBalanced.EdgeType)
+	}
+	if !strings.Contains(outBalanced.RejectReason, "edge_strength_below_floor") {
+		t.Errorf("expected edge_strength_below_floor reject reason, got %q", outBalanced.RejectReason)
+	}
+
+	outExploration, err := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0.45, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outExploration.EdgeType != contracts.EdgeTypeNewLaunch {
+		t.Errorf("EXPLORATION floor 0.45 should accept strength ~0.59, got edge_type=%q", outExploration.EdgeType)
 	}
 }
 

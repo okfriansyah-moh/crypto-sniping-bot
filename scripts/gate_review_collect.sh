@@ -130,6 +130,21 @@ log "Phase 2/3 — Extracting gate-review evidence..."
 # Helper: count lines matching a jq filter
 count_jq() { jq -c "$1" "$CLEAN_LOG" 2>/dev/null | wc -l | tr -d ' '; }
 
+# Helper: count stage_completed events for a registered worker group (canonical
+# per-worker health signal — see internal/orchestrator/logfields.go).
+count_stage_worker() {
+  local worker="$1"
+  count_jq "select(.msg == \"stage_completed\" and .worker_group == \"$worker\")"
+}
+
+# Helper: count stage_completed events filtered by output_status
+# (emitted | filtered | rejected | skipped | terminal).
+count_stage_worker_status() {
+  local worker="$1"
+  local status="$2"
+  count_jq "select(.msg == \"stage_completed\" and .worker_group == \"$worker\" and .output_status == \"$status\")"
+}
+
 # Helper: compute integer average of a numeric field across matching events
 avg_jq() {
   local filter="$1"
@@ -175,17 +190,51 @@ UNIQUE_TRACES=$(jq -r 'select(.trace_id != null) | .trace_id' "$CLEAN_LOG" 2>/de
 
 COUNT_INGESTION=$(count_jq 'select(.msg == "solana_ingestion_emitted" or .msg == "dex_pool_detected")')
 COUNT_DQ=$(count_jq 'select(.msg == "dq_decision")')
-COUNT_FEATURES=$(count_jq 'select(.msg == "features_extracted")')
-COUNT_EDGE=$(count_jq 'select(.msg == "edge_decision")')
-COUNT_PROB=$(count_jq 'select(.msg == "probability_scored")')
-COUNT_SLIP=$(count_jq 'select(.msg == "slippage_estimated")')
-COUNT_VAL=$(count_jq 'select(.msg == "validation_decision")')
-COUNT_VAL_ACCEPT=$(count_jq 'select(.msg == "validation_decision" and .decision == "ACCEPT")')
-COUNT_VAL_REJECT=$(count_jq 'select(.msg == "validation_decision" and .decision == "REJECT")')
-COUNT_SEL=$(count_jq 'select(.msg == "selection_decision")')
-COUNT_ALLOC=$(count_jq 'select(.msg == "allocation_decision")')
+COUNT_DQ_STAGE=$(count_stage_worker "dq_worker")
+COUNT_DQ_EMITTED=$(count_stage_worker_status "dq_worker" "emitted")
+
+# L2–L8: canonical stage_completed counts (worker_group from cmd/server.go).
+COUNT_FEATURES=$(count_stage_worker "features_worker")
+COUNT_FEATURES_EMITTED=$(count_stage_worker_status "features_worker" "emitted")
+COUNT_FEATURES_FILTERED=$(count_stage_worker_status "features_worker" "filtered")
+COUNT_FEATURES_REJECTED=$(count_stage_worker_status "features_worker" "rejected")
+COUNT_FEATURES_SKIPPED=$(count_stage_worker_status "features_worker" "skipped")
+
+COUNT_EDGE=$(count_stage_worker "edge_worker")
+COUNT_EDGE_EMITTED=$(count_stage_worker_status "edge_worker" "emitted")
+COUNT_EDGE_FILTERED=$(count_stage_worker_status "edge_worker" "filtered")
+COUNT_EDGE_REJECTED=$(count_stage_worker_status "edge_worker" "rejected")
+COUNT_EDGE_SKIPPED=$(count_stage_worker_status "edge_worker" "skipped")
+
+COUNT_PROB=$(count_stage_worker "probability_worker")
+COUNT_PROB_EMITTED=$(count_stage_worker_status "probability_worker" "emitted")
+COUNT_PROB_FILTERED=$(count_stage_worker_status "probability_worker" "filtered")
+COUNT_PROB_REJECTED=$(count_stage_worker_status "probability_worker" "rejected")
+
+COUNT_SLIP=$(count_stage_worker "slippage_worker")
+COUNT_SLIP_EMITTED=$(count_stage_worker_status "slippage_worker" "emitted")
+COUNT_SLIP_FILTERED=$(count_stage_worker_status "slippage_worker" "filtered")
+COUNT_SLIP_REJECTED=$(count_stage_worker_status "slippage_worker" "rejected")
+
+COUNT_VAL=$(count_stage_worker "validation_worker")
+COUNT_VAL_EMITTED=$(count_stage_worker_status "validation_worker" "emitted")
+COUNT_VAL_FILTERED=$(count_stage_worker_status "validation_worker" "filtered")
+COUNT_VAL_REJECTED=$(count_stage_worker_status "validation_worker" "rejected")
+COUNT_VAL_SKIPPED=$(count_stage_worker_status "validation_worker" "skipped")
+# ACCEPT/REJECT aliases for pipeline completion rate (emitted = passed validation).
+COUNT_VAL_ACCEPT=$COUNT_VAL_EMITTED
+COUNT_VAL_REJECT=$COUNT_VAL_REJECTED
+
+COUNT_SEL=$(count_stage_worker "selection_worker")
+COUNT_SEL_EMITTED=$(count_stage_worker_status "selection_worker" "emitted")
+
+COUNT_ALLOC=$(count_stage_worker "capital_worker")
+COUNT_ALLOC_EMITTED=$(count_stage_worker_status "capital_worker" "emitted")
+
+COUNT_EXEC_STAGE=$(count_stage_worker "execution_worker")
+COUNT_EXEC_EMITTED=$(count_stage_worker_status "execution_worker" "emitted")
 COUNT_EXEC_SUB=$(count_jq 'select(.msg == "execution_submitted")')
-COUNT_EXEC_CON=$(count_jq 'select(.msg == "execution_confirmed")')
+COUNT_EXEC_CON=$(count_jq 'select(.msg == "execution_confirmed" or .msg == "trade_executed")')
 COUNT_EXEC_FAIL=$(count_jq 'select(.msg == "execution_failed")')
 COUNT_POS_OPEN=$(count_jq 'select(.msg == "position_opened")')
 COUNT_POS_CLOSE=$(count_jq 'select(.msg == "position_closed")')
@@ -194,7 +243,10 @@ COUNT_LEARN=$(count_jq 'select(.msg == "learning_record_emitted")')
 COUNT_DRAWDOWN=$(count_jq 'select(.msg | test("drawdown|kill_switch"))')
 COUNT_KILL_SWITCH=$(count_jq 'select(.msg == "kill_switch_triggered")')
 COUNT_OVER_EXPOSURE=$(count_jq 'select(.msg | test("over_exposure|exposure_exceeded"))')
-COUNT_JOIN_TIMEOUT=$(count_jq 'select(.msg == "validation_decision" and (.reject_reason // "" | test("join_timeout")))')
+COUNT_JOIN_TIMEOUT=$(count_jq 'select(
+    (.msg == "validation_decision" and (.reject_reason // "" | test("join_timeout"))) or
+    (.msg == "stage_completed" and .worker_group == "validation_worker" and (.decision_reason // "" | test("join_timeout")))
+  )')
 HB_ZERO_EMITTED=$(count_jq 'select(.msg | test("_heartbeat")) | select(.events_emitted == 0)')
 
 # ── Idempotency / determinism checks ─────────────────────────────────────────
@@ -219,16 +271,11 @@ DUP_EVENT_IDS=$(jq -r 'select(
 MISSING_TRACE=$(count_jq 'select(.trace_id == null or .trace_id == "")')
 MISSING_VERSION=$(count_jq 'select(.version_id == null or .version_id == "")')
 
-# ── Traces that completed the full lifecycle in this window ───────────────────
-# A trace is "completed" when its trace_id appears in both execution_confirmed
-# and position_closed. This is a conservative window-based estimate.
-TRACES_EXEC=$(jq -r 'select(.msg == "execution_confirmed" and .trace_id != null) | .trace_id' \
-  "$CLEAN_LOG" 2>/dev/null | sort -u)
-TRACES_CLOSED=$(jq -r 'select(.msg == "position_closed" and .trace_id != null) | .trace_id' \
-  "$CLEAN_LOG" 2>/dev/null | sort -u)
-TRACES_COMPLETED=$(comm -12 \
-  <(echo "$TRACES_EXEC") \
-  <(echo "$TRACES_CLOSED") 2>/dev/null | wc -l | tr -d ' ')
+# ── Traces that completed the full L0→L10 lifecycle in this window ─────────────
+# PIPELINE_PROOF completion anchor: distinct trace_ids with learning_record_emitted
+# (real L10 evidence), not partial execution/position lifecycle hints.
+TRACES_COMPLETED=$(jq -r 'select(.msg == "learning_record_emitted" and .trace_id != null) | .trace_id' \
+  "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
 
 # ── Latency & slippage averages ───────────────────────────────────────────────
 AVG_LATENCY=$(avg_jq 'select(.msg == "position_opened" and .pipeline_latency_ms != null)' "pipeline_latency_ms")
@@ -241,18 +288,36 @@ STUB_P50=$(check_stub "p50_bps")
 STUB_P95=$(check_stub "p95_bps")
 
 # ── Dead-worker detection ─────────────────────────────────────────────────────
-# A stage is "dead" if ingestion exists but that stage emits zero events.
-# Only meaningful when upstream has traffic.
+# A worker slice is "dead" only when upstream stage_completed shows emitted
+# traffic but the downstream worker_group is completely silent in this window.
+# Upstream filtered/rejected/skipped alone must NOT flag downstream as dead.
 DEAD_WORKERS=""
-if [[ "$COUNT_INGESTION" -gt 0 ]]; then
-  [[ "$COUNT_DQ" -eq 0 ]]       && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 1 (dq_decision): 0 events — DQ worker may be dead\n"
-  [[ "$COUNT_FEATURES" -eq 0 ]] && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 2 (features_extracted): 0 events — Feature worker may be dead\n"
-  [[ "$COUNT_EDGE" -eq 0 ]]     && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 3 (edge_decision): 0 events — Edge worker may be dead\n"
-  [[ "$COUNT_PROB" -eq 0 ]]     && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 4 (probability_scored): 0 events — Probability worker may be dead\n"
-  [[ "$COUNT_VAL" -eq 0 ]]      && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 5 (validation_decision): 0 events — Validation worker may be dead\n"
+if [[ "$COUNT_INGESTION" -gt 0 && "$COUNT_DQ_STAGE" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 1 (dq_worker): 0 stage_completed — DQ worker may be dead\n"
 fi
-if [[ "$COUNT_ALLOC" -gt 0 ]]; then
-  [[ "$COUNT_EXEC_SUB" -eq 0 ]]  && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 8 (execution_submitted): 0 events after allocation — Execution worker may be dead\n"
+if [[ "$COUNT_DQ_EMITTED" -gt 0 && "$COUNT_FEATURES" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 2 (features_worker): 0 stage_completed after DQ emitted — Feature worker may be dead\n"
+fi
+if [[ "$COUNT_FEATURES_EMITTED" -gt 0 && "$COUNT_EDGE" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 3 (edge_worker): 0 stage_completed after features emitted — Edge worker may be dead\n"
+fi
+if [[ "$COUNT_FEATURES_EMITTED" -gt 0 && "$COUNT_PROB" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 4 (probability_worker): 0 stage_completed after features emitted — Probability worker may be dead\n"
+fi
+if [[ "$COUNT_FEATURES_EMITTED" -gt 0 && "$COUNT_SLIP" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 4 (slippage_worker): 0 stage_completed after features emitted — Slippage worker may be dead\n"
+fi
+if [[ "$COUNT_EDGE_EMITTED" -gt 0 && "$COUNT_VAL" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 5 (validation_worker): 0 stage_completed after edge emitted — Validation worker may be dead\n"
+fi
+if [[ "$COUNT_VAL_EMITTED" -gt 0 && "$COUNT_SEL" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 6 (selection_worker): 0 stage_completed after validation emitted — Selection worker may be dead\n"
+fi
+if [[ "$COUNT_SEL_EMITTED" -gt 0 && "$COUNT_ALLOC" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 7 (capital_worker): 0 stage_completed after selection emitted — Capital worker may be dead\n"
+fi
+if [[ "$COUNT_ALLOC_EMITTED" -gt 0 && "$COUNT_EXEC_STAGE" -eq 0 ]]; then
+  DEAD_WORKERS="${DEAD_WORKERS}  - Layer 8 (execution_worker): 0 stage_completed after allocation emitted — Execution worker may be dead\n"
 fi
 if [[ "$COUNT_POS_OPEN" -gt 0 ]]; then
   [[ "$COUNT_POS_CLOSE" -eq 0 ]] && DEAD_WORKERS="${DEAD_WORKERS}  - Layer 9 (position_closed): 0 events — Position exit worker may be dead\n"
@@ -355,13 +420,13 @@ fi
 PC_PIPELINE=0
 STAGE_COVERAGE=0
 [[ "$COUNT_INGESTION" -gt 0 ]] && (( STAGE_COVERAGE += 9 )) || true
-[[ "$COUNT_DQ" -gt 0 ]]        && (( STAGE_COVERAGE += 9 )) || true
+[[ "$COUNT_DQ_STAGE" -gt 0 ]]    && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_FEATURES" -gt 0 ]]  && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_EDGE" -gt 0 ]]      && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_PROB" -gt 0 ]]      && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_VAL" -gt 0 ]]       && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_ALLOC" -gt 0 ]]     && (( STAGE_COVERAGE += 9 )) || true
-[[ "$COUNT_EXEC_CON" -gt 0 ]]  && (( STAGE_COVERAGE += 9 )) || true
+[[ "$COUNT_EXEC_STAGE" -gt 0 || "$COUNT_EXEC_CON" -gt 0 ]] && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_POS_OPEN" -gt 0 ]]  && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_POS_CLOSE" -gt 0 ]] && (( STAGE_COVERAGE += 9 )) || true
 [[ "$COUNT_LEARN" -gt 0 ]]     && (( STAGE_COVERAGE += 10 )) || true
@@ -528,16 +593,17 @@ echo "  determinism_violations   0  (auto-check: dup_event_ids=$DUP_EVENT_IDS  m
 echo "  avg_latency              ${AVG_LATENCY}ms"
 echo "  avg_slippage             ${AVG_SLIPPAGE}bps"
 echo ""
-echo "  Pipeline stage counts:"
+echo "  Pipeline stage counts (stage_completed worker_group + output_status):"
 echo "    L0   ingestion:             $COUNT_INGESTION"
-echo "    L1   dq_decision:           $COUNT_DQ"
-echo "    L2   features_extracted:    $COUNT_FEATURES"
-echo "    L3   edge_decision:         $COUNT_EDGE"
-echo "    L4   probability_scored:    $COUNT_PROB"
-echo "    L4   slippage_estimated:    $COUNT_SLIP"
-echo "    L5   validation_decision:   $COUNT_VAL  (ACCEPT=$COUNT_VAL_ACCEPT  REJECT=$COUNT_VAL_REJECT)"
-echo "    L6   selection_decision:    $COUNT_SEL"
-echo "    L7   allocation_decision:   $COUNT_ALLOC"
+echo "    L1   dq_worker:             $COUNT_DQ_STAGE  (dq_decision=$COUNT_DQ  emitted=$COUNT_DQ_EMITTED)"
+echo "    L2   features_worker:       $COUNT_FEATURES  (emitted=$COUNT_FEATURES_EMITTED filtered=$COUNT_FEATURES_FILTERED rejected=$COUNT_FEATURES_REJECTED skipped=$COUNT_FEATURES_SKIPPED)"
+echo "    L3   edge_worker:           $COUNT_EDGE  (emitted=$COUNT_EDGE_EMITTED filtered=$COUNT_EDGE_FILTERED rejected=$COUNT_EDGE_REJECTED skipped=$COUNT_EDGE_SKIPPED)"
+echo "    L4   probability_worker:    $COUNT_PROB  (emitted=$COUNT_PROB_EMITTED filtered=$COUNT_PROB_FILTERED rejected=$COUNT_PROB_REJECTED)"
+echo "    L4   slippage_worker:       $COUNT_SLIP  (emitted=$COUNT_SLIP_EMITTED filtered=$COUNT_SLIP_FILTERED rejected=$COUNT_SLIP_REJECTED)"
+echo "    L5   validation_worker:     $COUNT_VAL  (emitted=$COUNT_VAL_EMITTED filtered=$COUNT_VAL_FILTERED rejected=$COUNT_VAL_REJECTED skipped=$COUNT_VAL_SKIPPED)"
+echo "    L6   selection_worker:      $COUNT_SEL  (emitted=$COUNT_SEL_EMITTED)"
+echo "    L7   capital_worker:        $COUNT_ALLOC  (emitted=$COUNT_ALLOC_EMITTED)"
+echo "    L8   execution_worker:      $COUNT_EXEC_STAGE  (emitted=$COUNT_EXEC_EMITTED)"
 echo "    L8   execution_submitted:   $COUNT_EXEC_SUB"
 echo "    L8   execution_confirmed:   $COUNT_EXEC_CON"
 echo "    L8   execution_failed:      $COUNT_EXEC_FAIL"

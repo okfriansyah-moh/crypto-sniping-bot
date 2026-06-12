@@ -13,33 +13,25 @@ import (
 	"testing"
 )
 
-// TestDataQualityYAML_MarketCapThresholdsAreCommentedOutByDefault loads
-// config/data_quality.yaml and asserts that all three market-cap / volume
-// threshold keys are absent from the parsed YAML (commented out → zero value).
-//
-// Guard contract from §7.11:
-//
-//	if MinMarketCapUsd > 0 && in.MarketCapUsd > 0 && in.MarketCapUsd < MinMarketCapUsd { reject }
-//
-// With zero values the condition is always false, so no token is ever rejected
-// by these filters until an operator explicitly enables them after shadow tuning.
-func TestDataQualityYAML_MarketCapThresholdsAreCommentedOutByDefault(t *testing.T) {
+// TestDataQualityYAML_MarketCapThresholdsMatchPlanConstraints loads
+// config/data_quality.yaml and asserts market-cap / volume thresholds match
+// docs/PLAN.md intentional product floors ($70k mcap, volume floor enabled).
+// max_market_cap_usd remains commented out (zero) so graduation tokens are not
+// capped at a low ceiling.
+func TestDataQualityYAML_MarketCapThresholdsMatchPlanConstraints(t *testing.T) {
 	cfg := loadDataQualityYAML(t)
 	got := cfg.Thresholds
 
-	if got.MinMarketCapUsd != 0.0 {
-		t.Errorf("MinMarketCapUsd: want 0.0 (commented out, filter disabled), got %v — "+
-			"uncomment only after shadow-mode calibration (PRODUCTION_GATE_ANALYSIS § 10 Change 3)",
+	if got.MinMarketCapUsd != 70000.0 {
+		t.Errorf("MinMarketCapUsd: want 70000.0 (PLAN.md intentional floor), got %v",
 			got.MinMarketCapUsd)
 	}
 	if got.MaxMarketCapUsd != 0.0 {
-		t.Errorf("MaxMarketCapUsd: want 0.0 (commented out, filter disabled), got %v — "+
-			"pump.fun graduation tokens may immediately exceed any cap; tune in shadow mode first",
+		t.Errorf("MaxMarketCapUsd: want 0.0 (commented out, no upper cap), got %v",
 			got.MaxMarketCapUsd)
 	}
-	if got.MinVolumeUsd1h != 0.0 {
-		t.Errorf("MinVolumeUsd1h: want 0.0 (commented out, filter disabled), got %v — "+
-			"uncomment only after shadow-mode calibration (PRODUCTION_GATE_ANALYSIS § 10 Change 3)",
+	if got.MinVolumeUsd1h != 100.0 {
+		t.Errorf("MinVolumeUsd1h: want 100.0 (enabled volume floor), got %v",
 			got.MinVolumeUsd1h)
 	}
 }

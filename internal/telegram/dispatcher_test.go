@@ -96,6 +96,9 @@ func (a *dispatcherStubAdapter) InsertEvaluation(_ context.Context, _ contracts.
 func (a *dispatcherStubAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (a *dispatcherStubAdapter) GetProbabilityForLifecycle(_ context.Context, _ string) (float64, bool, error) {
+	return 0, false, nil
+}
 func (a *dispatcherStubAdapter) InsertShadowTrade(_ context.Context, _ database.ShadowTrade) error {
 	return nil
 }
@@ -155,6 +158,9 @@ func (a *dispatcherStubAdapter) GetOpenPositions(_ context.Context) ([]contracts
 }
 func (a *dispatcherStubAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotFound
+}
+func (a *dispatcherStubAdapter) GetShadowGateStats(_ context.Context, _ int) (*database.ShadowGateStats, error) {
+	return &database.ShadowGateStats{}, nil
 }
 func (a *dispatcherStubAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
 	return nil, nil
@@ -455,6 +461,9 @@ func (s *dispatcherStubAdapter) GetTokensForRescan(_ context.Context, _ database
 // CheckTokenNameSeen stub — always returns (false, nil) so tests proceed through probes.
 func (s *dispatcherStubAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
+}
+func (s *dispatcherStubAdapter) GetLatestPoolAddressForToken(_ context.Context, _, _ string) (string, bool, error) {
+	return "", false, nil
 }
 func (s *dispatcherStubAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
 	return 0, nil

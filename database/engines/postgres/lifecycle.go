@@ -233,27 +233,11 @@ func isTerminalState(state string) bool {
 	return false
 }
 
-// GetPipelineStats returns cumulative funnel counts and the 10 most recently
-// detected tokens for the given window.
-//
-// Counts are CUMULATIVE: each value represents "tokens that reached AT LEAST
-// this stage". DETECTED = total tokens in window. REJECTED and FAILED are
-// raw terminal counts. A single single-row aggregate query replaces the
-// former GROUP BY approach which returned point-in-time snapshot counts,
-// making the denominator (Detected) nearly always zero for fast-moving tokens.
-func (d *DB) GetPipelineStats(ctx context.Context, windowHours int) (*database.PipelineStats, error) {
-	stats := &database.PipelineStats{WindowHours: windowHours}
-
-	// ── Cumulative funnel counts ──────────────────────────────────────────────
-	// Uses a CTE to look up the "failed-from" state for each FAILED token via
-	// token_state_transitions. This lets us accurately place FAILED tokens in
-	// the funnel:
-	//   SELECTED→FAILED  = failed during execution attempt (never executed)
-	//   EXECUTED→FAILED  = failed during position-open (never opened)
-	//   POSITION_OPEN→FAILED = failed during position-close
-	// Without this, all FAILED tokens would inflate EXECUTED and POSITION_OPEN
-	// counts even when no trade was ever submitted.
-	const countQ = `
+// pipelineStatsCountSQL is the parameterised aggregate used by GetPipelineStats.
+// DQ_SKIPPED is excluded from dq_passed through validated because it is a
+// terminal DQ-side audit state — SKIP emits no data_quality_event and tokens
+// in DQ_SKIPPED have not progressed downstream.
+var pipelineStatsCountSQL = `
 WITH failed_from AS (
     -- For each FAILED token find the predecessor state.
     -- FAILED is terminal so there is exactly one X→FAILED row per lifecycle;
@@ -267,13 +251,14 @@ WITH failed_from AS (
 )
 SELECT
     COUNT(*)                                                                   AS detected,
-    COUNT(*) FILTER (WHERE tl.current_state NOT IN ('DETECTED','REJECTED'))    AS dq_passed,
     COUNT(*) FILTER (WHERE tl.current_state NOT IN (
-        'DETECTED','REJECTED','DQ_PASSED'))                                    AS feature_ready,
+        'DETECTED','REJECTED','DQ_SKIPPED'))                                   AS dq_passed,
     COUNT(*) FILTER (WHERE tl.current_state NOT IN (
-        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY'))                    AS edge_detected,
+        'DETECTED','REJECTED','DQ_PASSED','DQ_SKIPPED'))                       AS feature_ready,
     COUNT(*) FILTER (WHERE tl.current_state NOT IN (
-        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED'))    AS validated,
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','DQ_SKIPPED'))       AS edge_detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED','DQ_SKIPPED')) AS validated,
     -- selected: reached SELECTED or any later state (including FAILED from SELECTED+)
     COUNT(*) FILTER (WHERE tl.current_state IN (
         'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED')) AS selected,
@@ -304,7 +289,20 @@ FROM token_lifecycle tl
 LEFT JOIN failed_from ff ON ff.lifecycle_id = tl.token_lifecycle_id
 WHERE tl.created_at >= NOW() - ($1 * INTERVAL '1 hour')`
 
-	row := d.pool.QueryRowContext(ctx, countQ, windowHours)
+// GetPipelineStats returns cumulative funnel counts and the 10 most recently
+// detected tokens for the given window.
+//
+// Counts are CUMULATIVE: each value represents "tokens that reached AT LEAST
+// this stage". DETECTED = total tokens in window. REJECTED and FAILED are
+// raw terminal counts. DQ_SKIPPED tokens are excluded from dq_passed through
+// validated — they are terminal DQ-only outcomes, not downstream progress.
+// A single single-row aggregate query replaces the former GROUP BY approach
+// which returned point-in-time snapshot counts, making the denominator
+// (Detected) nearly always zero for fast-moving tokens.
+func (d *DB) GetPipelineStats(ctx context.Context, windowHours int) (*database.PipelineStats, error) {
+	stats := &database.PipelineStats{WindowHours: windowHours}
+
+	row := d.pool.QueryRowContext(ctx, pipelineStatsCountSQL, windowHours)
 	if err := row.Scan(
 		&stats.Detected,
 		&stats.DQPassed,
@@ -412,24 +410,11 @@ ORDER BY cnt DESC`
 	return stats, nil
 }
 
-// GetRescanPipelineStats returns a pipeline funnel snapshot for tokens that
-// were re-emitted via the rescan worker (market_data.transport LIKE 'rescan_%')
-// within the given window. Funnel semantics match GetPipelineStats: counts are
-// cumulative relative to the DETECTED base.
-//
-// This is a concrete method on *DB — it is NOT part of the database.Adapter
-// interface. Callers type-assert to rescanPipelineQueryer (defined in cmd/).
-func (d *DB) GetRescanPipelineStats(ctx context.Context, windowHours int) (*database.RescanPipelineStats, error) {
-	stats := &database.RescanPipelineStats{
-		WindowHours: windowHours,
-		ByBand:      make(map[string]int64),
-	}
-
-	// ── Funnel counts ──────────────────────────────────────────────────────────
-	// Anchored on market_data.ingested_at (rescan emission time).
-	// We JOIN token_lifecycle on token_address so we see the current pipeline
-	// state of each rescanned token regardless of when first detection happened.
-	const countQ = `
+// rescanPipelineStatsCountSQL is the parameterised aggregate used by GetRescanPipelineStats.
+// Anchored on distinct rescan_tokens (market_data.transport LIKE 'rescan_%').
+// DQ_SKIPPED exclusions mirror pipelineStatsCountSQL — skipped tokens must not
+// inflate dq_passed through validated.
+var rescanPipelineStatsCountSQL = `
 WITH rescan_tokens AS (
     SELECT DISTINCT token_address
     FROM market_data
@@ -445,40 +430,54 @@ failed_from AS (
     ORDER  BY t.lifecycle_id, t.transitioned_at DESC
 )
 SELECT
-    COUNT(*)                                                                    AS detected,
-    COUNT(*) FILTER (WHERE tl.current_state NOT IN ('DETECTED','REJECTED'))     AS dq_passed,
+    COUNT(*)                                                                   AS detected,
     COUNT(*) FILTER (WHERE tl.current_state NOT IN (
-        'DETECTED','REJECTED','DQ_PASSED'))                                     AS feature_ready,
+        'DETECTED','REJECTED','DQ_SKIPPED'))                                   AS dq_passed,
     COUNT(*) FILTER (WHERE tl.current_state NOT IN (
-        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY'))                     AS edge_detected,
+        'DETECTED','REJECTED','DQ_PASSED','DQ_SKIPPED'))                       AS feature_ready,
     COUNT(*) FILTER (WHERE tl.current_state NOT IN (
-        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED'))     AS validated,
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','DQ_SKIPPED'))       AS edge_detected,
+    COUNT(*) FILTER (WHERE tl.current_state NOT IN (
+        'DETECTED','REJECTED','DQ_PASSED','FEATURE_READY','EDGE_DETECTED','DQ_SKIPPED')) AS validated,
     COUNT(*) FILTER (WHERE tl.current_state IN (
-        'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED'))
-                                                                                AS selected,
+        'SELECTED','EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED','FAILED')) AS selected,
     COUNT(*) FILTER (WHERE tl.current_state IN (
             'EXECUTED','POSITION_OPEN','POSITION_CLOSED','EVALUATED')
         OR (tl.current_state = 'FAILED'
-            AND ff.from_state IN ('EXECUTED','POSITION_OPEN')))                 AS executed,
+            AND ff.from_state IN ('EXECUTED','POSITION_OPEN')))                AS executed,
     COUNT(*) FILTER (WHERE tl.current_state IN (
             'POSITION_OPEN','POSITION_CLOSED','EVALUATED')
         OR (tl.current_state = 'FAILED'
-            AND ff.from_state = 'POSITION_OPEN'))                               AS position_open,
+            AND ff.from_state = 'POSITION_OPEN'))                              AS position_open,
     COUNT(*) FILTER (WHERE tl.current_state IN ('POSITION_CLOSED','EVALUATED')) AS position_closed,
-    COUNT(*) FILTER (WHERE tl.current_state = 'EVALUATED')                      AS evaluated,
-    COUNT(*) FILTER (WHERE tl.current_state = 'REJECTED')                       AS rejected,
-    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED')                         AS failed,
+    COUNT(*) FILTER (WHERE tl.current_state = 'EVALUATED')                     AS evaluated,
+    COUNT(*) FILTER (WHERE tl.current_state = 'REJECTED')                      AS rejected,
+    COUNT(*) FILTER (WHERE tl.current_state = 'FAILED')                        AS failed,
     COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
-        AND ff.from_state = 'SELECTED')                                         AS failed_at_selected,
+        AND ff.from_state = 'SELECTED')                                        AS failed_at_selected,
     COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
-        AND ff.from_state = 'EXECUTED')                                         AS failed_at_executed,
+        AND ff.from_state = 'EXECUTED')                                        AS failed_at_executed,
     COUNT(*) FILTER (WHERE tl.current_state = 'FAILED'
-        AND ff.from_state = 'POSITION_OPEN')                                    AS failed_at_position_open
+        AND ff.from_state = 'POSITION_OPEN')                                   AS failed_at_position_open
 FROM token_lifecycle tl
 INNER JOIN rescan_tokens rt ON rt.token_address = tl.token_address
-LEFT JOIN  failed_from   ff ON ff.lifecycle_id  = tl.token_lifecycle_id`
+LEFT JOIN failed_from ff ON ff.lifecycle_id = tl.token_lifecycle_id`
 
-	row := d.pool.QueryRowContext(ctx, countQ, windowHours)
+// GetRescanPipelineStats returns a pipeline funnel snapshot for tokens that
+// were re-emitted via the rescan worker (market_data.transport LIKE 'rescan_%')
+// within the given window. Funnel semantics match GetPipelineStats: counts are
+// cumulative relative to the DETECTED base. DQ_SKIPPED tokens are excluded from
+// dq_passed through validated — they are terminal DQ-only outcomes, not downstream progress.
+//
+// This is a concrete method on *DB — it is NOT part of the database.Adapter
+// interface. Callers type-assert to rescanPipelineQueryer (defined in cmd/).
+func (d *DB) GetRescanPipelineStats(ctx context.Context, windowHours int) (*database.RescanPipelineStats, error) {
+	stats := &database.RescanPipelineStats{
+		WindowHours: windowHours,
+		ByBand:      make(map[string]int64),
+	}
+
+	row := d.pool.QueryRowContext(ctx, rescanPipelineStatsCountSQL, windowHours)
 	if err := row.Scan(
 		&stats.Detected,
 		&stats.DQPassed,

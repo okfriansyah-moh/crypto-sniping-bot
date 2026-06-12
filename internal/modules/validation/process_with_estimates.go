@@ -41,7 +41,7 @@ func (m *Module) ProcessWithEstimates(
 	slip *contracts.SlippageEstimateDTO,
 	lat *contracts.LatencyProfileDTO,
 ) (contracts.ValidatedEdgeDTO, error) {
-	return m.ProcessWithEstimatesAt(ctx, in, prob, slip, lat, time.Now().UTC())
+	return m.ProcessWithEstimatesAt(ctx, in, prob, slip, lat, 0, time.Now().UTC())
 }
 
 // ProcessWithEstimatesAt is the deterministic, replay-safe variant of
@@ -57,10 +57,12 @@ func (m *Module) ProcessWithEstimatesAt(
 	prob *contracts.ProbabilityEstimateDTO,
 	slip *contracts.SlippageEstimateDTO,
 	lat *contracts.LatencyProfileDTO,
+	evThresholdBps int32,
 	now time.Time,
 ) (contracts.ValidatedEdgeDTO, error) {
 	nowTime := now.UTC()
 	nowStr := nowTime.Format(time.RFC3339Nano)
+	evThreshold := m.effectiveEVThreshold(evThresholdBps)
 
 	// Fallback reason tags carry diagnostic intent without rejecting.
 	var fallbackReasons []string
@@ -151,8 +153,8 @@ func (m *Module) ProcessWithEstimatesAt(
 			float64(m.cfg.FixedCostsBps) -
 			float64(slipBps)
 
-		if ev < float64(m.cfg.EvThresholdBps) {
-			rejectReason = fmt.Sprintf("ev_below_threshold:ev=%.1f,threshold=%d", ev, m.cfg.EvThresholdBps)
+		if ev < float64(evThreshold) {
+			rejectReason = fmt.Sprintf("ev_below_threshold:ev=%.1f,threshold=%d", ev, evThreshold)
 		}
 
 		if in.OpportunityWindowMs > 0 && latencyP95 > in.OpportunityWindowMs {
@@ -220,7 +222,7 @@ func (m *Module) ProcessWithEstimatesAt(
 		FixedCostsBps:      m.cfg.FixedCostsBps,
 		ProbabilityUsed:    p,
 		SlippageP95BpsUsed: slipBps,
-		EvThresholdApplied: m.cfg.EvThresholdBps,
+		EvThresholdApplied: evThreshold,
 		RejectReason:       rejectReason,
 
 		ExpectedLatencyMs: latencyP95,
@@ -230,6 +232,15 @@ func (m *Module) ProcessWithEstimatesAt(
 		ValidatedAt:     nowStr,
 		FallbackReasons: fallbackReasons,
 	}, nil
+}
+
+// effectiveEVThreshold returns the per-call mode threshold when positive,
+// otherwise the static ValidationConfig default from pipeline.yaml.
+func (m *Module) effectiveEVThreshold(evThresholdBps int32) int32 {
+	if evThresholdBps > 0 {
+		return evThresholdBps
+	}
+	return m.cfg.EvThresholdBps
 }
 
 // clipInt32 rounds and clamps a float64 into the int32 range, treating

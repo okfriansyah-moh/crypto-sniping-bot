@@ -11,7 +11,7 @@ import (
 
 func TestHealthCheck(t *testing.T) {
 	mux := http.NewServeMux()
-	endpoint.Register(mux)
+	endpoint.Register(mux, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()

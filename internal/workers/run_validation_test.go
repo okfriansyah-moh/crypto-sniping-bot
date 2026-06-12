@@ -282,3 +282,58 @@ func TestValidation_CombinedJoin_HalvesRoundtrips(t *testing.T) {
 		t.Fatalf("expected 0 per-side slip reads on hot path; got %d", got)
 	}
 }
+
+// ── 4. Mode-aware EV threshold (docs/PLAN.md Task 2) ─────────────────────────
+
+type validationModeStubAdapter struct {
+	validationStubAdapter
+	sysMode string
+}
+
+func (s *validationModeStubAdapter) GetSystemState(_ context.Context) (*contracts.SystemStateDTO, error) {
+	return &contracts.SystemStateDTO{Mode: s.sysMode}, nil
+}
+
+func priorityCfgForEVThreshold() *config.Config {
+	cfg := validationCfgWithJoin(100, 5)
+	cfg.Priority = config.PriorityConfig{
+		ActiveMode: "balanced",
+		Modes: config.PriorityModesConfig{
+			Strict:          config.ModeThresholdProfile{EvThresholdBps: 150},
+			Balanced:        config.ModeThresholdProfile{EvThresholdBps: 100},
+			Exploration:     config.ModeThresholdProfile{EvThresholdBps: 60},
+			VeryExploration: config.ModeThresholdProfile{EvThresholdBps: 30},
+		},
+	}
+	return cfg
+}
+
+func TestValidationWorker_resolveEVThresholdBps_UsesSystemStateMode(t *testing.T) {
+	ad := &validationModeStubAdapter{sysMode: "EXPLORATION"}
+	w := NewValidationWorker(ad, priorityCfgForEVThreshold(), nil)
+
+	got := w.resolveEVThresholdBps(context.Background())
+	if got != 60 {
+		t.Fatalf("EXPLORATION ev_threshold_bps: want 60, got %d", got)
+	}
+}
+
+func TestValidationWorker_resolveEVThresholdBps_FallsBackToActiveMode(t *testing.T) {
+	ad := &validationStubAdapter{}
+	w := NewValidationWorker(ad, priorityCfgForEVThreshold(), nil)
+
+	got := w.resolveEVThresholdBps(context.Background())
+	if got != 100 {
+		t.Fatalf("active_mode balanced ev_threshold_bps: want 100, got %d", got)
+	}
+}
+
+func TestValidationWorker_resolveEVThresholdBps_UnknownModeFailClosedToStrict(t *testing.T) {
+	ad := &validationModeStubAdapter{sysMode: "DEGRADED"}
+	w := NewValidationWorker(ad, priorityCfgForEVThreshold(), nil)
+
+	got := w.resolveEVThresholdBps(context.Background())
+	if got != 150 {
+		t.Fatalf("unknown drawdown mode should fail-closed to STRICT=150, got %d", got)
+	}
+}

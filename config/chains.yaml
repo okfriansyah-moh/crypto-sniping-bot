@@ -243,9 +243,10 @@ solana:
   # intentionally above VERY_EXPLORATION's max_creator_prev_token_count=10 so
   # this filter never overrides a DQ mode decision — it only drops the strict
   # super-set that always SKIP/REJECT under every mode (e.g. creator_count=49).
-  # Disabled by default — flip to true after Task 24 PIPELINE_PROOF passes and
-  # at least 24 hours of shadow trading confirm the filter does not drop valid tokens.
+  # Enabled (PLAN Task 9): drop serial launchers at L0 before Helius probe calls.
+  # Threshold 25 is above VERY_EXPLORATION DQ ceiling (10) — only drops creators
+  # that SKIP/REJECT under every mode. Fail-open when profile unknown.
   # PRODUCTION_GATE_ANALYSIS § 3 + §7.20.
   pre_filter:
-    enabled: false
+    enabled: true
     max_creator_prev_token_count: 25

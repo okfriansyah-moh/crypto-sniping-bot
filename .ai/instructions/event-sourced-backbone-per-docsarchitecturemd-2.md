@@ -1,0 +1,5 @@
+- **Append-only event bus** in Postgres (`events` table) is the authoritative log of all DTO transitions
+- Modules **publish events** (INSERT); they never mutate past events
+- **Workers consume via `SELECT ... FOR UPDATE SKIP LOCKED`** with `consumer_offsets` tracking — no polling queues, no in-memory queues
+- **Full state is reconstructible** from the event log alone (replay guarantee)
+- See `docs/architecture.md` § 2.2–2.3 for SQL and worker loop

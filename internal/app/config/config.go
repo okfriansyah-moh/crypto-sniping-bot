@@ -30,6 +30,7 @@ type Config struct {
 	Evaluation   EvaluationConfig       `yaml:"evaluation"`
 	StateMachine StateMachineConfig     `yaml:"state_machine"`
 	EventWeights EventPriorityWeights   `yaml:"event_weights"`
+	Priority     PriorityConfig         `yaml:"priority"`
 	Models       ModelsConfig           `yaml:"models"`
 	Learning     LearningConfig         `yaml:"learning"`
 	Risk         RiskConfig             `yaml:"risk"`
@@ -74,6 +75,10 @@ type Config struct {
 	// CreatorProfile configures the creator_profile_aggregator worker (Task 8).
 	// Maps to the creator_profile: block in config/pipeline.yaml.
 	CreatorProfile CreatorProfileConfig `yaml:"creator_profile"`
+
+	// PriceOracle configures the live price client for position monitoring and
+	// shadow execution fills. Maps to price_oracle: in config/pipeline.yaml.
+	PriceOracle PriceOracleConfig `yaml:"price_oracle"`
 
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
@@ -292,23 +297,22 @@ type ValidationConfig struct {
 	JoinPollIntervalMs int `yaml:"join_poll_interval_ms"`
 }
 
-// SelectionConfig holds Phase 2 selection parameters.
+// SelectionConfig holds Layer 6 selection parameters.
 type SelectionConfig struct {
+	// MaxOpenPositions is the legacy Phase-2 ceiling when mode thresholds
+	// are unavailable. Active Top-K cap comes from priority.modes.*.max_positions
+	// via Config.ResolveModeThresholds (docs/PLAN.md Task 4).
 	MaxOpenPositions int `yaml:"max_open_positions"`
 
-	// Phase 11 (Reference-Repo Improvements R2 — SELECT) — per-creator
-	// dedup. mux's pattern: at most this many open positions per
-	// creator wallet. 0 = disabled.
-	//
-	// NOTE (wiring): the pure helper lives at
-	// internal/modules/selection/per_creator_dedup.go
-	// (FilterByCreatorOpenPositions). It is intentionally NOT yet
-	// invoked from SelectionWorker because per-creator counting
-	// requires creator metadata to flow through ValidatedEdgeDTO and
-	// PositionStateDTO (additive DTO fields scheduled for the next
-	// selection-pipeline phase). Until that DTO+adapter wiring lands
-	// this field stays inert — leaving it at 0 in YAML preserves
-	// legacy behaviour and is the only safe configuration today.
+	// BatchWindowMs coalesces validated_edge_event inputs per chain before
+	// Top-K ranking (docs/PLAN.md Task 4). 0 flushes immediately.
+	BatchWindowMs int `yaml:"batch_window_ms"`
+
+	// TopK overrides mode max_positions when > 0. 0 = use mode threshold.
+	TopK int `yaml:"top_k"`
+
+	// MaxPositionsPerCreator caps concurrent open positions per creator wallet
+	// (wired via FilterByCreatorOpenPositions in ProcessBatch).
 	MaxPositionsPerCreator int `yaml:"max_positions_per_creator"`
 }
 
@@ -469,6 +473,10 @@ type ExecutionConfig struct {
 	EthPriceUsd float64 `yaml:"eth_price_usd"`
 	// Phase 7: Solana execution parameters
 	Solana SolanaExecutionConfig `yaml:"solana"`
+
+	// ShadowGate defines readiness thresholds before operators flip mode to live.
+	// See docs/PLAN.md Task 11 — no auto-promotion; manual YAML change only.
+	ShadowGate ShadowGateConfig `yaml:"shadow_gate"`
 
 	// Phase 10 (Reference-Repo Improvements / Task C) — adaptive priority fee.
 	// When mode == "adaptive", AdaptivePriorityFeeWei scales the RPC-suggested
@@ -795,7 +803,10 @@ func Load(paths ...string) (*Config, error) {
 			paths = append(paths, executionPath)
 		}
 		// Phase 9 — auto-discover the four profitability-restoration configs.
-		for _, name := range []string{"data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml"} {
+		for _, name := range []string{
+			"priority.yaml",
+			"data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml",
+		} {
 			p := filepath.Join(cwd, "config", name)
 			if _, statErr := os.Stat(p); statErr == nil {
 				paths = append(paths, p)
@@ -806,7 +817,10 @@ func Load(paths ...string) (*Config, error) {
 		// auto-discover sibling config files so budgets.yaml, chains.yaml,
 		// and execution.yaml are always merged in.
 		dir := filepath.Dir(paths[0])
-		for _, name := range []string{"chains.yaml", "budgets.yaml", "execution.yaml", "data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml"} {
+		for _, name := range []string{
+			"chains.yaml", "budgets.yaml", "execution.yaml", "priority.yaml",
+			"data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml",
+		} {
 			p := filepath.Join(dir, name)
 			if _, statErr := os.Stat(p); statErr == nil {
 				paths = append(paths, p)
@@ -826,6 +840,13 @@ func Load(paths ...string) (*Config, error) {
 
 	// Apply rescan defaults (Phase 10) before validation.
 	applyRescanDefaults(&cfg.Rescan)
+
+	// Apply operational-mode threshold defaults (docs/PLAN.md Task 1).
+	applyPriorityDefaults(&cfg.Priority)
+
+	applyPriceOracleDefaults(&cfg.PriceOracle)
+
+	applyShadowGateDefaults(&cfg.Execution.ShadowGate)
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err

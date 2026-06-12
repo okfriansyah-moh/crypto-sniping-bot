@@ -11,7 +11,7 @@ import (
 func TestRegister_HealthRoute_Returns200(t *testing.T) {
 	// Arrange
 	mux := http.NewServeMux()
-	endpoint.Register(mux)
+	endpoint.Register(mux, nil)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
@@ -27,7 +27,7 @@ func TestRegister_HealthRoute_Returns200(t *testing.T) {
 func TestRegister_PostMethod_NotAllowed(t *testing.T) {
 	// Arrange — route is registered as GET only
 	mux := http.NewServeMux()
-	endpoint.Register(mux)
+	endpoint.Register(mux, nil)
 	req := httptest.NewRequest(http.MethodPost, "/health", nil)
 	rec := httptest.NewRecorder()
 
@@ -43,7 +43,7 @@ func TestRegister_PostMethod_NotAllowed(t *testing.T) {
 func TestRegister_ResponseBody_ContainsStatus(t *testing.T) {
 	// Arrange
 	mux := http.NewServeMux()
-	endpoint.Register(mux)
+	endpoint.Register(mux, nil)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 

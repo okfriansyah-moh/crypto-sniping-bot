@@ -171,6 +171,9 @@ func (m *mockAdapter) InsertEvaluation(_ context.Context, _ contracts.Evaluation
 func (m *mockAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (m *mockAdapter) GetProbabilityForLifecycle(_ context.Context, _ string) (float64, bool, error) {
+	return 0, false, nil
+}
 func (m *mockAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
 }
@@ -217,6 +220,9 @@ func (m *mockAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionS
 }
 func (m *mockAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotImplemented
+}
+func (m *mockAdapter) GetShadowGateStats(_ context.Context, _ int) (*database.ShadowGateStats, error) {
+	return &database.ShadowGateStats{}, nil
 }
 func (m *mockAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotImplemented
@@ -527,6 +533,9 @@ func (m *mockAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQue
 // CheckTokenNameSeen stub — always returns (false, nil) so tests proceed through probes.
 func (m *mockAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
+}
+func (m *mockAdapter) GetLatestPoolAddressForToken(_ context.Context, _, _ string) (string, bool, error) {
+	return "", false, nil
 }
 func (m *mockAdapter) CountTokensByCreator(_ context.Context, _, _ string) (int32, error) {
 	return 0, nil

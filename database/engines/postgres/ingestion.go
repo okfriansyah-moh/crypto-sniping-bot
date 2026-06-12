@@ -178,6 +178,30 @@ func nullableString(s string) interface{} {
 	return s
 }
 
+// GetLatestPoolAddressForToken returns the pool_address from the most recent
+// market_data row for chain+token. Read-only; no side effects.
+func (d *DB) GetLatestPoolAddressForToken(ctx context.Context, chain, tokenAddress string) (string, bool, error) {
+	const q = `
+SELECT pool_address
+FROM market_data
+WHERE chain = $1
+  AND token_address = $2
+  AND pool_address IS NOT NULL
+  AND pool_address != ''
+ORDER BY ingested_at DESC
+LIMIT 1
+`
+	var pool string
+	err := d.pool.QueryRowContext(ctx, q, chain, tokenAddress).Scan(&pool)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("get latest pool address: %w", err)
+	}
+	return pool, true, nil
+}
+
 // CheckTokenNameSeen returns true when any previously ingested token for the
 // same chain shares normalizedName (already lowercased + trimmed by the caller),
 // excluding the currentTokenAddress itself.

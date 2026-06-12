@@ -1,0 +1,1 @@
+Skills are pre-digested knowledge packages that agents load on-demand. They live in `.github/skills/<name>/SKILL.md`.

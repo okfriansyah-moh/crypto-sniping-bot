@@ -1,0 +1,7 @@
+- **All database access goes through `database/adapter.*`** — the single entry point
+- Modules under `app/modules/` **MUST NOT** import any database driver directly
+- Modules **MUST NOT** contain SQL strings or execute queries
+- The adapter accepts and returns immutable DTOs — no raw rows, no dicts/maps
+- Only the orchestrator calls the adapter — modules never touch the database
+- All SQL uses portable syntax (`ON CONFLICT DO NOTHING`, not `INSERT OR IGNORE`)
+- See `docs/db_adapter_spec.md` for the full adapter interface and migration strategy

@@ -17,6 +17,10 @@ dist/
 
 # Go vendor directory
 vendor/
+.cursor/
+.claude/
+.codex/
+.agents/
 
 # Module download cache
 go.sum.bak

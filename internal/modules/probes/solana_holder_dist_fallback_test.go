@@ -31,6 +31,14 @@ func (s *fallbackStubRPC) GetAccountInfo(_ context.Context, _, _ string) (*Solan
 	return &SolanaAccountData{Owner: splTokenV1Program}, nil
 }
 
+func (s *fallbackStubRPC) GetMultipleAccounts(_ context.Context, pubkeys []string, _ string) ([]*SolanaAccountData, error) {
+	out := make([]*SolanaAccountData, len(pubkeys))
+	for i := range pubkeys {
+		out[i] = &SolanaAccountData{Owner: splTokenV1Program}
+	}
+	return out, nil
+}
+
 func (s *fallbackStubRPC) GetTokenLargestAccounts(_ context.Context, _, _ string) ([]SolanaTokenHolder, error) {
 	if s.primaryErr != nil {
 		return nil, s.primaryErr
