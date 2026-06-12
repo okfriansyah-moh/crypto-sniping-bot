@@ -1,1 +1,0 @@
-These rules extend the skeleton-parallel framework with the specific architecture defined in `docs/architecture.md`. All code generation MUST comply.

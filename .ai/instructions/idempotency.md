@@ -1,4 +1,0 @@
-- Running the pipeline twice on the same input produces no duplicates and no corruption
-- All IDs are content-addressable:
-  - `entity_id = SHA256(content_signature)[:16]`
-- All SQL uses portable `INSERT ... ON CONFLICT DO NOTHING` semantics

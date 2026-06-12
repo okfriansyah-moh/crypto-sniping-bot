@@ -1,4 +1,0 @@
-- The orchestrator is the **only** component that calls modules — modules never call each other
-- Checkpoint after every stage completion (write to database)
-- Resume from last successful checkpoint on restart
-- See `docs/orchestrator_spec.md` for the full execution model

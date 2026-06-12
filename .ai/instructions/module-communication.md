@@ -1,4 +1,0 @@
-- Modules communicate **only** through immutable DTO types defined in `contracts/`
-- No direct imports between module internals — only public contracts
-- No raw dicts/maps/objects, no untyped data crossing module boundaries
-- See `docs/dto_contracts.md` for DTO definitions and validation rules

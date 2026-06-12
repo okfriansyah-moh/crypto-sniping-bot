@@ -1,4 +1,0 @@
-- Every configuration update creates an **immutable `StrategyVersion`** — thresholds, feature weights, model params, cohort multipliers
-- Every trade logs `strategy_version_id` for attribution
-- **A/B promotion is bounded**: promote only if `expectancy(V2) > expectancy(V1) × 1.05` AND `drawdown(V2) ≤ drawdown(V1)` AND `N ≥ 30–50` samples
-- **Replay must be bit-for-bit deterministic**: no wall-clock dependencies, no randomness, no external nondeterministic calls — use event timestamps only

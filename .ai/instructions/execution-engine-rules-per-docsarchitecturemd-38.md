@@ -1,5 +1,0 @@
-- **Wallet sharding is mandatory** — `hash(TokenAddress) % n` or round-robin; one in-flight tx per wallet; strictly increasing nonce per wallet
-- **Prebuilt calldata** on hot path — no recomputation during submission
-- **Bounded parallelism** — global semaphore, concurrency_limit ∈ [5, 20], adaptive on failure rate
-- **Idempotency keys** — each `AllocationDTO` has unique `execution_id`; duplicate submissions are dropped
-- **Multi-endpoint RPC fallback** with circuit breaker; fee bumps on stuck tx use same nonce, δ ≈ 10–20%, max 2–3 retries

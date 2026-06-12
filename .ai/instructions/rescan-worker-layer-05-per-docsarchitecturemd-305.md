@@ -1,9 +1,0 @@
-- **Pure DB reader + event emitter** — no RPC, no on-chain calls, no private keys, no new event types or DTOs
-- Re-emits `market_data_event` at **14 fixed age bands (15m → 48h)** across two phases:
-  - **Phase 1** (Goal A — organic momentum, 0–8h): 15m / 30m / 45m / 1h / 1.5h / 2h / 3h / 4h / 6h / 8h
-  - **Phase 2** (Goals B+C — reversal + CEX catalyst, 12–48h): 12h / 24h / 36h / 48h
-- **EventID** = `SHA256(chain ‖ token_address ‖ band_name ‖ bucket_ts)[:16]` — content-addressable, idempotent via `ON CONFLICT DO NOTHING`
-- **Eligibility is SQL-side only** — honeypot_score, rug_score, buy_tax_bps filters plus open-position skip; mode-adaptive thresholds
-- **Transport tag** = `"rescan_<band_name>"` (e.g. `"rescan_8h"`) on every re-emitted `MarketDataDTO`
-- **Fully generic**: worker iterates `cfg.Rescan.Bands` at runtime — add/remove bands via `config/pipeline.yaml` only, no code changes
-- **Configured in:** `config/pipeline.yaml` → `rescan:` block (enabled by default); defaults in `internal/app/config/rescan_config.go`
