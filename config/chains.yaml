@@ -250,3 +250,12 @@ solana:
   pre_filter:
     enabled: true
     max_creator_prev_token_count: 25
+  # Task 14 — reject system/stable mints as TokenAddress before event-bus emit.
+  # Prevents WSOL/USDC/USDT from entering probes, DQ, and creator_profiles.
+  # Gate run 20260612_174145: 44/48 pumpfun-amm emissions had TokenAddress=WSOL.
+  system_mint_reject:
+    enabled: true
+    mints:
+      - "So11111111111111111111111111111111111111112" # WSOL / native SOL placeholder
+      - "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC
+      - "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" # USDT

@@ -117,6 +117,17 @@ type Module struct {
 	// preFilterDropped counts tokens dropped by the L0 pre-cohort filter (Task 25).
 	// Visible in every heartbeat for observability.
 	preFilterDropped atomic.Int64
+
+	// systemMintRejected counts tokens dropped by the L0 system-mint guard (Task 14).
+	systemMintRejected atomic.Int64
+
+	// validTokenEmitted counts successful emissions where TokenAddress is not a
+	// configured system/stable mint (Task 17 throughput metrics).
+	validTokenEmitted atomic.Int64
+
+	// mintPairSwapped counts emissions where ResolveTradableMint flipped a stable
+	// base mint to pick the quote-side project token (Task 17).
+	mintPairSwapped atomic.Int64
 }
 
 // SolUsdSource is the minimal interface the ingestion module consumes from
@@ -145,6 +156,7 @@ func New(cfg config.SolanaConfig, versionID string, emit EventEmitter, logger *s
 	if logger == nil {
 		logger = slog.Default()
 	}
+	ConfigureStableMints(cfg.SystemMintReject.EffectiveMints())
 	return &Module{
 		cfg:       cfg,
 		versionID: versionID,
@@ -173,6 +185,37 @@ func (m *Module) WithSolUsdSource(s SolUsdSource) *Module {
 func (m *Module) WithCreatorProfileReader(r CreatorProfileReader) *Module {
 	m.preFilterReader = r
 	return m
+}
+
+// applySystemMintReject drops DTOs whose TokenAddress is a configured system/stable
+// mint (WSOL, USDC, USDT). Returns true when the event must not be emitted.
+func (m *Module) applySystemMintReject(dto *contracts.MarketDataDTO) bool {
+	if dto == nil || !m.cfg.SystemMintReject.ShouldRejectToken(dto.TokenAddress) {
+		return false
+	}
+	m.systemMintRejected.Add(1)
+	m.logger.Debug("ingestion_system_mint_rejected",
+		"chain", dto.Chain,
+		"token", dto.TokenAddress,
+		"market", dto.Market,
+		"tx", dto.TxHash,
+	)
+	return true
+}
+
+// recordEmitTelemetry updates module-level throughput counters after a successful
+// market_data_event emission (Task 17).
+func (m *Module) recordEmitTelemetry(dto *contracts.MarketDataDTO) {
+	if dto == nil {
+		return
+	}
+	if !IsSystemMint(dto.TokenAddress) {
+		m.validTokenEmitted.Add(1)
+	}
+	if dto.Token0Address != "" && dto.Token1Address != "" &&
+		MintPairWasSwapped(dto.Token0Address, dto.Token1Address) {
+		m.mintPairSwapped.Add(1)
+	}
 }
 
 // applyCreatorGuard enforces that dto.CreatorAddress is never a known pump.fun
@@ -505,6 +548,9 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 	// Pump.fun non-Create). These are irrelevant by design — distinct from
 	// decoder bugs that mis-handle a recognized opcode.
 	var skippedUnknownInstruction atomic.Int64
+	// raydiumInitFallbackFetch counts raydium-v4 getTransaction retries when the
+	// embedded transactionSubscribe body had no matching program instructions.
+	var raydiumInitFallbackFetch atomic.Int64
 	// emittedFromLogs counts events produced by the Pump.fun log-decode path.
 	var emittedFromLogs atomic.Int64
 	// sampleSeq is incremented for every successfully-fetched notification
@@ -549,6 +595,10 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 				"creator_guard_corrected", m.creatorGuardCorrected.Load(),
 				"creator_guard_cleared", m.creatorGuardCleared.Load(),
 				"pre_filter_dropped", m.preFilterDropped.Load(),
+				"system_mint_rejected", m.systemMintRejected.Load(),
+				"valid_token_emitted", m.validTokenEmitted.Load(),
+				"mint_pair_swapped", m.mintPairSwapped.Load(),
+				"raydium_init_fallback_fetch", raydiumInitFallbackFetch.Load(),
 			)
 
 		case notif, ok := <-notifs:
@@ -590,7 +640,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 			go func(n LogsNotification, s int64) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if err := m.processNotification(ctx, n, prog, s, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip, &skippedUnknownInstruction); err != nil {
+				if err := m.processNotification(ctx, n, prog, s, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip, &skippedUnknownInstruction, &raydiumInitFallbackFetch); err != nil {
 					processErrors.Add(1)
 					m.logger.Warn("solana_ingestion_process_error",
 						"signature", n.Signature,
@@ -645,6 +695,9 @@ func (m *Module) handlePumpfunFromLogs(
 	// event.User is already in dto.CreatorAddress; pass "" as no separate
 	// fallback exists when the event-derived user IS the factory program.
 	m.applyCreatorGuard(dto, "")
+	if m.applySystemMintReject(dto) {
+		return
+	}
 	// Pre-cohort filter (Task 25): drop serial launchers at L0 before probe calls.
 	// Fail-open: if reader unavailable or creator unknown, emit normally.
 	if m.applyPreFilter(ctx, dto) {
@@ -660,6 +713,7 @@ func (m *Module) handlePumpfunFromLogs(
 	}
 	emitted.Add(1)
 	emittedFromLogs.Add(1)
+	m.recordEmitTelemetry(dto)
 	m.logger.Info("solana_ingestion_emitted",
 		"event_id", dto.EventID,
 		"trace_id", dto.TraceID,
@@ -686,7 +740,7 @@ func (m *Module) processNotification(
 	notif LogsNotification,
 	prog config.SolanaProgramConfig,
 	seq int64,
-	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip, skippedUnknownInstruction *atomic.Int64,
+	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip, skippedUnknownInstruction, raydiumInitFallbackFetch *atomic.Int64,
 ) error {
 	var tx *TransactionResult
 	var err error
@@ -696,30 +750,11 @@ func (m *Module) processNotification(
 		tx = notif.Transaction
 		txSource = "ws_tx"
 	} else {
-		// Circuit breaker: skip GetTransaction during an active rate-limit backoff.
-		if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
-			rateLimitSkip.Add(1)
-			return nil
-		}
-
-		tx, err = m.client.GetTransaction(ctx, notif.Signature)
+		tx, err = m.fetchTransactionRateLimited(ctx, notif.Signature, prog.Family, rateLimitSkip)
 		if err != nil {
-			if IsRateLimitError(err) {
-				backoff := rateLimitBackoff(m.cfg)
-				until := time.Now().Add(backoff).UnixNano()
-				m.rateLimitUntil.Store(until)
-				rateLimitSkip.Add(1)
-				m.logger.Warn("solana_rate_limit_backoff",
-					"family", prog.Family,
-					"backoff_s", int(backoff.Seconds()),
-					"note", "getTransaction quota exhausted; suppressing calls until backoff expires",
-				)
-				return nil
-			}
-			return fmt.Errorf("get_transaction %s: %w", notif.Signature, err)
+			return err
 		}
 		if tx == nil {
-			// Transaction not yet at commitment level — normal for confirmed vs finalized.
 			nilTx.Add(1)
 			if seq%solanaLogSampleRate == 0 {
 				m.logger.Info("solana_tx_sample",
@@ -745,110 +780,173 @@ func (m *Module) processNotification(
 		)
 	}
 
-	instrMatched := 0
-	for _, instr := range tx.Instructions {
-		if instr.ProgramID != prog.ProgramID {
-			continue
-		}
-		instrMatched++
-		var dto *contracts.MarketDataDTO
-		var normErr error
-
-		switch prog.Family {
-		case "pumpfun":
-			dto, normErr = NormalizePumpFunCreate(tx, instr, m.versionID)
-		case "raydium-v4":
-			res := NormalizeRaydiumV4Instruction(tx, instr, m.versionID)
-			switch res.Kind {
-			case RaydiumV4KindUnknown:
-				// Tag is not Initialize2 / SwapBaseIn / SwapBaseOut. Irrelevant
-				// by design — NOT a decoder bug. Counted separately so the
-				// heartbeat distinguishes "we saw a SetParams" from "we failed
-				// to decode an Initialize2".
-				skippedUnknownInstruction.Add(1)
-				continue
-			case RaydiumV4KindSwapBaseIn, RaydiumV4KindSwapBaseOut:
-				// Swap instructions are recognized but not pipeline-relevant
-				// (F-1 fix: swaps produce no DTO to avoid empty-token DLQ spam).
-				// Count as skipped_unknown_instruction so heartbeat math matches.
-				skippedUnknownInstruction.Add(1)
+	processTx := func(tx *TransactionResult) (int, error) {
+		instrMatched := 0
+		for _, instr := range tx.Instructions {
+			if instr.ProgramID != prog.ProgramID {
 				continue
 			}
-			dto, normErr = res.DTO, res.Err
-		// P4: PumpFun AMM (graduation pools)
-		case "pumpfun-amm":
-			dto, normErr = NormalizePumpFunAMMCreatePool(tx, instr, m.versionID)
-		// P4: Raydium CLMM (concentrated liquidity)
-		case "raydium-clmm":
-			dto, normErr = NormalizeRaydiumCLMMCreatePool(tx, instr, m.versionID)
-		// P4: Orca Whirlpool
-		case "orca-whirlpool":
-			dto, normErr = NormalizeOrcaWhirlpoolInitPool(tx, instr, m.versionID)
-		// P4: Meteora DLMM
-		case "meteora-dlmm":
-			dto, normErr = NormalizeMeteoraDLMMInitLbPair(tx, instr, m.versionID)
-		default:
-			continue
-		}
-		if normErr != nil {
-			normalizeSkip.Add(1)
-			m.logger.Debug("solana_ingestion_normalize_skip",
-				"family", prog.Family,
-				"signature", notif.Signature,
-				"instr_index", instr.Index,
-				"reason", normErr,
-			)
-			if seq%solanaLogSampleRate == 0 {
-				// Sampled visibility: tells operator most skips are swaps, not bugs.
-				m.logger.Info("solana_tx_sample",
+			instrMatched++
+			var dto *contracts.MarketDataDTO
+			var normErr error
+
+			switch prog.Family {
+			case "pumpfun":
+				dto, normErr = NormalizePumpFunCreate(tx, instr, m.versionID)
+			case "raydium-v4":
+				res := NormalizeRaydiumV4Instruction(tx, instr, m.versionID)
+				switch res.Kind {
+				case RaydiumV4KindUnknown:
+					skippedUnknownInstruction.Add(1)
+					continue
+				case RaydiumV4KindSwapBaseIn, RaydiumV4KindSwapBaseOut:
+					skippedUnknownInstruction.Add(1)
+					continue
+				}
+				dto, normErr = res.DTO, res.Err
+			case "pumpfun-amm":
+				dto, normErr = NormalizePumpFunAMMCreatePool(tx, instr, m.versionID)
+			case "raydium-clmm":
+				dto, normErr = NormalizeRaydiumCLMMCreatePool(tx, instr, m.versionID)
+			case "orca-whirlpool":
+				dto, normErr = NormalizeOrcaWhirlpoolInitPool(tx, instr, m.versionID)
+			case "meteora-dlmm":
+				dto, normErr = NormalizeMeteoraDLMMInitLbPair(tx, instr, m.versionID)
+			default:
+				continue
+			}
+			if normErr != nil {
+				normalizeSkip.Add(1)
+				m.logger.Debug("solana_ingestion_normalize_skip",
 					"family", prog.Family,
 					"signature", notif.Signature,
 					"instr_index", instr.Index,
-					"result", "normalize_skip",
 					"reason", normErr,
-					"note", "1-in-100 sample: most skips are swaps, not pool-inits/creates",
 				)
+				if seq%solanaLogSampleRate == 0 {
+					m.logger.Info("solana_tx_sample",
+						"family", prog.Family,
+						"signature", notif.Signature,
+						"instr_index", instr.Index,
+						"result", "normalize_skip",
+						"reason", normErr,
+						"note", "1-in-100 sample: most skips are swaps, not pool-inits/creates",
+					)
+				}
+				continue
 			}
-			continue
-		}
-		if dto == nil {
-			// Discriminator matched program ID but instruction was not a
-			// target event (e.g. SetParams, Withdraw). Tracked so heartbeat
-			// math reconciles instead of silently dropping the notification.
-			dtoNilSkip.Add(1)
-			continue
-		}
-		// Guard: factory program IDs must never propagate as creator identity.
-		// Applied after every normalizer in the tx-fetch path so that future
-		// decoder changes cannot bypass it. No fallback is available at this
-		// call site — the normalizer already consumed the raw accounts.
-		m.applyCreatorGuard(dto, "")
-		// Pre-cohort filter (Task 25): drop serial launchers at L0.
-		// Fail-open: if reader unavailable or creator unknown, emit normally.
-		if m.applyPreFilter(ctx, dto) {
-			continue
-		}
+			if dto == nil {
+				dtoNilSkip.Add(1)
+				continue
+			}
+			m.applyCreatorGuard(dto, "")
+			if m.applySystemMintReject(dto) {
+				continue
+			}
+			if m.applyPreFilter(ctx, dto) {
+				continue
+			}
 
-		if err := m.emit(ctx, *dto); err != nil {
-			return fmt.Errorf("emit %s: %w", dto.EventID, err)
+			if err := m.emit(ctx, *dto); err != nil {
+				return instrMatched, fmt.Errorf("emit %s: %w", dto.EventID, err)
+			}
+			emitted.Add(1)
+			m.recordEmitTelemetry(dto)
+			m.logger.Info("solana_ingestion_emitted",
+				"event_id", dto.EventID,
+				"trace_id", dto.TraceID,
+				"version_id", dto.VersionID,
+				"market", dto.Market,
+				"token", dto.TokenAddress,
+				"symbol", dto.Symbol,
+				"name", dto.Name,
+				"tx", notif.Signature,
+				"slot", notif.Slot,
+			)
 		}
-		emitted.Add(1)
-		m.logger.Info("solana_ingestion_emitted",
-			"event_id", dto.EventID,
-			"trace_id", dto.TraceID,
-			"version_id", dto.VersionID,
-			"market", dto.Market,
-			"token", dto.TokenAddress,
-			"symbol", dto.Symbol,
-			"name", dto.Name,
-			"tx", notif.Signature,
-			"slot", notif.Slot,
-		)
+		return instrMatched, nil
 	}
+
+	instrMatched, err := processTx(tx)
+	if err != nil {
+		return err
+	}
+
+	// Task 16: embedded transactionSubscribe bodies may omit CPI inner instructions.
+	// When logs suggest Initialize2 but ws_tx had no program match, retry via HTTP.
+	if instrMatched == 0 && prog.Family == "raydium-v4" && txSource == "ws_tx" && LogsSuggestRaydiumPoolInit(notif.Logs) {
+		fallbackTx, fetchErr := m.fetchTransactionRateLimited(ctx, notif.Signature, prog.Family, rateLimitSkip)
+		if fetchErr != nil {
+			return fetchErr
+		}
+		if fallbackTx != nil {
+			raydiumInitFallbackFetch.Add(1)
+			m.logger.Debug("solana_raydium_init_fallback_fetch",
+				"signature", notif.Signature,
+				"ws_instructions", len(tx.Instructions),
+				"fetched_instructions", len(fallbackTx.Instructions),
+			)
+			matched, procErr := processTx(fallbackTx)
+			if procErr != nil {
+				return procErr
+			}
+			if matched > 0 {
+				instrMatched = matched
+			}
+		}
+	}
+
 	if instrMatched == 0 {
 		noInstrMatch.Add(1)
 	}
 	return nil
+}
+
+// fetchTransactionRateLimited calls GetTransaction respecting the module rate-limit
+// circuit breaker and RPC error truncation invariant.
+func (m *Module) fetchTransactionRateLimited(
+	ctx context.Context,
+	signature, family string,
+	rateLimitSkip *atomic.Int64,
+) (*TransactionResult, error) {
+	if m.client == nil {
+		return nil, nil
+	}
+	if until := m.rateLimitUntil.Load(); until > 0 && time.Now().UnixNano() < until {
+		rateLimitSkip.Add(1)
+		return nil, nil
+	}
+
+	tx, err := m.client.GetTransaction(ctx, signature)
+	if err != nil {
+		if IsRateLimitError(err) {
+			backoff := rateLimitBackoff(m.cfg)
+			until := time.Now().Add(backoff).UnixNano()
+			m.rateLimitUntil.Store(until)
+			rateLimitSkip.Add(1)
+			m.logger.Warn("solana_rate_limit_backoff",
+				"family", family,
+				"backoff_s", int(backoff.Seconds()),
+				"note", "getTransaction quota exhausted; suppressing calls until backoff expires",
+			)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get_transaction %s: %s", signature, truncateRPCError(err))
+	}
+	return tx, nil
+}
+
+// truncateRPCError caps RPC error strings before they surface in logs or returns.
+func truncateRPCError(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxLen = 200
+	msg := err.Error()
+	if len(msg) <= maxLen {
+		return msg
+	}
+	return msg[:maxLen]
 }
 
 // ShouldFetchTransaction returns false when the notification log content makes

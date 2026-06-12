@@ -16,10 +16,13 @@ import (
 )
 
 const (
-	juneGateRawLog      = "output/logs/gate_raw_20260601_161344.log"
-	juneGateEvidence    = "output/logs/gate_evidence_20260601_161344.json"
-	juneGateBrief       = "output/logs/gate_brief_20260601_161344.txt"
-	gateReviewScript    = "scripts/gate_review_collect.sh"
+	juneGateRawLog       = "output/logs/gate_raw_20260601_161344.log"
+	juneGateEvidence     = "output/logs/gate_evidence_20260601_161344.json"
+	juneGateBrief        = "output/logs/gate_brief_20260601_161344.txt"
+	june12GateRawLog     = "output/logs/gate_raw_20260612_174145.log"
+	june12GateEvidence   = "output/logs/gate_evidence_20260612_174145.json"
+	june12GateBrief      = "output/logs/gate_brief_20260612_174145.txt"
+	gateReviewScript     = "scripts/gate_review_collect.sh"
 	legacyDeadWorkerL2 = "features_extracted"
 	legacyDeadWorkerL3 = "edge_decision"
 	legacyDeadWorkerL4 = "probability_scored"
@@ -34,6 +37,11 @@ type gateEvidenceSnapshot struct {
 		TracesCompleted int `json:"traces_completed"`
 		LearningRecords int `json:"learning_records"`
 	} `json:"operational_evidence"`
+	ThroughputMetrics struct {
+		WsolTokenAddressEmitted int    `json:"wsol_token_address_emitted"`
+		ThroughputVerdict       string `json:"throughput_verdict"`
+		ShadowObserverFailed    int    `json:"shadow_observer_failed"`
+	} `json:"throughput_metrics"`
 }
 
 func findRepoRoot(t *testing.T) string {
@@ -54,12 +62,12 @@ func findRepoRoot(t *testing.T) string {
 	}
 }
 
-func runGateReviewAnalyze(t *testing.T, root string) (evidence gateEvidenceSnapshot, brief string) {
+func runGateReviewAnalyze(t *testing.T, root, rawRel, evidenceRel, briefRel string) (evidence gateEvidenceSnapshot, brief string) {
 	t.Helper()
 
-	rawLog := filepath.Join(root, juneGateRawLog)
+	rawLog := filepath.Join(root, rawRel)
 	if _, err := os.Stat(rawLog); err != nil {
-		t.Skipf("June 1 gate fixture missing (%s) — copy production capture to output/logs/ to run this regression", juneGateRawLog)
+		t.Skipf("gate fixture missing (%s) — copy production capture to output/logs/ to run this regression", rawRel)
 	}
 
 	script := filepath.Join(root, gateReviewScript)
@@ -70,19 +78,19 @@ func runGateReviewAnalyze(t *testing.T, root string) (evidence gateEvidenceSnaps
 		t.Fatalf("gate_review_collect.sh --analyze failed: %v\n%s", err, out)
 	}
 
-	evidencePath := filepath.Join(root, juneGateEvidence)
+	evidencePath := filepath.Join(root, evidenceRel)
 	evidenceBytes, err := os.ReadFile(evidencePath)
 	if err != nil {
-		t.Fatalf("read evidence snapshot %s: %v", juneGateEvidence, err)
+		t.Fatalf("read evidence snapshot %s: %v", evidenceRel, err)
 	}
 	if err := json.Unmarshal(evidenceBytes, &evidence); err != nil {
 		t.Fatalf("parse evidence JSON: %v", err)
 	}
 
-	briefPath := filepath.Join(root, juneGateBrief)
+	briefPath := filepath.Join(root, briefRel)
 	briefBytes, err := os.ReadFile(briefPath)
 	if err != nil {
-		t.Fatalf("read gate brief %s: %v", juneGateBrief, err)
+		t.Fatalf("read gate brief %s: %v", briefRel, err)
 	}
 	return evidence, string(briefBytes)
 }
@@ -91,7 +99,7 @@ func runGateReviewAnalyze(t *testing.T, root string) (evidence gateEvidenceSnaps
 // semantics for the 2026-06-01 production capture after Tasks 1–3.
 func TestGateReviewCollect_June20260601Fixture(t *testing.T) {
 	root := findRepoRoot(t)
-	evidence, brief := runGateReviewAnalyze(t, root)
+	evidence, brief := runGateReviewAnalyze(t, root, juneGateRawLog, juneGateEvidence, juneGateBrief)
 
 	t.Run("no_fake_L2_L5_dead_worker_blockers", func(t *testing.T) {
 		if evidence.BlockerCount != 0 {
@@ -151,6 +159,25 @@ func TestGateReviewCollect_June20260601Fixture(t *testing.T) {
 			t.Errorf("production_decision = %q, want PIPELINE_PROOF_READY or NOT_READY for this fixture", evidence.ProductionDecision)
 		}
 	})
+}
+
+// TestGateReviewCollect_June20260612ThroughputVerdict locks Task 17 throughput
+// classification for the pre-fix production gate capture.
+func TestGateReviewCollect_June20260612ThroughputVerdict(t *testing.T) {
+	root := findRepoRoot(t)
+	evidence, brief := runGateReviewAnalyze(t, root, june12GateRawLog, june12GateEvidence, june12GateBrief)
+
+	if evidence.ThroughputMetrics.ThroughputVerdict != "CODE_DEFECT" {
+		t.Fatalf("throughput_verdict = %q, want CODE_DEFECT", evidence.ThroughputMetrics.ThroughputVerdict)
+	}
+	if evidence.ThroughputMetrics.WsolTokenAddressEmitted < 40 {
+		t.Fatalf("wsol_token_address_emitted = %d, want >= 40 for pre-fix capture",
+			evidence.ThroughputMetrics.WsolTokenAddressEmitted)
+	}
+	if !strings.Contains(brief, "THROUGHPUT_VERDICT:             CODE_DEFECT") &&
+		!strings.Contains(brief, "THROUGHPUT_VERDICT             CODE_DEFECT") {
+		t.Error("brief missing THROUGHPUT_VERDICT: CODE_DEFECT line")
+	}
 }
 
 func extractBriefSection(brief, startMarker, endMarker string) string {

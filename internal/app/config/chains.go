@@ -151,6 +151,11 @@ type SolanaConfig struct {
 	// launch count exceeds MaxCreatorPrevTokenCount are dropped at L0
 	// before probe calls are issued, reducing Helius credit burn.
 	PreFilter IngestionPreFilterConfig `yaml:"pre_filter"`
+
+	// SystemMintReject drops market_data_event emissions whose TokenAddress is
+	// a configured system/stable mint (WSOL, USDC, USDT) before the event bus.
+	// Also used by mint-pair resolution to identify quote-side mints (Task 14).
+	SystemMintReject SystemMintRejectConfig `yaml:"system_mint_reject"`
 }
 
 // IngestionTransportConfig governs Solana streaming transport selection.
@@ -183,4 +188,47 @@ type IngestionPreFilterConfig struct {
 	// MaxCreatorPrevTokenCount is the inclusive upper bound on prior launches
 	// before the token is dropped at L0. 0 means filter disabled regardless of Enabled.
 	MaxCreatorPrevTokenCount int32 `yaml:"max_creator_prev_token_count"`
+}
+
+// SystemMintRejectConfig controls L0 rejection of system/stable mint addresses
+// as TokenAddress and excludes them from creator_profile launch counting (Task 14).
+type SystemMintRejectConfig struct {
+	// Enabled gates emit-time rejection. When false, tokens pass through L0 but
+	// EffectiveMints still drives mint-pair resolution for decoders.
+	Enabled bool `yaml:"enabled"`
+	// Mints is the deny-list of addresses that must never be TokenAddress.
+	// When empty, defaults to wrapped SOL only.
+	Mints []string `yaml:"mints"`
+}
+
+// wrappedSOLMintDefault is the canonical WSOL mint used when Mints is unset.
+const wrappedSOLMintDefault = "So11111111111111111111111111111111111111112"
+
+// EffectiveMints returns the stable/system mint list for pair resolution and
+// rejection checks. Defaults to WSOL when Mints is empty.
+func (c SystemMintRejectConfig) EffectiveMints() []string {
+	if len(c.Mints) > 0 {
+		out := make([]string, len(c.Mints))
+		copy(out, c.Mints)
+		return out
+	}
+	return []string{wrappedSOLMintDefault}
+}
+
+// Contains reports whether addr is a configured system/stable mint.
+func (c SystemMintRejectConfig) Contains(addr string) bool {
+	for _, m := range c.EffectiveMints() {
+		if m == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldRejectToken reports whether a TokenAddress must be dropped at L0 emit.
+func (c SystemMintRejectConfig) ShouldRejectToken(addr string) bool {
+	if !c.Enabled || addr == "" {
+		return false
+	}
+	return c.Contains(addr)
 }

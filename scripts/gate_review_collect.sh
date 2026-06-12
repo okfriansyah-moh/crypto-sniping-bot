@@ -16,6 +16,12 @@
 #   gate_brief_<TIMESTAMP>.txt    — structured gate-review brief (paste into Copilot)
 #   gate_evidence_<TIMESTAMP>.json — machine-readable evidence snapshot
 #
+# Throughput section (PLAN §1.1 / Task 17) — appended to brief + evidence JSON:
+#   wsol_token_address_emitted, ingestion_valid_token_ratio,
+#   market_probes_backlog_ratio, dq_pass_or_risky_pass, shadow_observer_failed,
+#   per-program ingestion heartbeat finals (pumpfun-amm, raydium-v4),
+#   THROUGHPUT_VERDICT: CODE_DEFECT | MARKET_QUIET | HEALTHY
+#
 # After the script finishes, open a new Copilot chat and paste:
 #   "Review this using the production-gate-reviewer skill:" + brief content.
 #
@@ -248,6 +254,86 @@ COUNT_JOIN_TIMEOUT=$(count_jq 'select(
     (.msg == "stage_completed" and .worker_group == "validation_worker" and (.decision_reason // "" | test("join_timeout")))
   )')
 HB_ZERO_EMITTED=$(count_jq 'select(.msg | test("_heartbeat")) | select(.events_emitted == 0)')
+
+# ── Throughput metrics (PLAN §1.1 / Task 17) ─────────────────────────────────
+WSOL_MINT="So11111111111111111111111111111111111111112"
+WSOL_TOKEN_ADDRESS_EMITTED=$(count_jq "select(.msg == \"solana_ingestion_emitted\" and .token == \"$WSOL_MINT\")")
+COUNT_PROBES_COMPLETED=$(count_jq 'select(.msg == "market_probes_completed")')
+COUNT_DQ_PASS=$(count_jq 'select(.msg == "dq_decision" and (.decision == "PASS" or .decision == "RISKY_PASS"))')
+COUNT_SHADOW_OBS_FAIL=$(count_jq 'select(.msg == "shadow_observer_failed")')
+
+INGESTION_VALID_TOKEN_RATIO="N/A"
+INGESTION_VALID_COUNT=0
+if [[ "$COUNT_INGESTION" -gt 0 ]]; then
+  INGESTION_VALID_COUNT=$(( COUNT_INGESTION - WSOL_TOKEN_ADDRESS_EMITTED ))
+  INGESTION_VALID_TOKEN_RATIO=$(awk -v v="$INGESTION_VALID_COUNT" -v t="$COUNT_INGESTION" 'BEGIN{printf "%.4f", v/t}')
+fi
+
+MARKET_PROBES_COMPLETION_RATIO="N/A"
+MARKET_PROBES_BACKLOG_RATIO="N/A"
+if [[ "$COUNT_INGESTION" -gt 0 ]]; then
+  MARKET_PROBES_COMPLETION_RATIO=$(awk -v p="$COUNT_PROBES_COMPLETED" -v i="$COUNT_INGESTION" 'BEGIN{printf "%.4f", p/i}')
+  MARKET_PROBES_BACKLOG_RATIO=$(awk -v p="$COUNT_PROBES_COMPLETED" -v i="$COUNT_INGESTION" 'BEGIN{printf "%.4f", 1 - (p/i)}')
+fi
+
+last_heartbeat_family() {
+  local family="$1"
+  jq -c "select(.msg == \"solana_ingestion_heartbeat\" and .family == \"$family\")" "$CLEAN_LOG" 2>/dev/null | tail -1
+}
+
+HB_PUMPFUN_AMM_FINAL=$(last_heartbeat_family "pumpfun-amm")
+HB_RAYDIUM_V4_FINAL=$(last_heartbeat_family "raydium-v4")
+
+format_heartbeat_final() {
+  local line="$1"
+  local label="$2"
+  if [[ -z "$line" ]]; then
+    echo "  $label: (no heartbeat in window)"
+    return
+  fi
+  echo "$line" | jq -r --arg lbl "$label" \
+    '"  \($lbl): notifications=\(.notifications_received // 0) events_emitted=\(.events_emitted // 0) system_mint_rejected=\(.system_mint_rejected // 0) valid_token_emitted=\(.valid_token_emitted // 0) mint_pair_swapped=\(.mint_pair_swapped // 0) raydium_init_fallback_fetch=\(.raydium_init_fallback_fetch // 0)"' \
+    2>/dev/null || echo "  $label: (parse error)"
+}
+
+TOTAL_INGESTION_NOTIFICATIONS=0
+for _hb_line in "$HB_PUMPFUN_AMM_FINAL" "$HB_RAYDIUM_V4_FINAL"; do
+  if [[ -n "$_hb_line" ]]; then
+    _n=$(echo "$_hb_line" | jq -r '.notifications_received // 0' 2>/dev/null || echo 0)
+    TOTAL_INGESTION_NOTIFICATIONS=$(( TOTAL_INGESTION_NOTIFICATIONS + _n ))
+  fi
+done
+
+ratio_lt() {
+  awk -v r="$1" -v threshold="$2" 'BEGIN{exit !(r+0 < threshold+0)}'
+}
+
+ratio_gte() {
+  awk -v r="$1" -v threshold="$2" 'BEGIN{exit !(r+0 >= threshold+0)}'
+}
+
+THROUGHPUT_VERDICT="HEALTHY"
+if [[ "$WSOL_TOKEN_ADDRESS_EMITTED" -gt 0 ]]; then
+  THROUGHPUT_VERDICT="CODE_DEFECT"
+elif [[ "$COUNT_SHADOW_OBS_FAIL" -gt 0 ]]; then
+  THROUGHPUT_VERDICT="CODE_DEFECT"
+elif [[ "$COUNT_INGESTION" -gt 0 ]]; then
+  if ratio_lt "$INGESTION_VALID_TOKEN_RATIO" 0.80; then
+    THROUGHPUT_VERDICT="CODE_DEFECT"
+  elif ratio_lt "$MARKET_PROBES_COMPLETION_RATIO" 0.95; then
+    THROUGHPUT_VERDICT="CODE_DEFECT"
+  elif [[ "$TOTAL_INGESTION_NOTIFICATIONS" -ge 10000 && "$COUNT_DQ_PASS" -eq 0 ]]; then
+    THROUGHPUT_VERDICT="CODE_DEFECT"
+  elif [[ "$TOTAL_INGESTION_NOTIFICATIONS" -lt 1000 && "$COUNT_INGESTION" -lt 5 ]]; then
+    THROUGHPUT_VERDICT="MARKET_QUIET"
+  else
+    THROUGHPUT_VERDICT="HEALTHY"
+  fi
+elif [[ "$TOTAL_INGESTION_NOTIFICATIONS" -lt 1000 ]]; then
+  THROUGHPUT_VERDICT="MARKET_QUIET"
+else
+  THROUGHPUT_VERDICT="CODE_DEFECT"
+fi
 
 # ── Idempotency / determinism checks ─────────────────────────────────────────
 # Only count true idempotency violations — exclude log lines that legitimately
@@ -620,6 +706,21 @@ echo "  Kill switch events:         $COUNT_KILL_SWITCH"
 echo "  Over-exposure events:       $COUNT_OVER_EXPOSURE"
 echo "  Drawdown events:            $COUNT_DRAWDOWN"
 echo ""
+echo "  Throughput metrics (PLAN §1.1):"
+echo "    wsol_token_address_emitted   $WSOL_TOKEN_ADDRESS_EMITTED"
+echo "    ingestion_valid_token_ratio  $INGESTION_VALID_TOKEN_RATIO  ($INGESTION_VALID_COUNT/$COUNT_INGESTION)"
+echo "    market_probes_completed      $COUNT_PROBES_COMPLETED"
+echo "    market_probes_completion     $MARKET_PROBES_COMPLETION_RATIO"
+echo "    market_probes_backlog_ratio  $MARKET_PROBES_BACKLOG_RATIO"
+echo "    dq_pass_or_risky_pass         $COUNT_DQ_PASS"
+echo "    shadow_observer_failed        $COUNT_SHADOW_OBS_FAIL"
+echo "    ingestion_notifications_sum   $TOTAL_INGESTION_NOTIFICATIONS  (pumpfun-amm + raydium-v4 final HB)"
+echo "    THROUGHPUT_VERDICT             $THROUGHPUT_VERDICT"
+echo ""
+echo "  Per-program ingestion heartbeat (final row in window):"
+format_heartbeat_final "$HB_PUMPFUN_AMM_FINAL" "pumpfun-amm"
+format_heartbeat_final "$HB_RAYDIUM_V4_FINAL" "raydium-v4"
+echo ""
 echo "───────────────────────────────────────────────────────────────────"
 echo "6. PRODUCTION CONFIDENCE MODEL"
 echo "───────────────────────────────────────────────────────────────────"
@@ -692,6 +793,11 @@ echo "════════════════════════�
 } > "$BRIEF"
 
 # ── Write machine-readable evidence JSON ─────────────────────────────────────
+HB_PUMPFUN_AMM_JSON="null"
+HB_RAYDIUM_V4_JSON="null"
+[[ -n "$HB_PUMPFUN_AMM_FINAL" ]] && HB_PUMPFUN_AMM_JSON=$(echo "$HB_PUMPFUN_AMM_FINAL" | jq -c '.' 2>/dev/null || echo "null")
+[[ -n "$HB_RAYDIUM_V4_FINAL" ]] && HB_RAYDIUM_V4_JSON=$(echo "$HB_RAYDIUM_V4_FINAL" | jq -c '.' 2>/dev/null || echo "null")
+
 {
   echo "{"
   echo "  \"timestamp\": \"$TIMESTAMP\","
@@ -717,6 +823,21 @@ echo "════════════════════════�
   echo "    \"capital_safety\": $PC_CAP,"
   echo "    \"operational_consistency\": $PC_OPS"
   echo "  },"
+  echo "  \"throughput_metrics\": {"
+  echo "    \"wsol_token_address_emitted\": $WSOL_TOKEN_ADDRESS_EMITTED,"
+  echo "    \"ingestion_valid_token_ratio\": \"$INGESTION_VALID_TOKEN_RATIO\","
+  echo "    \"ingestion_emitted\": $COUNT_INGESTION,"
+  echo "    \"ingestion_valid_count\": $INGESTION_VALID_COUNT,"
+  echo "    \"market_probes_completed\": $COUNT_PROBES_COMPLETED,"
+  echo "    \"market_probes_completion_ratio\": \"$MARKET_PROBES_COMPLETION_RATIO\","
+  echo "    \"market_probes_backlog_ratio\": \"$MARKET_PROBES_BACKLOG_RATIO\","
+  echo "    \"dq_pass_or_risky_pass\": $COUNT_DQ_PASS,"
+  echo "    \"shadow_observer_failed\": $COUNT_SHADOW_OBS_FAIL,"
+  echo "    \"ingestion_notifications_sum\": $TOTAL_INGESTION_NOTIFICATIONS,"
+  echo "    \"throughput_verdict\": \"$THROUGHPUT_VERDICT\","
+  echo "    \"heartbeat_pumpfun_amm_final\": $HB_PUMPFUN_AMM_JSON,"
+  echo "    \"heartbeat_raydium_v4_final\": $HB_RAYDIUM_V4_JSON"
+  echo "  },"
   echo "  \"raw_log\": \"$RAW_LOG\","
   echo "  \"brief\": \"$BRIEF\""
   echo "}"
@@ -725,7 +846,7 @@ echo "════════════════════════�
 log "Phase 3/3 — Done."
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo "  Mode: $DETECTED_MODE   Decision: $PROD_DECISION   Blockers: $BLOCKER_COUNT"
+echo "  Mode: $DETECTED_MODE   Decision: $PROD_DECISION   Blockers: $BLOCKER_COUNT   Throughput: $THROUGHPUT_VERDICT"
 echo "  Brief:    $BRIEF"
 echo "  Evidence: $EVIDENCE_SNAPSHOT"
 echo "════════════════════════════════════════════════════════════"

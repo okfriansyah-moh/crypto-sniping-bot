@@ -17,7 +17,10 @@ package ingestion_solana
 //
 // Source: https://github.com/raydium-io/raydium-amm/blob/master/program/src/instruction.rs
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Raydium V4 instruction tag constants. See the file header for the program
 // reference. Adding a new tag here MUST be paired with a normalization path
@@ -46,6 +49,35 @@ const (
 	// RaydiumV4KindSwapBaseOut matches tag 11.
 	RaydiumV4KindSwapBaseOut
 )
+
+// RaydiumV4ProgramID is the on-chain Raydium AMM V4 program address.
+const RaydiumV4ProgramID = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+
+// LogsSuggestRaydiumPoolInit reports whether log lines indicate a Raydium V4
+// Initialize2 (pool creation) transaction. Initialize2 does not emit ray_log:
+// entries; swaps/deposits do. Used to trigger a getTransaction fallback when an
+// embedded transactionSubscribe payload had no matching program instructions.
+func LogsSuggestRaydiumPoolInit(logs []string) bool {
+	if len(logs) == 0 {
+		return false
+	}
+	for _, l := range logs {
+		if strings.Contains(strings.ToLower(l), "initialize2") {
+			return true
+		}
+	}
+	hasRayLog := false
+	invokesRaydium := false
+	for _, l := range logs {
+		if strings.Contains(l, "ray_log:") {
+			hasRayLog = true
+		}
+		if strings.Contains(l, RaydiumV4ProgramID) {
+			invokesRaydium = true
+		}
+	}
+	return invokesRaydium && !hasRayLog
+}
 
 // ClassifyRaydiumV4Instruction returns the kind based solely on the leading
 // tag byte. Deterministic: same input → same output. No allocation.

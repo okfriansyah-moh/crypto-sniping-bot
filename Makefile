@@ -142,6 +142,32 @@ gate-analyze:
 	@[[ -n "$(LOG)" ]] || (echo "Usage: make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log" && exit 1)
 	@bash scripts/gate_review_collect.sh --analyze $(LOG) $(MODE)
 
+# PIPELINE_PROOF acceptance — collect (optional) then validate latest evidence.
+# Usage:
+#   make gate-validate                          # validate newest gate_evidence_*.json
+#   make gate-validate EVIDENCE=output/logs/gate_evidence_TIMESTAMP.json
+#   make gate-proof MINS=30                     # collect 30m then validate (Task 18)
+.PHONY: gate-validate
+gate-validate:
+	@bash scripts/validate_pipeline_proof.sh $(EVIDENCE)
+
+.PHONY: gate-proof
+gate-proof:
+	@echo "Collecting gate evidence for $(MINS) minute(s), then running pipeline-proof acceptance..."
+	@bash scripts/gate_review_collect.sh $(MINS) $(SVC) $(MODE)
+	@bash scripts/validate_pipeline_proof.sh
+
+# Phase 2 full §1.1 acceptance (Task 19) — all six success criteria.
+.PHONY: phase2-validate
+phase2-validate:
+	@bash scripts/validate_phase2_acceptance.sh $(EVIDENCE)
+
+.PHONY: phase2-proof
+phase2-proof:
+	@echo "Collecting gate evidence for $(MINS) minute(s), then running Phase 2 full acceptance..."
+	@bash scripts/gate_review_collect.sh $(MINS) $(SVC) $(MODE)
+	@bash scripts/validate_phase2_acceptance.sh
+
 # ── Docker targets ────────────────────────────────────────────────────────────
 
 # Build the Docker image (does not start any services).

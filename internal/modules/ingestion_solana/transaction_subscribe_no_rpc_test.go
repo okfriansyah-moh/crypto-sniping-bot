@@ -138,3 +138,72 @@ func TestRunSubscribeLoop_TransactionSubscribe_EmbeddedTx_NoGetTransaction(t *te
 		t.Errorf("expected 0 GetTransaction calls, got %d", got)
 	}
 }
+
+func TestRunSubscribeLoop_TransactionSubscribe_CPINestedInitialize2_Emits(t *testing.T) {
+	const sig = "RaydiumCPISig11111111111111111111111111111"
+	data := buildRaydiumInitialize2WireBytes()
+	// CPI-style index: outer wrapper at 0, Raydium Initialize2 at inner offset.
+	embedded := &TransactionResult{
+		Signature: sig,
+		Slot:      99000,
+		BlockTime: 1_700_000_000,
+		Instructions: []InstructionData{
+			{
+				ProgramID: "WrapperProgram111111111111111111111111111",
+				Accounts:  []string{"payer"},
+				Data:      []byte{0x00},
+				Index:     0,
+			},
+			{
+				ProgramID: RaydiumV4ProgramID,
+				Accounts: []string{
+					"tok", "spl", "sys", "rent",
+					"AmmPoolCPI", "auth", "orders", "lp",
+					"CoinMintCPI", "PcMintCPI11", "extra",
+				},
+				Data:  data,
+				Index: 1000,
+			},
+		},
+	}
+
+	client := &txSubscribePanicClient{
+		notif: LogsNotification{
+			Signature:   sig,
+			Slot:        99000,
+			Logs:        []string{"Program log: Initialize2"},
+			Transaction: embedded,
+		},
+	}
+
+	cfg := config.SolanaConfig{
+		ChainID: "solana",
+		Programs: []config.SolanaProgramConfig{{
+			ProgramID:          RaydiumV4ProgramID,
+			Family:             "raydium-v4",
+			SubscriptionMethod: "transactionSubscribe",
+			AccountFilter:      "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
+		}},
+		IngestionBackoff:  config.IngestionBackoff{InitialMs: 100, MaxMs: 1000, Multiplier: 2.0},
+		ProcessingWorkers: 4,
+	}
+
+	emitted := make(chan contracts.MarketDataDTO, 1)
+	mod := New(cfg, "v1", func(_ context.Context, dto contracts.MarketDataDTO) error {
+		emitted <- dto
+		return nil
+	}, nil).WithClient(client)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() { _ = mod.Start(ctx) }()
+
+	select {
+	case dto := <-emitted:
+		if dto.EventTopic != "PoolCreated" {
+			t.Errorf("EventTopic = %q, want PoolCreated", dto.EventTopic)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for CPI-nested Initialize2 emission")
+	}
+}

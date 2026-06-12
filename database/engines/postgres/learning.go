@@ -185,19 +185,22 @@ UPDATE shadow_trades
 	return nil
 }
 
-// GetShadowTradesByWindow returns pending shadow trades older than windowSeconds.
-func (d *DB) GetShadowTradesByWindow(ctx context.Context, windowSeconds int) ([]database.ShadowTrade, error) {
-	const q = `
+// getShadowTradesByWindowSQL selects pending shadow trades whose observation window
+// has elapsed. Uses make_interval so pgx can bind windowSeconds as a numeric arg
+// (string concat on $1 caused encode errors: OID 25 text plan).
+const getShadowTradesByWindowSQL = `
 SELECT shadow_id, token_address, stage,
        to_char(rejected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
        observation_complete, observed_return_pct, classification,
        learning_record_id, version_id
 FROM shadow_trades
 WHERE observation_complete = FALSE
-  AND rejected_at < NOW() - ($1 || ' seconds')::interval
+  AND rejected_at < NOW() - make_interval(secs => $1::double precision)
 ORDER BY rejected_at ASC`
 
-	rows, err := d.pool.QueryContext(ctx, q, windowSeconds)
+// GetShadowTradesByWindow returns pending shadow trades older than windowSeconds.
+func (d *DB) GetShadowTradesByWindow(ctx context.Context, windowSeconds int) ([]database.ShadowTrade, error) {
+	rows, err := d.pool.QueryContext(ctx, getShadowTradesByWindowSQL, windowSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("get shadow trades by window: %w", err)
 	}

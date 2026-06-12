@@ -78,6 +78,43 @@ func TestRunCreatorProfileAggregator_MarketDataEvent_SkipsEmptyCreator(t *testin
 	}
 }
 
+// TestRunCreatorProfileAggregator_MarketDataEvent_SkipsSystemMintToken: WSOL as
+// TokenAddress must not increment creator_profiles (Task 14).
+func TestRunCreatorProfileAggregator_MarketDataEvent_SkipsSystemMintToken(t *testing.T) {
+	const wsol = "So11111111111111111111111111111111111111112"
+	md := contracts.MarketDataDTO{
+		EventID:        "evt-wsol",
+		Chain:          "solana",
+		TokenAddress:   wsol,
+		CreatorAddress: "CreatorWallet1111111111111111111111111111111",
+	}
+	payload, _ := json.Marshal(md)
+	adapter := &trackingAdapter{
+		stubAdapter: stubAdapter{},
+		nextEvent: &database.Event{
+			EventID:   "evt-wsol",
+			EventType: "market_data_event",
+			Payload:   payload,
+		},
+	}
+	cfg := testCfg()
+	cfg.Solana.SystemMintReject = config.SystemMintRejectConfig{
+		Enabled: true,
+		Mints:   []string{wsol},
+	}
+
+	err := RunCreatorProfileAggregator(context.Background(), adapter, cfg, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if adapter.upsertLaunchCalled {
+		t.Error("UpsertCreatorProfileOnLaunch must NOT be called for system mint TokenAddress")
+	}
+	if !adapter.markProcessedCalled {
+		t.Error("MarkEventProcessed must be called when skipping system mint")
+	}
+}
+
 // TestRunCreatorProfileAggregator_MarketDataEvent_IncrementsLaunch: valid creator
 // triggers UpsertCreatorProfileOnLaunch and event is marked processed.
 func TestRunCreatorProfileAggregator_MarketDataEvent_IncrementsLaunch(t *testing.T) {
