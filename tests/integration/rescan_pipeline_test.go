@@ -1,7 +1,7 @@
 // Package integration — Phase 10 rescan pipeline tests.
 //
 // These tests exercise the rescan worker using in-memory stubs without
-// a real database. Scenarios map to docs/PLAN.md § Task 7.
+// a real database. Scenarios map to docs/plans/2026-06-10-profit-restoration-plan.md § Task 7.
 //
 // Test 7 (TestRescanInteg_DownstreamPipeline_FiresMomentumEdge) validates
 // the contract that emitted events satisfy for the downstream edge
@@ -257,7 +257,7 @@ func TestRescanInteg_ModeOverride_STRICT(t *testing.T) {
 
 // ── Scenario 7: Downstream MOMENTUM_EDGE consumability ─────────────────────
 //
-// Exit criterion #7 from docs/PLAN.md § 12. We can't run the full
+// Exit criterion #7 from docs/plans/2026-06-10-profit-restoration-plan.md § 12. We can't run the full
 // orchestrator in a unit-style test (no real DB), so we validate the
 // CONTRACT that the rescan emission satisfies for the downstream edge
 // detector to fire MOMENTUM_EDGE:

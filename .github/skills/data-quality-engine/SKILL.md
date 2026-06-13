@@ -226,7 +226,7 @@ return DataQualityDTO{
 false_positive: accepted (pass/risky-pass) → later rug/loss
 false_negative: rejected → later pump (observed via shadow observer)
 
-These signals feed: docs/architecture.md § 3.10 (Learning Engine)
+These signals feed: docs/reference/architecture.md § 3.10 (Learning Engine)
 Shadow trades table: database schema tracks rejected tokens' subsequent price action
 ```
 
@@ -265,7 +265,7 @@ Shadow trades table: database schema tracks rejected tokens' subsequent price ac
 
 ## Phase 9 Notes (Profitability Restoration)
 
-Per `docs/implementation_roadmap.md` § 9.1, Phase 9 closes **GAP-01** by replacing the
+Per `docs/reference/implementation_roadmap.md` § 9.1, Phase 9 closes **GAP-01** by replacing the
 five hardcoded `false` flags in `internal/modules/data_quality/data_quality.go` with
 real RPC-backed detectors. This skill is the canonical reference for that work.
 
@@ -288,8 +288,8 @@ real RPC-backed detectors. This skill is the canonical reference for that work.
 
 ## References
 
-- Architecture: `docs/architecture.md` § 3.1 (Data Quality Engine)
-- Architecture context: `docs/architecture-context/3_data_quality_engine.md`
-- DTO spec: `docs/dto_contracts.md` § 3.2 (DataQualityDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 2.1
+- Architecture: `docs/reference/architecture.md` § 3.1 (Data Quality Engine)
+- Architecture context: `docs/archive/architecture-context/3_data_quality_engine.md`
+- DTO spec: `docs/reference/dto_contracts.md` § 3.2 (DataQualityDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.1
 - Config: `config/data_quality.yaml`

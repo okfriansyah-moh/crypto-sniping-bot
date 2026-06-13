@@ -48,8 +48,8 @@ You are a merge conflict resolution specialist for parallel development branches
 
 Before resolving conflicts, read:
 
-1. `docs/implementation_roadmap.md` — file ownership matrix
-2. `docs/architecture.md` — pipeline stage ordering
+1. `docs/reference/implementation_roadmap.md` — file ownership matrix
+2. `docs/reference/architecture.md` — pipeline stage ordering
 3. `.github/copilot-instructions.md` — protected file rules
 
 ## Output

@@ -14,7 +14,7 @@ import (
 // Migrations are tracked in the _migrations table to ensure idempotency.
 // Filenames must follow: YYYYMMDDNNNNNN_description.sql
 //
-// See docs/db_adapter_spec.md § 5 for migration rules.
+// See docs/reference/db_adapter_spec.md § 5 for migration rules.
 type MigrationRunner struct {
 	db     Querier
 	dir    string

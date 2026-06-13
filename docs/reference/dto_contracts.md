@@ -107,9 +107,9 @@ type MarketDataDTO struct {
 - **Consumer:** `internal/modules/data_quality`
 - **ID rule:** `EventID = SHA256(chain||tx_hash||log_index)[:16]` (EVM) or `SHA256("solana"||signature||instruction_index)[:16]` (Solana). Both forms are content-addressable hashes over the chain-natural ordering keys; collisions across chains are statistically negligible because `chain` is part of the hash.
 
-> **Chain-agnostic invariant.** All DTOs are chain-agnostic. The `Chain` field is a free-form string identifier (`eth | bsc | solana`); per-chain interpretation lives in the **consuming module**, not in the DTO. Adding a new chain (e.g. Solana via Phase 7) requires **zero schema changes** to any DTO — only a new value in the `Chain` enumeration and new chain-specific producer/consumer modules. Layers 1–7, 9, 10 MUST never branch on `Chain`. See `docs/architecture.md` § 3.11.
+> **Chain-agnostic invariant.** All DTOs are chain-agnostic. The `Chain` field is a free-form string identifier (`eth | bsc | solana`); per-chain interpretation lives in the **consuming module**, not in the DTO. Adding a new chain (e.g. Solana via Phase 7) requires **zero schema changes** to any DTO — only a new value in the `Chain` enumeration and new chain-specific producer/consumer modules. Layers 1–7, 9, 10 MUST never branch on `Chain`. See `docs/reference/architecture.md` § 3.11.
 
-> **Ordering invariant.** `OrderingKey` is the **single** authoritative event-ordering field across the entire pipeline. The `events` table is read with `ORDER BY logical_order_key ASC` — never `created_at`. See `docs/architecture.md` § 4.10.A for the full contract, encoding rules, and the partitioning strategy that pairs with it.
+> **Ordering invariant.** `OrderingKey` is the **single** authoritative event-ordering field across the entire pipeline. The `events` table is read with `ORDER BY logical_order_key ASC` — never `created_at`. See `docs/reference/architecture.md` § 4.10.A for the full contract, encoding rules, and the partitioning strategy that pairs with it.
 
 ---
 

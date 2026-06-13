@@ -1,6 +1,6 @@
 # Database Adapter Specification — Project-Specific Extension
 
-> **Canonical source of database contract.** Extends the skeleton adapter pattern with the concrete schema, DTOs, and invariants required by the deterministic event-driven sniper system (`docs/architecture.md`).
+> **Canonical source of database contract.** Extends the skeleton adapter pattern with the concrete schema, DTOs, and invariants required by the deterministic event-driven sniper system (`docs/reference/architecture.md`).
 
 ---
 
@@ -14,7 +14,7 @@
 - **Event-sourced:** The `events` table is the authoritative log. All DTO transitions append to it. State tables are derived projections.
 - **Traceability enforced at write time:** Every event write validates `trace_id`, `correlation_id`, `causation_id` (except Layer 0), `version_id` — orphan events are rejected.
 - **Multi-chain ready (additive):** The adapter is chain-agnostic at the DTO layer. The `Chain` field on every DTO (`eth | bsc | solana`) is a free-form string; chain-specific interpretation lives in the consuming module. Adding a new chain (Phase 7: Solana) introduces only **additive** adapter methods (e.g. `UpsertSolanaEndpointState`, `InsertSolanaSignature`) — never modifies the existing interface. Chain-restricted methods (e.g. `AllocateNonce`, `ReconcileNonce`) document the restriction in their contract; callers are responsible for gating on `chain`. `InsertExecutionResult` accepts `ExecutionResultDTO` for **all** chains; chain-specific fields (Solana signature, EVM tx hash) map to the same `TxHash` slot, and `Nonce` is unused (`0`) for Solana.
-- **Solana ingestion state model (additive):** Solana ingestion uses two persistent state slices not present in the EVM model: a **monotonic watermark** (`solana_ingestion_watermark.slot`) and an **optional signature ledger** (`solana_signatures`) for idempotent execution. The adapter exposes `UpsertIngestionWatermark(ctx, chain, slot)` (rejects regressions with `ErrWatermarkRegression`), `GetIngestionWatermark`, `InsertSolanaSignature` (`ON CONFLICT DO NOTHING`), `UpdateSolanaSignatureStatus`, plus endpoint health/circuit-breaker methods (`UpsertSolanaEndpointState`, `GetSolanaEndpointState`, `UpsertSolanaEndpointHealth`, `ListSolanaEndpointsRanked`). All are additive; no existing call site is altered. The nonce manager (`AllocateNonce`, `ReconcileNonce`) remains EVM-only — Solana callers MUST NOT invoke it. See `docs/architecture.md` § 3.11.10 and `docs/implementation_roadmap.md` § 7.1.6 / § 7.7 for the production-grade hardening invariants. Migration: `database/migrations/20260101000007_solana_tables.sql`.
+- **Solana ingestion state model (additive):** Solana ingestion uses two persistent state slices not present in the EVM model: a **monotonic watermark** (`solana_ingestion_watermark.slot`) and an **optional signature ledger** (`solana_signatures`) for idempotent execution. The adapter exposes `UpsertIngestionWatermark(ctx, chain, slot)` (rejects regressions with `ErrWatermarkRegression`), `GetIngestionWatermark`, `InsertSolanaSignature` (`ON CONFLICT DO NOTHING`), `UpdateSolanaSignatureStatus`, plus endpoint health/circuit-breaker methods (`UpsertSolanaEndpointState`, `GetSolanaEndpointState`, `UpsertSolanaEndpointHealth`, `ListSolanaEndpointsRanked`). All are additive; no existing call site is altered. The nonce manager (`AllocateNonce`, `ReconcileNonce`) remains EVM-only — Solana callers MUST NOT invoke it. See `docs/reference/architecture.md` § 3.11.10 and `docs/reference/implementation_roadmap.md` § 7.1.6 / § 7.7 for the production-grade hardening invariants. Migration: `database/migrations/20260101000007_solana_tables.sql`.
 - **Production hardening contract (architecture § 4.10):** The adapter is the **single** authoritative boundary for the determinism + exactly-once + failure-safety guarantees. Specifically: (a) event reads are ordered by `logical_order_key` (never `created_at`); (b) `ClaimExecution` is the only path that reserves an `execution_id` — in-memory locks are advisory only; (c) `MoveToDLQ` is the only path that records terminal failure of an event; (d) `UpsertPositionFromExecution` enforces the single-position-per-execution invariant via a UNIQUE constraint on `source_execution_id`; (e) `SetSystemHalt` / `IsSystemHalted` are the only legitimate read/write of the global kill switch; (f) `PromoteStrategyVersion` is the only path that activates a new strategy version. Direct SQL bypassing these methods is FORBIDDEN. Migration: `database/migrations/20260101000012_production_hardening.sql`.
 
 ---
@@ -111,7 +111,7 @@ type Adapter interface {
     // signature-uniqueness ordering model. Solana workers MUST NOT call
     // AllocateNonce or ReconcileNonce. Callers MUST gate on
     //   chain ∈ {"eth", "bsc"}
-    // before invoking these methods. See docs/architecture.md § 3.11.6.
+    // before invoking these methods. See docs/reference/architecture.md § 3.11.6.
 
     // AllocateNonce atomically reserves the next nonce for a wallet.
     // Uses UPDATE ... RETURNING with row-level lock.
@@ -136,7 +136,7 @@ type Adapter interface {
     // ── Solana Adapter Methods (Phase 7 — additive, non-breaking) ─
     //
     // These methods support Solana ingestion + execution per
-    // docs/architecture.md § 3.11.10 (production-grade hardening).
+    // docs/reference/architecture.md § 3.11.10 (production-grade hardening).
     // EVM callers MUST NOT invoke them; Solana callers MUST NOT
     // invoke nonce methods (AllocateNonce / ReconcileNonce).
     //
@@ -612,7 +612,7 @@ CREATE INDEX idx_shadow_incomplete ON shadow_trades (observation_complete, rejec
 
 ### 6.8 Strategy Versions & Pipeline Runs
 
-(Defined in Phase 0 — § Phase 0 of `docs/implementation_roadmap.md`.)
+(Defined in Phase 0 — § Phase 0 of `docs/reference/implementation_roadmap.md`.)
 
 ---
 

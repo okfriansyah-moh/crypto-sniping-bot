@@ -260,8 +260,8 @@ position_monitor:
 
 ## References
 
-- `docs/architecture.md` § 3.9 — Position Engine (Layer 9)
-- `docs/architecture-context/11_position_engine.md` — TP/SL/trailing patterns
+- `docs/reference/architecture.md` § 3.9 — Position Engine (Layer 9)
+- `docs/archive/architecture-context/11_position_engine.md` — TP/SL/trailing patterns
 - `.github/skills/position-management/SKILL.md` — TP/SL exit configuration
 - `.github/skills/drawdown-protection/SKILL.md` — Drawdown tier integration
 - `contracts/position.go` — `PositionState` DTO fields

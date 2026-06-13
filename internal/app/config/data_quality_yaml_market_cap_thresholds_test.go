@@ -15,7 +15,7 @@ import (
 
 // TestDataQualityYAML_MarketCapThresholdsMatchPlanConstraints loads
 // config/data_quality.yaml and asserts market-cap / volume thresholds match
-// docs/PLAN.md intentional product floors ($70k mcap, volume floor enabled).
+// docs/plans/2026-06-10-profit-restoration-plan.md intentional product floors ($70k mcap, volume floor enabled).
 // max_market_cap_usd remains commented out (zero) so graduation tokens are not
 // capped at a low ceiling.
 func TestDataQualityYAML_MarketCapThresholdsMatchPlanConstraints(t *testing.T) {

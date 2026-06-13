@@ -96,7 +96,7 @@ func (w *ValidationWorker) Process(ctx context.Context, evt *database.Event) (*d
 
 // fetchEstimates returns the latest model estimates for this trace.
 //
-// Bounded join-wait (per docs/architecture.md § 2 + § 3.5): probability
+// Bounded join-wait (per docs/reference/architecture.md § 2 + § 3.5): probability
 // and slippage producers consume the same upstream feature_event and
 // commit to the bus-state tables in parallel with edge production.
 // Without a bounded wait the validation worker can race ahead of the
@@ -184,7 +184,7 @@ joinLoop:
 }
 
 // resolveEVThresholdBps maps the active operational mode to ev_threshold_bps
-// from config/priority.yaml via Config.ResolveModeThresholds (docs/PLAN.md Task 2).
+// from config/priority.yaml via Config.ResolveModeThresholds (docs/plans/2026-06-10-profit-restoration-plan.md Task 2).
 func (w *ValidationWorker) resolveEVThresholdBps(ctx context.Context) int32 {
 	sysMode := w.cfg.Priority.ActiveMode
 	if sysMode == "" {

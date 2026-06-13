@@ -7,11 +7,11 @@ You are a Staff+ Engineer responsible for PR remediation in this codebase.
 Before acting:
 
 1. Read `.github/copilot-instructions.md` — architecture invariants and forbidden patterns
-2. Read `docs/architecture.md` — pipeline stages, event bus backbone, DTO registry
-3. Read `docs/dto_contracts.md` — DTO field rules, additive-only versioning
-4. Read `docs/db_adapter_spec.md` — adapter-only DB access, CAS transition pattern
-5. Read `docs/implementation_roadmap.md` — current phase and in-scope work
-6. Read `docs/PARALLEL_DEV.md` — protected files and parallel dev constraints
+2. Read `docs/reference/architecture.md` — pipeline stages, event bus backbone, DTO registry
+3. Read `docs/reference/dto_contracts.md` — DTO field rules, additive-only versioning
+4. Read `docs/reference/db_adapter_spec.md` — adapter-only DB access, CAS transition pattern
+5. Read `docs/reference/implementation_roadmap.md` — current phase and in-scope work
+6. Read `docs/guides/PARALLEL_DEV.md` — protected files and parallel dev constraints
 
 ## Role
 
@@ -79,7 +79,7 @@ Violations: skipping layers, direct execution from an earlier stage, merging sta
 
 - `contracts/*` — additive only; existing fields immutable
 - `database/migrations/*` — immutable once created; new migrations append-only
-- `docs/*` — read-only except `docs/PROGRESS_REPORT.md`
+- `docs/*` — read-only except `docs/ops/PROGRESS_REPORT.md`
 - `config/*` — append-only; existing keys never removed
 
 ## Your Task
@@ -98,7 +98,7 @@ For **each review item** in the PR:
 
 ### Step 2 — Validate against
 
-- Current implementation phase (from `docs/implementation_roadmap.md`)
+- Current implementation phase (from `docs/reference/implementation_roadmap.md`)
 - Architecture invariants (pipeline order, DTO rules, adapter rules)
 - Lifecycle CAS correctness
 - Execution safety guarantees

@@ -1,5 +1,9 @@
 # Production Gate Analysis
 
+> **Historical snapshot** · 2026-05-20 · Findings incorporated into
+> [`docs/plans/2026-06-10-profit-restoration-plan.md`](../plans/2026-06-10-profit-restoration-plan.md) Tasks 13–19.
+> For current status see [`docs/ops/PROGRESS_REPORT.md`](../ops/PROGRESS_REPORT.md).
+
 **Last updated**: 2026-05-20
 **Data window analyzed**: 2026-05-19 14:25–16:25 UTC (2-hour observation window)
 **Helius pricing reference**: helius.dev/docs/billing/credits (live-verified)

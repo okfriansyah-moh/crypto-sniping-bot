@@ -2,7 +2,7 @@
 -- quarantine_tokens table (quarantined token audit log), and
 -- evaluation_details table for per-position evaluation data.
 -- All SQL is portable: ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP, parameterized queries.
--- See docs/db_adapter_spec.md and docs/implementation_roadmap.md § Phase 3.
+-- See docs/reference/db_adapter_spec.md and docs/reference/implementation_roadmap.md § Phase 3.
 
 BEGIN;
 

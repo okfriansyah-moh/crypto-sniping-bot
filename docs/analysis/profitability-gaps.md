@@ -1,5 +1,10 @@
 # Profitability Gap Analysis — Cross-Chain Audit
 
+> **Historical snapshot** · Gap inventory as of 2026-04-29.
+> Phase 9 remediation tracked in [`docs/reference/implementation_roadmap.md`](../reference/implementation_roadmap.md);
+> partial fixes in [`docs/plans/2026-06-10-profit-restoration-plan.md`](../plans/2026-06-10-profit-restoration-plan.md).
+> For current status see [`docs/ops/PROGRESS_REPORT.md`](../ops/PROGRESS_REPORT.md).
+
 > **Status:** Verified against codebase on 2026-04-29.
 > **Canonical invariant:** `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality`
 > Any factor approaching zero kills profit regardless of how well the other factors perform.

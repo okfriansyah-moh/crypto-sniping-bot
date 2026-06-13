@@ -32,17 +32,17 @@ type SolanaHolderDistConfig struct {
 	CacheTTLSec int `yaml:"cache_ttl_sec"`
 	// FallbackEnabled controls whether the fallback path (getTokenSupply +
 	// getProgramAccounts) is attempted when getTokenLargestAccounts times out
-	// or returns an error. Defaults to true. The fallback costs +11 Helius
+	// or returns an error. Defaults to false (opt-in). The fallback costs +11 Helius
 	// credits per invocation (1 for getTokenSupply + 10 for getProgramAccounts).
 	FallbackEnabled bool `yaml:"fallback_enabled"`
 	// FallbackTimeoutMs is the context timeout applied to each fallback RPC
-	// call. Defaults to 2500 ms. Two sequential calls are issued so the
-	// worst-case added latency is 2× this value.
+	// call. Defaults to 2500 ms. Both fallback calls share the same context,
+	// so worst-case added latency is bounded by this value (not 2×).
 	FallbackTimeoutMs int32 `yaml:"fallback_timeout_ms"`
 	// FallbackMaxProgramAccounts caps how many token accounts getProgramAccounts
-	// may return for HolderCount computation. Defaults to 200. Higher values
-	// improve accuracy but cost more Helius credits; 200 covers virtually all
-	// relevant holder concentration cases for fresh pump.fun mints.
+	// are processed for HolderCount computation. Defaults to 200. This is a
+	// post-fetch cap (loop break after max accounts), not an RPC-side result
+	// limit. Higher values improve accuracy but increase local processing cost.
 	FallbackMaxProgramAccounts int32 `yaml:"fallback_max_program_accounts"`
 }
 

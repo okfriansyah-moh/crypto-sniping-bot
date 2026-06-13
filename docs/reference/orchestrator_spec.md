@@ -28,7 +28,7 @@ for stage in PIPELINE_STAGES:
 
 ## 2. Stage Ordering
 
-The pipeline stage sequence is defined in `docs/architecture.md` and is **immutable**:
+The pipeline stage sequence is defined in `docs/reference/architecture.md` and is **immutable**:
 
 ```
 stage_1 → stage_2 → stage_3 → ... → stage_N
@@ -259,7 +259,7 @@ adapter.close()
 
 ## 11. Production Hardening Worker Rules
 
-The orchestrator and the workers it dispatches MUST satisfy the determinism + exactly-once + failure-safety contract defined in `docs/architecture.md` § 4.10. The rules below are normative and apply to every consumer worker (ingestion, data_quality, edge, probability, selection, capital, execution, position, learning).
+The orchestrator and the workers it dispatches MUST satisfy the determinism + exactly-once + failure-safety contract defined in `docs/reference/architecture.md` § 4.10. The rules below are normative and apply to every consumer worker (ingestion, data_quality, edge, probability, selection, capital, execution, position, learning).
 
 ### 11.1 Event Claim Discipline (§ 4.10.A, § 4.10.B)
 

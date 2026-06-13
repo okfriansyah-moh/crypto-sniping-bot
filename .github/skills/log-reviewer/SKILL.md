@@ -34,7 +34,7 @@ The skill answers four questions in order:
 1. **Identify** — what is this log line / heartbeat / Telegram event?
 2. **Classify** — `GOOD | DEGRADED | BAD | STUBBED | STUCK | NOISE`.
 3. **Diagnose** — which layer, which DTO, which stage, which invariant is
-   violated (per `docs/architecture.md` § 3 layers and § 2 backbone)?
+   violated (per `docs/reference/architecture.md` § 3 layers and § 2 backbone)?
 4. **Plan** — concrete fix routed to the right agent/skill, with citation of
    the canonical doc section.
 
@@ -70,7 +70,7 @@ finding.
 
 ### R3 — Pipeline-stage completeness check
 
-For each `trace_id`, the canonical sequence (per `docs/architecture.md` § 3
+For each `trace_id`, the canonical sequence (per `docs/reference/architecture.md` § 3
 and § 1) is:
 
 ```
@@ -295,7 +295,7 @@ open_critical: <count of unresolved CRITICAL/HIGH findings>
     - count: <n>
     - example_line: "<verbatim>"
   hypothesis:    <single sentence>
-  doc_anchor:    docs/architecture.md § <n>  | docs/<spec>.md § <n>
+  doc_anchor:    docs/reference/architecture.md § <n>  | docs/<spec>.md § <n>
 ```
 
 ### 3. Plan (delegation manifest)
@@ -496,7 +496,7 @@ The following behaviors are **explicitly forbidden** to prevent an endless loop:
 
 4. **Moving the launch threshold**: The LAUNCH_ALLOWED threshold is fixed at PRS=65.
    It MUST NOT be silently raised by any future plan or skill update without an explicit
-   operator decision recorded in `docs/PROGRESS_REPORT.md`.
+   operator decision recorded in `docs/ops/PROGRESS_REPORT.md`.
 
 ### Current PRS (as of 2026-05-01)
 
@@ -576,21 +576,21 @@ findings:
       count: 18
       example_line: '"msg":"probability_scored","probability":0.9700552787112123'
     hypothesis: probability worker emits a hard-coded constant; model is not wired.
-    doc_anchor: docs/architecture.md § 3.4 (Probability/Slippage/Latency Models)
+    doc_anchor: docs/reference/architecture.md § 3.4 (Probability/Slippage/Latency Models)
 
   - id: F-2
     pattern: features_extracted identical (1, 0.7, 0.9) across distinct trace_ids
     class: STUBBED
     severity: HIGH
     layer: 2
-    doc_anchor: docs/architecture.md § 3.2
+    doc_anchor: docs/reference/architecture.md § 3.2
 
   - id: F-3
     pattern: dq_decision PASS with risk_score=0 for 100% of tokens
     class: STUBBED
     severity: HIGH
     layer: 1
-    doc_anchor: docs/architecture.md § 3.1
+    doc_anchor: docs/reference/architecture.md § 3.1
 
   - id: F-4
     pattern: edge_decision constant (0.91, 0.7)
@@ -608,8 +608,8 @@ findings:
       validation worker times out joining probability event; falls back
       to default 0.35 → all rejects with ev_bps=-1900. The bus join is
       broken or the worker reads before the producer commits.
-    doc_anchor: docs/orchestrator_spec.md (event join / dependency wait);
-      docs/architecture.md § 2.2 (event bus consumer_offsets)
+    doc_anchor: docs/reference/orchestrator_spec.md (event join / dependency wait);
+      docs/reference/architecture.md § 2.2 (event bus consumer_offsets)
 
   - id: F-6
     pattern: solana_ingestion_heartbeat raydium-v4 events_emitted=0 with
@@ -617,7 +617,7 @@ findings:
     class: BAD
     severity: HIGH
     layer: 0
-    doc_anchor: docs/architecture-context/* ingestion notes
+    doc_anchor: docs/archive/architecture-context/* ingestion notes
 
   - id: F-7
     pattern: zero selection/allocation/execution events in window
@@ -732,9 +732,9 @@ Before emitting a review object:
 - `operational-modes` — STRICT/BALANCED/EXPLORATION gating affects severity.
 - `drawdown-protection` — kill-switch trigger evaluation on CRITICAL findings.
 - `telegram-dispatcher` — bus-only Telegram contract.
-- `docs/architecture.md` — canonical layer and pipeline definitions.
-- `docs/orchestrator_spec.md` — failure handling, join logic, retries.
-- `docs/PROGRESS_REPORT.md` — session history; PRS snapshot is updated here after each session.
+- `docs/reference/architecture.md` — canonical layer and pipeline definitions.
+- `docs/reference/orchestrator_spec.md` — failure handling, join logic, retries.
+- `docs/ops/PROGRESS_REPORT.md` — session history; PRS snapshot is updated here after each session.
 - § Production Readiness Score — deterministic 0–100 rubric; LAUNCH_ALLOWED at PRS=65.
 - § Tolerable vs. Non-Tolerable — hard boundary between monitor-only and stop-trading.
 - § Termination Contract — the explicit conditions under which the fix loop ends.

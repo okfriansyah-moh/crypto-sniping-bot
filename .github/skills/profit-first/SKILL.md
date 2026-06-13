@@ -245,8 +245,8 @@ if feature.ImprovesAtLeastOneFactor() &&
 
 ## References
 
-- Architecture: `docs/architecture.md` § 1 (Core Invariant), § 5 (KPIs)
-- Architecture context: `docs/architecture-context/0_system_definition.md`
-- Architecture context: `docs/architecture-context/1_global_control_loop.md`
-- DTO spec: `docs/dto_contracts.md` (all DTO types)
-- Roadmap: `docs/implementation_roadmap.md` (all phases)
+- Architecture: `docs/reference/architecture.md` § 1 (Core Invariant), § 5 (KPIs)
+- Architecture context: `docs/archive/architecture-context/0_system_definition.md`
+- Architecture context: `docs/archive/architecture-context/1_global_control_loop.md`
+- DTO spec: `docs/reference/dto_contracts.md` (all DTO types)
+- Roadmap: `docs/reference/implementation_roadmap.md` (all phases)

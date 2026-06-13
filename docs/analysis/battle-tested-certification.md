@@ -1,5 +1,8 @@
 # Battle-Tested Certification
 
+> **Location:** `docs/analysis/battle-tested-certification.md` (moved from `docs/analysis/battle-tested-certification.md`, 2026-06-13).
+> Index: [`docs/README.md`](../README.md).
+
 > **Status:** `BATTLE_TEST_CERTIFICATION: READY` (offline scenario matrix)  
 > **Last validated:** 2026-06-10  
 > **Canonical runner:** `make battle-test`
@@ -107,8 +110,8 @@ These were **real defects** fixed without weakening DQ rules:
 
 ## Related documents
 
-- `docs/architecture.md` — system design (single source of truth)
-- `docs/orchestrator_spec.md` — execution model
+- `docs/reference/architecture.md` — system design (single source of truth)
+- `docs/reference/orchestrator_spec.md` — execution model
 - `scripts/validate_pipeline_proof.sh` — PIPELINE_PROOF acceptance
 - `scripts/gate_review_collect.sh` — throughput verdicts including `GUARDRAILS_ACTIVE`
 - `README.md` — mock proof quick start

@@ -4,7 +4,7 @@ import "strings"
 
 // PriorityConfig holds operational-mode thresholds from config/priority.yaml.
 // Consumed by validation (L5), edge (L3), and selection (L6) workers via
-// Config.ResolveModeThresholds — see docs/PLAN.md Task 2–4.
+// Config.ResolveModeThresholds — see docs/plans/2026-06-10-profit-restoration-plan.md Task 2–4.
 type PriorityConfig struct {
 	Modes PriorityModesConfig `yaml:"modes"`
 
@@ -44,7 +44,7 @@ type ModeThresholds struct {
 }
 
 // PriorityAllocationConfig holds capital-allocation weights from priority.yaml.
-// Fixed $5 entry sizing (docs/PLAN.md) is unchanged; these weights apply to
+// Fixed $5 entry sizing (docs/plans/2026-06-10-profit-restoration-plan.md) is unchanged; these weights apply to
 // portfolio-level exposure caps in the capital engine.
 type PriorityAllocationConfig struct {
 	BaseSizeUSD            float64 `yaml:"base_size_usd"`
@@ -55,7 +55,7 @@ type PriorityAllocationConfig struct {
 }
 
 // ResolveModeThresholds maps an operational mode string to its threshold profile.
-// Unknown or empty modes fail-closed to STRICT (docs/PLAN.md §7.1).
+// Unknown or empty modes fail-closed to STRICT (docs/plans/2026-06-10-profit-restoration-plan.md §7.1).
 func (c *Config) ResolveModeThresholds(mode string) ModeThresholds {
 	if c == nil {
 		return canonicalStrictThresholds()
@@ -153,7 +153,7 @@ func normalizeOperationalMode(mode string) string {
 }
 
 // applyPriorityDefaults fills zero-value priority fields with canonical defaults
-// from docs/architecture.md §7 / config/priority.yaml.
+// from docs/reference/architecture.md §7 / config/priority.yaml.
 func applyPriorityDefaults(p *PriorityConfig) {
 	if p == nil {
 		return

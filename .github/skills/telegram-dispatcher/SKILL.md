@@ -16,7 +16,7 @@ Enforce the event-bus-only Telegram integration pattern. The Telegram dispatcher
 **dedicated consumer** of the event bus — it reads events and sends messages. No module
 calls Telegram APIs directly.
 
-**Architecture rule:** `docs/architecture.md` § 2.5 — Telegram via Event Bus Only
+**Architecture rule:** `docs/reference/architecture.md` § 2.5 — Telegram via Event Bus Only
 
 ---
 
@@ -261,7 +261,7 @@ if err := sendWithRetry(ctx, bot, chatID, msg, cfg); err != nil {
 
 ## References
 
-- Architecture: `docs/architecture.md` § 2.5 (Telegram via Event Bus), § 4.4 (Operator Commands)
-- Architecture context: `docs/architecture-context/2_system_backbone.md`
-- Roadmap: `docs/implementation_roadmap.md` Phase 6
+- Architecture: `docs/reference/architecture.md` § 2.5 (Telegram via Event Bus), § 4.4 (Operator Commands)
+- Architecture context: `docs/archive/architecture-context/2_system_backbone.md`
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 6
 - Config: `config/telegram.yaml` (authorized IDs, templates — NO bot token)

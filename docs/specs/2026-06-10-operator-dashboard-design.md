@@ -53,4 +53,4 @@ Operators today use Telegram (`/status`, `/pnl`, `/pipeline`, `/dq`) and shell s
 
 ## Next step
 
-After mockup approval → `writing-plans` skill for API routes + static asset serving from `cmd/server.go`.
+Implemented: [`docs/plans/2026-06-13-operator-dashboard-plan.md`](../plans/2026-06-13-operator-dashboard-plan.md).

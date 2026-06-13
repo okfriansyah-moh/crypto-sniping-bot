@@ -4,7 +4,7 @@ package orchestrator
 // record. Documented as constants so downstream parsers, dashboards, and
 // replay tooling stay in sync with the producer. Any change here must be
 // reflected in operator dashboards and trace correlators (see
-// docs/architecture.md § 13 Observability and the traceability skill).
+// docs/reference/architecture.md § 13 Observability and the traceability skill).
 const (
 	// LogFieldOutputEventID is the EventID of the downstream event emitted by
 	// the handler, or "" when no output event was produced.

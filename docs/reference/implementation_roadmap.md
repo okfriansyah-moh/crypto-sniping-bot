@@ -4,9 +4,9 @@
 >
 > **Source-of-truth cross-references:**
 >
-> - Architecture layers and invariants: `docs/architecture.md`
-> - Database schema + adapter interface: `docs/db_adapter_spec.md`
-> - DTO registry (field-level): `docs/dto_contracts.md`
+> - Architecture layers and invariants: `docs/reference/architecture.md`
+> - Database schema + adapter interface: `docs/reference/db_adapter_spec.md`
+> - DTO registry (field-level): `docs/reference/dto_contracts.md`
 
 ---
 
@@ -128,7 +128,7 @@ func Run<Name>(ctx context.Context, adapter database.Adapter, mod *<name>.Module
 
 ## 0.3 Traceability Contract (All DTOs, All Phases)
 
-Every DTO emitted by any phase MUST carry these four fields (see `docs/dto_contracts.md` § 1):
+Every DTO emitted by any phase MUST carry these four fields (see `docs/reference/dto_contracts.md` § 1):
 
 | Field           | Propagation Rule                                                             |
 | --------------- | ---------------------------------------------------------------------------- |
@@ -436,7 +436,7 @@ adapter.MarkEventProcessed(ctx, eventID)   // every consume
 
 ### Migration — `20260101000001_initial_schema.sql`
 
-Tables: `events`, `consumer_offsets`, `pipeline_runs`, `strategy_versions`, `_migrations`. See `docs/db_adapter_spec.md` § 6.1 & § 6.8 for exact DDL.
+Tables: `events`, `consumer_offsets`, `pipeline_runs`, `strategy_versions`, `_migrations`. See `docs/reference/db_adapter_spec.md` § 6.1 & § 6.8 for exact DDL.
 
 ### Failure Handling
 
@@ -463,7 +463,7 @@ Tables: `events`, `consumer_offsets`, `pipeline_runs`, `strategy_versions`, `_mi
 
 ## Phase 1 — Detection & Ingestion (P1)
 
-**Architecture:** Layer 0 (`docs/architecture.md` § 3.0)
+**Architecture:** Layer 0 (`docs/reference/architecture.md` § 3.0)
 
 ### Objective
 
@@ -517,7 +517,7 @@ database/migrations/
 ### Function Contracts
 
 ```go
-// contracts/market_data.go  — see docs/dto_contracts.md § 3.1 for full field list
+// contracts/market_data.go  — see docs/reference/dto_contracts.md § 3.1 for full field list
 type MarketDataDTO struct {
     EventID, TraceID, CorrelationID, CausationID, VersionID string
     Chain, Market                                            string
@@ -782,7 +782,7 @@ position_event (Status=exited)
 
 ## Phase 2 — Minimal Trading Pipeline (FIRST TRADE) (P1)
 
-**Architecture:** Layers 1, 2, 3, 5, 6, 7, 8, 9 (`docs/architecture.md` §§ 3.1–3.9)
+**Architecture:** Layers 1, 2, 3, 5, 6, 7, 8, 9 (`docs/reference/architecture.md` §§ 3.1–3.9)
 
 ### Objective
 
@@ -887,7 +887,7 @@ Complete Input → Output DTO map for all 8 pipeline stages in Phase 2:
 | Execution  | 8     | `AllocationDTO`      | `allocation_event`     | `ExecutionResultDTO` | `execution_event`      |
 | Position   | 9     | `ExecutionResultDTO` | `execution_event`      | `PositionStateDTO`   | `position_event`       |
 
-All DTOs carry `TraceID`, `CorrelationID`, `CausationID`, `VersionID`. See `docs/dto_contracts.md` for full field definitions.
+All DTOs carry `TraceID`, `CorrelationID`, `CausationID`, `VersionID`. See `docs/reference/dto_contracts.md` for full field definitions.
 
 ### Lifecycle Transitions
 
@@ -1586,7 +1586,7 @@ adapter.InsertEvent(ctx, event)              // every snapshot and exit
 
 ### 2.9 Phase 2 Migration — `20260101000003_trading_tables.sql`
 
-Adds `wallet_nonce_state`, `executions`, `positions`, `tokens`. See `docs/db_adapter_spec.md` § 6.3, § 6.5, § 6.6.
+Adds `wallet_nonce_state`, `executions`, `positions`, `tokens`. See `docs/reference/db_adapter_spec.md` § 6.3, § 6.5, § 6.6.
 
 ### 2.10 Phase 2 Orchestrator Wiring
 
@@ -1854,7 +1854,7 @@ Adapter returns `ErrMissingTraceField` on write if any field empty; `ErrOrphanEv
 
 ### DTO Flow (Cross-Cutting)
 
-No new DTOs introduced (EvaluationDTO is defined in `docs/dto_contracts.md` § 3.11). Phase 3 **extends the enforcement rules** that all existing DTOs must already comply with.
+No new DTOs introduced (EvaluationDTO is defined in `docs/reference/dto_contracts.md` § 3.11). Phase 3 **extends the enforcement rules** that all existing DTOs must already comply with.
 
 ### Worker Flows — All Pipeline Stages with Mandatory CAS
 
@@ -2087,7 +2087,7 @@ adapter.GetActiveStrategyVersion(ctx)
 
 ## Phase 4 — Signal Quality (Models + Full DQ/Features) (P1.5)
 
-**Architecture:** Layer 1 (full `docs/architecture.md` § 3.1), Layer 2 (full § 3.2), Layer 3 (full § 3.3), Layer 4 (§ 3.4)
+**Architecture:** Layer 1 (full `docs/reference/architecture.md` § 3.1), Layer 2 (full § 3.2), Layer 3 (full § 3.3), Layer 4 (§ 3.4)
 
 ### Objective
 
@@ -2454,7 +2454,7 @@ Status ∈ {draft, shadow, active, deactivated, rolled_back}
 3. A/B promoter moves `shadow → active` when promotion conditions pass (existing § 5.5 rules).
 4. **Rollback watchdog** (new `run_rollback_watchdog.go`): if active version's realized expectancy drops below baseline by more than `cfg.learning.rollback_threshold_pct` within `cfg.learning.post_promotion_watch_minutes`, auto-rollback — `active → rolled_back`, previous active reinstated.
 
-**New adapter methods** (declared in `docs/db_adapter_spec.md` § 11.3):
+**New adapter methods** (declared in `docs/reference/db_adapter_spec.md` § 11.3):
 
 ```go
 adapter.SetStrategyVersionStatus(ctx, versionID, status string) error
@@ -2921,7 +2921,7 @@ case "BALANCED", "EXPLORATION", "STRICT":
 }
 ```
 
-**New adapter methods:** `GetSystemState`, `UpsertSystemState` (see `docs/db_adapter_spec.md` § 11.1).
+**New adapter methods:** `GetSystemState`, `UpsertSystemState` (see `docs/reference/db_adapter_spec.md` § 11.1).
 
 ### Full Capital Safety Envelope (from § 7.4)
 
@@ -3228,7 +3228,7 @@ adapter.ArchiveEvents(ctx, olderThan time.Time)        // moves events to events
 
 # DB Adapter Mapping
 
-Concrete adapter method usage per phase. Full interface in `docs/db_adapter_spec.md` § 2.
+Concrete adapter method usage per phase. Full interface in `docs/reference/db_adapter_spec.md` § 2.
 
 | Phase | Adapter Methods Used                                                                                                                                                                                                           | Tables Touched                                                                               |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -3247,13 +3247,13 @@ Concrete adapter method usage per phase. Full interface in `docs/db_adapter_spec
 | 5     | `InsertLearningRecord`, `InsertEvaluation`, `CreateStrategyVersion`, `GetStrategyVersion`, `SetStrategyVersionStatus`, `GetShadowVersion`                                                                                      | `learning_records`, `evaluations`, `shadow_trades`, `strategy_versions`                      |
 | 6     | `GetSystemState`, `UpsertSystemState`, `GetExposureSummary`, `GetEventsByTraceIncludeArchive` — also: `ClaimNextEvent` gains optional `chain` partition filter                                                                 | `system_states`, `events_archive`                                                            |
 
-**Rule:** No phase introduces an adapter method not declared in `docs/db_adapter_spec.md` § 2 without updating that spec first.
+**Rule:** No phase introduces an adapter method not declared in `docs/reference/db_adapter_spec.md` § 2 without updating that spec first.
 
 ---
 
 # DTO Pipeline Map
 
-Full DTO flow — matches `docs/architecture.md` End-to-End Pipeline diagram exactly.
+Full DTO flow — matches `docs/reference/architecture.md` End-to-End Pipeline diagram exactly.
 
 ```
                   Layer 0 (Phase 1)
@@ -3400,7 +3400,7 @@ Full DTO flow — matches `docs/architecture.md` End-to-End Pipeline diagram exa
 
 ## Phase 7 — Solana Market Extension (P2)
 
-**Architecture:** Layer 0 (Solana ingestion) and Layer 8 (Solana execution) — see `docs/architecture.md` § 3.11.
+**Architecture:** Layer 0 (Solana ingestion) and Layer 8 (Solana execution) — see `docs/reference/architecture.md` § 3.11.
 
 ### Objective
 
@@ -3531,7 +3531,7 @@ Market = e.g., "solana-raydium-v4" | "solana-pumpfun"
 
 #### 7.1.1 Connection Management (Production-Grade)
 
-The Solana ingestion worker maintains a **persistent WebSocket** to the active RPC endpoint with the following lifecycle (see `docs/architecture.md` § 3.11.10.3):
+The Solana ingestion worker maintains a **persistent WebSocket** to the active RPC endpoint with the following lifecycle (see `docs/reference/architecture.md` § 3.11.10.3):
 
 - **Connect** — Open WS, subscribe via `logsSubscribe` (program-filtered) and `programSubscribe` for tracked accounts.
 - **Heartbeat** — Send periodic ping; if no pong within `cfg.solana.ws_heartbeat_timeout_ms` (default 10 s) → treat as disconnected.
@@ -3606,7 +3606,7 @@ EventID = SHA256("solana" || signature || instruction_index)[:16]
 
 #### 7.1.5 Backpressure Control
 
-The WS subscriber → publisher pipeline uses a **bounded channel** of size `cfg.solana.publish_buffer_size` (default 4096). Drop policy follows `docs/architecture.md` § 3.11.10.11:
+The WS subscriber → publisher pipeline uses a **bounded channel** of size `cfg.solana.publish_buffer_size` (default 4096). Drop policy follows `docs/reference/architecture.md` § 3.11.10.11:
 
 | Event Class                           | Buffer Pressure Behavior                                        |
 | ------------------------------------- | --------------------------------------------------------------- |
@@ -3687,7 +3687,7 @@ func (m *Module) Execute(ctx context.Context, alloc contracts.AllocationDTO) (co
 | ----------------- | ------------------------------------------------------------------------------------ | ----------- | ----------- | ------ | --------- |
 | `Chain`           | `"solana"`                                                                           |
 | `WalletAddress`   | Base58 pubkey of executing keypair                                                   |
-| `Nonce`           | `0` (Solana has no nonce — field is unused; documented in `docs/db_adapter_spec.md`) |
+| `Nonce`           | `0` (Solana has no nonce — field is unused; documented in `docs/reference/db_adapter_spec.md`) |
 | `TxHash`          | Solana signature (base58)                                                            |
 | `BlockNumber`     | Slot of confirmation                                                                 |
 | `Status`          | `confirmed                                                                           | reverted    | dropped     | failed | rejected` |
@@ -3717,7 +3717,7 @@ if attempts == max:
     emit Status=dropped, FailureCategory=leader_skip OR blockhash_expired
 ```
 
-**Hard invariants** (also in `docs/architecture.md` § 3.11.10.6):
+**Hard invariants** (also in `docs/reference/architecture.md` § 3.11.10.6):
 
 - Maximum **5** total send attempts per `ExecutionID`.
 - Each retry uses a **fresh** `recent_blockhash` — never replays a stale blockhash.
@@ -3780,7 +3780,7 @@ Endpoint rotation is **per-attempt**, not per-execution: a single `ExecutionID` 
 
 #### 7.3.5 Failure Classification (Required Field)
 
-Every emitted `ExecutionResultDTO` for `chain="solana"` MUST carry `FailureCategory ∈` the authoritative enum in `docs/architecture.md` § 3.11.10.8:
+Every emitted `ExecutionResultDTO` for `chain="solana"` MUST carry `FailureCategory ∈` the authoritative enum in `docs/reference/architecture.md` § 3.11.10.8:
 
 ```
 blockhash_expired | simulation_failure | rpc_timeout | rpc_circuit_open |
@@ -3911,11 +3911,11 @@ adapter.UpsertSolanaEndpointHealth(ctx, url, p95_ms, err_rate, ...)  // dynamic 
 adapter.ListSolanaEndpointsRanked(ctx) ([]EndpointHealth, error)     // priority + health-sorted
 ```
 
-**`AllocateNonce` and `ReconcileNonce` are NEVER called** for `chain="solana"`. Callers gate on `chain ∈ {eth, bsc}`. See `docs/db_adapter_spec.md` § 2 for the EVM-only contract.
+**`AllocateNonce` and `ReconcileNonce` are NEVER called** for `chain="solana"`. Callers gate on `chain ∈ {eth, bsc}`. See `docs/reference/db_adapter_spec.md` § 2 for the EVM-only contract.
 
 ### 7.7 RPC Provider Strategy (Production-Grade)
 
-This subsection is normative — Phase 7 MUST satisfy all rules below. See `docs/architecture.md` § 3.11.10 for the architectural commitments.
+This subsection is normative — Phase 7 MUST satisfy all rules below. See `docs/reference/architecture.md` § 3.11.10 for the architectural commitments.
 
 #### 7.7.1 Provider Set (Minimum 2)
 
@@ -4101,7 +4101,7 @@ execution:
 
 # Phase 8 — Final Production Hardening
 
-> **Goal:** Lock the determinism + exactly-once + failure-safety contract of `docs/architecture.md` § 4.10. Phase 8 is mandatory before any mainnet capital is routed. Phase 8 changes are **additive** — they do not modify Phase 0–7 module logic; they add a single migration, a set of adapter methods, and worker discipline.
+> **Goal:** Lock the determinism + exactly-once + failure-safety contract of `docs/reference/architecture.md` § 4.10. Phase 8 is mandatory before any mainnet capital is routed. Phase 8 changes are **additive** — they do not modify Phase 0–7 module logic; they add a single migration, a set of adapter methods, and worker discipline.
 
 ## 8.1 Migration — `20260101000012_production_hardening.sql`
 
@@ -4261,11 +4261,11 @@ CREATE INDEX idx_drops_window ON ingestion_drops (chain, dropped_at);
 
 ## 8.2 Adapter Methods (additive)
 
-See `docs/db_adapter_spec.md` § 2 — the "Production Hardening" block lists `ClaimNextEvents`, `IncrementEventRetry`, `MoveToDLQ`, `ClaimExecution`, `UpsertPositionFromExecution`, `ListOpenPositionsForReconciliation`, `AdjustPositionAmount`, `ClosePositionForced`, `InsertLatencyEvent`, `GetLatencyProfile`, `PromoteStrategyVersion`, `DrainAndCheckPipelineIdle`, `SetSystemHalt`, `IsSystemHalted`, `ComputeStateHash`, `RequeueFromDLQ`, `ListDLQ`.
+See `docs/reference/db_adapter_spec.md` § 2 — the "Production Hardening" block lists `ClaimNextEvents`, `IncrementEventRetry`, `MoveToDLQ`, `ClaimExecution`, `UpsertPositionFromExecution`, `ListOpenPositionsForReconciliation`, `AdjustPositionAmount`, `ClosePositionForced`, `InsertLatencyEvent`, `GetLatencyProfile`, `PromoteStrategyVersion`, `DrainAndCheckPipelineIdle`, `SetSystemHalt`, `IsSystemHalted`, `ComputeStateHash`, `RequeueFromDLQ`, `ListDLQ`.
 
 ## 8.3 Worker Discipline
 
-See `docs/orchestrator_spec.md` § 11. Every consumer worker MUST:
+See `docs/reference/orchestrator_spec.md` § 11. Every consumer worker MUST:
 
 1. Use `ClaimNextEvents` with strict `logical_order_key ASC` ordering
 2. Process within its assigned partition only (`HASHTEXT(token_address) % NumWorkers == workerID`)
@@ -4357,14 +4357,14 @@ A green replay validation is a hard merge gate to `main`.
 
 # Phase 9 — Profitability Restoration & Signal Integrity (P2+)
 
-> **Goal:** Restore the system from _functionally correct but unprofitable_ (~0.1 % of theoretical maximum, see `docs/PROFITABILITY_GAPS.md`) to _profit-capable production_. Every fix in Phase 9 closes a fabricated-data leak in one of the six profit factors of the canonical invariant `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality`. Phase 9 is **mandatory before any mainnet capital is routed**, comes immediately after Phase 8, and has the same merge-gate weight as Phase 8.
+> **Goal:** Restore the system from _functionally correct but unprofitable_ (~0.1 % of theoretical maximum, see `docs/analysis/profitability-gaps.md`) to _profit-capable production_. Every fix in Phase 9 closes a fabricated-data leak in one of the six profit factors of the canonical invariant `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality`. Phase 9 is **mandatory before any mainnet capital is routed**, comes immediately after Phase 8, and has the same merge-gate weight as Phase 8.
 >
 > **Architecture invariant — no drift.** Phase 9 introduces **zero** new pipeline layers, **zero** new DTO types, and **zero** modifications to the database adapter interface. All work is internal-to-module: replace stubbed values with real computations, wire already-defined model outputs into already-defined consumers, populate already-defined DTO fields. Architecture, layer count, event-routing table, and adapter signatures are unchanged.
 >
 > **Source-of-truth cross-references:**
 >
-> - Gap inventory and per-chain implementation tables: `docs/PROFITABILITY_GAPS.md` (canonical)
-> - Layer-by-layer specs: `docs/architecture.md` § 3.1 (DQ), § 3.2 (Features), § 3.4 (Models), § 3.7 (Capital), § 3.9 (Position), § 3.10 (Learning)
+> - Gap inventory and per-chain implementation tables: `docs/analysis/profitability-gaps.md` (canonical)
+> - Layer-by-layer specs: `docs/reference/architecture.md` § 3.1 (DQ), § 3.2 (Features), § 3.4 (Models), § 3.7 (Capital), § 3.9 (Position), § 3.10 (Learning)
 
 ## 9.0 Gap → Layer Mapping
 
@@ -4378,7 +4378,7 @@ A green replay validation is a hard merge gate to `main`.
 | **ALL**    | xfn   | [9.6 Failure Handling Matrix](#96-failure-handling-matrix-mandatory)               | Cross-module deterministic failure rules |
 | **GAP-06** | L10   | [9.7 Learning — Real Inputs](#97-learning-engine--real-signals)                    | `AdaptationQuality` 0.20 → compounding   |
 
-> **Lower-tier gaps (GAP-07 through GAP-17)** are deferred to follow-on hardening passes; they are tracked in `docs/PROFITABILITY_GAPS.md` and do not gate Phase 9 completion. The six gaps above collectively move the combined profit multiplier from ~0.1 % to an estimated 5–10 % of theoretical maximum (per `docs/PROFITABILITY_GAPS.md` § "Recommended Implementation Sequence").
+> **Lower-tier gaps (GAP-07 through GAP-17)** are deferred to follow-on hardening passes; they are tracked in `docs/analysis/profitability-gaps.md` and do not gate Phase 9 completion. The six gaps above collectively move the combined profit multiplier from ~0.1 % to an estimated 5–10 % of theoretical maximum (per `docs/analysis/profitability-gaps.md` § "Recommended Implementation Sequence").
 
 ### BLOCKERS
 
@@ -4424,7 +4424,7 @@ All updated DTOs continue to carry the four mandatory traceability fields per §
 
 ## 9.1 DataQuality — Real Detectors (CRITICAL)
 
-**Closes:** GAP-01 (`docs/PROFITABILITY_GAPS.md`). **Layer 1.** **All chains.**
+**Closes:** GAP-01 (`docs/analysis/profitability-gaps.md`). **Layer 1.** **All chains.**
 
 ### Objective
 
@@ -4507,7 +4507,7 @@ Input: `MarketDataDTO` from `market_data_event`. Output: `DataQualityDTO` on `da
 
 ### Detector Inventory (per chain)
 
-The exact RPC strategy per detector is canonical in `docs/PROFITABILITY_GAPS.md` § GAP-01 — reproduced here only as a checklist:
+The exact RPC strategy per detector is canonical in `docs/analysis/profitability-gaps.md` § GAP-01 — reproduced here only as a checklist:
 
 | Detector          | EVM (ETH/BSC)                                                         | Solana                                                     |
 | ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
@@ -4607,7 +4607,7 @@ A `risky-pass` Decision propagates downstream — Selection / Capital observe `D
 
 ## 9.2 Feature Extraction — Real Signals
 
-**Closes:** GAP-03 (`docs/PROFITABILITY_GAPS.md`). **Layer 2.** **All chains.**
+**Closes:** GAP-03 (`docs/analysis/profitability-gaps.md`). **Layer 2.** **All chains.**
 
 ### Objective
 
@@ -4663,13 +4663,13 @@ internal/modules/features/
 
 ### DTO Flow
 
-Input: `DataQualityDTO` on `data_quality_event` (already includes the underlying `MarketDataDTO`'s pool address and reserves). Output: `FeatureDTO` on `feature_event` with all eight numeric features populated and `Confidence` populated per § 9.2 of `docs/dto_contracts.md`.
+Input: `DataQualityDTO` on `data_quality_event` (already includes the underlying `MarketDataDTO`'s pool address and reserves). Output: `FeatureDTO` on `feature_event` with all eight numeric features populated and `Confidence` populated per § 9.2 of `docs/reference/dto_contracts.md`.
 
 > **DTO additions:** None. The `FeatureConfidence` struct already exists in `contracts/feature.go` (verified 2026-04-29). Phase 9 only populates fields; no schema change.
 
 ### Real-Signal Computation Map
 
-The exact computation per feature per chain is canonical in `docs/PROFITABILITY_GAPS.md` § GAP-03 — reproduced as the contract:
+The exact computation per feature per chain is canonical in `docs/analysis/profitability-gaps.md` § GAP-03 — reproduced as the contract:
 
 | Feature           | EVM compute                                                                | Solana compute                                            | Confidence target |
 | ----------------- | -------------------------------------------------------------------------- | --------------------------------------------------------- | ----------------- |
@@ -4748,7 +4748,7 @@ featMod := features.New(cfg.Features, evmRPC, solanaRPC, syncEventCache, normali
 
 ## 9.3 Probability Model — Wire the Existing Model
 
-**Closes:** GAP-04 (`docs/PROFITABILITY_GAPS.md`). **Layer 5 (Validation).** **All chains.**
+**Closes:** GAP-04 (`docs/analysis/profitability-gaps.md`). **Layer 5 (Validation).** **All chains.**
 
 ### Objective
 
@@ -4835,7 +4835,7 @@ p := probDTO.Probability     // sourced from ProbabilityModel.Predict(featureDTO
 
 ## 9.4 Capital Engine — Dynamic Sizing
 
-**Closes:** GAP-05 (`docs/PROFITABILITY_GAPS.md`). **Layer 7.** **All chains.**
+**Closes:** GAP-05 (`docs/analysis/profitability-gaps.md`). **Layer 7.** **All chains.**
 
 ### Objective
 
@@ -4890,7 +4890,7 @@ size_final = clamp(size_raw, min_size_usd, max_size_usd) // existing Phase 6 env
 | `BALANCED`    | **1.0**    | Default operating mode.                                              |
 | `EXPLORATION` | **1.3**    | Wider sizing AND tighter Kelly cap (`kelly_cap_exploration = 0.05`). |
 
-**Exploration band** (per `docs/architecture.md` § 7): when `selectionDTO.IsExploration=true`, sizing is overridden to a uniform draw in `[min_exploration_pct, max_exploration_pct]` of `total_capital_usd` (default 1–5 %), regardless of edge score — the system intentionally probes the FN frontier within a bounded budget.
+**Exploration band** (per `docs/reference/architecture.md` § 7): when `selectionDTO.IsExploration=true`, sizing is overridden to a uniform draw in `[min_exploration_pct, max_exploration_pct]` of `total_capital_usd` (default 1–5 %), regardless of edge score — the system intentionally probes the FN frontier within a bounded budget.
 
 ### Worker
 
@@ -4935,7 +4935,7 @@ Both are injected at worker construction.
 
 ## 9.5 Position Engine — Real Price Feed (CRITICAL)
 
-**Closes:** GAP-02 (`docs/PROFITABILITY_GAPS.md`). **Layer 9.** **All chains.**
+**Closes:** GAP-02 (`docs/analysis/profitability-gaps.md`). **Layer 9.** **All chains.**
 
 ### Objective
 
@@ -5291,7 +5291,7 @@ No new worker. `internal/workers/run_updater.go` continues to operate. Phase 9 c
 
 ### Configuration Tightening
 
-`config/pipeline.yaml learning` adjustments (per `docs/PROFITABILITY_GAPS.md` § GAP-14):
+`config/pipeline.yaml learning` adjustments (per `docs/analysis/profitability-gaps.md` § GAP-14):
 
 - `min_samples_for_update` raised from current default to `≥ 50`
 - Per-cohort multiplier updates **enabled** in `LearningConfig.UpdateCohortMultipliers=true`
@@ -5577,7 +5577,7 @@ Phase 9 is **complete** only when **all** of the following hold simultaneously o
 - [ ] **Capital dynamic** — `AllocationDTO.SizeUsd` over 200 fixtures shows `stddev > 30 %` of mean; mode-multiplier effect observable (STRICT ≈ 0.5× BALANCED); exploration band respected
 - [ ] **TP/SL working** — ≥ 80 % of position exits in a 1h replay are TP/SL/Trail (not `max_hold_seconds`); no `priceClient == nil` paths reachable; realized PnL right-tail observable
 - [ ] **Learning improving** — cohort centroid variance `> 0.15`; feature-importance Spearman ρ ≥ 0.7 across two consecutive 24h windows; ≥ 1 successful A/B promotion in 7-day testnet window
-- [ ] **No architecture drift** — `git diff main..phase-9 -- contracts/` shows only additive changes; `git diff main..phase-9 -- database/adapter.go` is empty; `git diff main..phase-9 -- docs/architecture.md` is non-substantive (Phase-9 status note only)
+- [ ] **No architecture drift** — `git diff main..phase-9 -- contracts/` shows only additive changes; `git diff main..phase-9 -- database/adapter.go` is empty; `git diff main..phase-9 -- docs/reference/architecture.md` is non-substantive (Phase-9 status note only)
 - [ ] **No SLO regression** — `executed_trade_latency_p95 < 1500 ms` holds (Phase 6 invariant)
 - [ ] **Per-stage SLAs respected** — DQ p95 ≤ 500 ms; Features p95 ≤ 200 ms; Probability predict p95 ≤ 50 ms; **total pipeline p95 ≤ 2000 ms**
 - [ ] **Stub-feature regression guard** — zero `LearningRecord` ingested with all-stub `FeatureDTO` over 24 h replay (per § 9.6 guard)

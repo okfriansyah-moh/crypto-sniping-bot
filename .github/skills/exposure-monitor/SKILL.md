@@ -288,8 +288,8 @@ exposure_monitor:
 
 ## References
 
-- `docs/architecture.md` § 3.7 — Capital Engine (Layer 7)
-- `docs/architecture-context/9_capital_engine.md` — Allocation sizing
+- `docs/reference/architecture.md` § 3.7 — Capital Engine (Layer 7)
+- `docs/archive/architecture-context/9_capital_engine.md` — Allocation sizing
 - `.github/skills/capital-sizing/SKILL.md` — Kelly-adjacent sizing
 - `.github/skills/drawdown-protection/SKILL.md` — HWM + drawdown tiers
 - `contracts/allocation.go` — `AllocationDTO`, `rejected`, `reject_reason` fields

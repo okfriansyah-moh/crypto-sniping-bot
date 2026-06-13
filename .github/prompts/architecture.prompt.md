@@ -1,11 +1,11 @@
 # Architecture Generation Prompt
 
-You are a Staff+ backend architect. Generate a complete `docs/architecture.md` for a new project based on the skeleton-parallel framework.
+You are a Staff+ backend architect. Generate a complete `docs/reference/architecture.md` for a new project based on the skeleton-parallel framework.
 
 ## Instructions
 
 1. Read `.github/copilot-instructions.md` for hard architectural constraints
-2. Read `docs/STARTER_GUIDE.md` for the expected document structure
+2. Read `docs/guides/STARTER_GUIDE.md` for the expected document structure
 3. Ask the user for:
    - **System goal** — What does this system do? (one sentence)
    - **Input** — What goes in?
@@ -15,7 +15,7 @@ You are a Staff+ backend architect. Generate a complete `docs/architecture.md` f
 
 ## Architecture Document Structure
 
-Generate `docs/architecture.md` with these sections:
+Generate `docs/reference/architecture.md` with these sections:
 
 ### 1. System Goal
 
@@ -82,4 +82,4 @@ Define thresholds, retry policies, and degradation strategies.
 
 ## Output
 
-Write the completed architecture to `docs/architecture.md`.
+Write the completed architecture to `docs/reference/architecture.md`.

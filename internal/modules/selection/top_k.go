@@ -22,7 +22,7 @@ type rankedCandidate struct {
 	score float64
 }
 
-// PickTopK implements the greedy Top-K algorithm from docs/PLAN.md §7.3.
+// PickTopK implements the greedy Top-K algorithm from docs/plans/2026-06-10-profit-restoration-plan.md §7.3.
 // Returns one SelectionOutputDTO per input item (deterministic order matches inputs).
 func PickTopK(
 	items []BatchItem,

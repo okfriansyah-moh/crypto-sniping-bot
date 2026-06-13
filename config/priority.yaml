@@ -40,7 +40,7 @@ execution:
 
 priority:
   # Operational mode thresholds (STRICT | BALANCED | EXPLORATION | VERY_EXPLORATION)
-  # See docs/architecture.md § 7 and docs/PLAN.md §7.1.
+  # See docs/reference/architecture.md § 7 and docs/plans/2026-06-10-profit-restoration-plan.md §7.1.
   #
   # Runtime lookup: Config.ResolveModeThresholds(mode) in internal/app/config/priority.go
   # Wired by workers in PLAN Tasks 2–4:

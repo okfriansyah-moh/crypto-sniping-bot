@@ -236,7 +236,7 @@ lr := LearningRecord{
 
 ## References
 
-- Architecture: `docs/architecture.md` § 2.1 (DTO Contracts), § 4.5 (DTO Registry)
-- Architecture context: `docs/architecture-context/2_system_backbone.md`
-- DTO spec: `docs/dto_contracts.md` (TraceFields on all DTOs)
-- Roadmap: `docs/implementation_roadmap.md` Phase 0 (foundation)
+- Architecture: `docs/reference/architecture.md` § 2.1 (DTO Contracts), § 4.5 (DTO Registry)
+- Architecture context: `docs/archive/architecture-context/2_system_backbone.md`
+- DTO spec: `docs/reference/dto_contracts.md` (TraceFields on all DTOs)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 0 (foundation)

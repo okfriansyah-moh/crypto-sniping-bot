@@ -314,9 +314,9 @@ execution:
 
 ## References
 
-- Architecture context: `docs/architecture-context/10_execution_engine.md`
-- DTO spec: `docs/dto_contracts.md` § 3.9 (ExecutionResultDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 2.8
+- Architecture context: `docs/archive/architecture-context/10_execution_engine.md`
+- DTO spec: `docs/reference/dto_contracts.md` § 3.9 (ExecutionResultDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.8
 - Config: `config/execution.yaml`
 - Related skill: `rpc-management` (circuit breaker, endpoint health)
 - `.github/skills/execution-quality-analyzer/SKILL.md` — Post-execution quality audit (slippage/fill/latency/cost-as-edge)

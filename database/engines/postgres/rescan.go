@@ -2,7 +2,7 @@ package postgres
 
 // rescan.go — Postgres implementation of Adapter.GetTokensForRescan.
 // Pure read-only query with parameterised SQL.
-// See docs/PLAN.md § Task 4 for design rationale.
+// See docs/plans/2026-06-10-profit-restoration-plan.md § Task 4 for design rationale.
 
 import (
 	"database/sql"

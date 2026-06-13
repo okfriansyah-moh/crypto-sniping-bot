@@ -9,15 +9,19 @@
 
 | Document                         | Purpose                                                                                                                                                                           |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/architecture.md`           | **Single source of truth.** Unified architecture — control system, 10-layer pipeline, backbone, meta systems, KPIs, operational modes. All other docs must be consistent with it. |
-| `docs/implementation_roadmap.md` | Phase-based implementation roadmap with schemas, algorithms, exit criteria, priority layers                                                                                       |
-| `docs/orchestrator_spec.md`      | Orchestrator specification — execution model, checkpointing, resume, idempotency, failure handling                                                                                |
-| `docs/dto_contracts.md`          | DTO definitions with all fields/types/constraints, cross-module dependency matrix, validation rules                                                                               |
-| `docs/db_adapter_spec.md`        | Database abstraction layer — adapter interface, SQL compatibility, migration strategy, engine portability                                                                         |
-| `docs/PARALLEL_DEV.md`           | Parallel development orchestration guide — 3-mode execution system, phase grouping, token optimization                                                                            |
-| `docs/AGENTS_AND_SKILLS.md`      | Agent/skill system — agents, skills, composition matrices, token optimization, parallel dev integration                                                                           |
-| `docs/STARTER_GUIDE.md`          | Getting started playbook — setup, architecture generation, roadmap generation, parallel system usage                                                                              |
-| `docs/PROGRESS_REPORT.md`        | Implementation status — completed work, test results, remaining items, phase-by-phase progress tracking                                                                           |
+| `docs/README.md`                 | **Documentation index** — start here; tier layout (`plans/`, `analysis/`, `archive/`, `specs/`)                                                                                  |
+| `docs/reference/architecture.md`           | **Single source of truth.** Unified architecture — control system, 10-layer pipeline, backbone, meta systems, KPIs, operational modes. All other docs must be consistent with it. |
+| `docs/reference/implementation_roadmap.md` | Phase-based implementation roadmap with schemas, algorithms, exit criteria, priority layers                                                                                       |
+| `docs/reference/orchestrator_spec.md`      | Orchestrator specification — execution model, checkpointing, resume, idempotency, failure handling                                                                                |
+| `docs/reference/dto_contracts.md`          | DTO definitions with all fields/types/constraints, cross-module dependency matrix, validation rules                                                                               |
+| `docs/reference/db_adapter_spec.md`        | Database abstraction layer — adapter interface, SQL compatibility, migration strategy, engine portability                                                                         |
+| `docs/guides/PARALLEL_DEV.md`           | Parallel development orchestration guide — 3-mode execution system, phase grouping, token optimization                                                                            |
+| `docs/guides/AGENTS_AND_SKILLS.md`      | Agent/skill system — agents, skills, composition matrices, token optimization, parallel dev integration                                                                           |
+| `docs/guides/STARTER_GUIDE.md`          | Getting started playbook — setup, architecture generation, roadmap generation, parallel system usage                                                                              |
+| `docs/ops/PROGRESS_REPORT.md`        | Implementation status — completed work, test results, remaining items, phase-by-phase progress tracking                                                                           |
+| `docs/plans/`                    | Executable implementation plans (task-numbered; see `plans/README.md`)                                                                                                            |
+| `docs/analysis/`                 | Dated investigations and certifications (historical context; see `analysis/README.md`)                                                                                              |
+| `docs/archive/`                  | Superseded chunks — e.g. `archive/architecture-context/` for layer-focused extracts                                                                                                 |
 | `contracts/`                     | Immutable DTO definitions — all modules MUST use these, not upstream sources or raw dicts/objects                                                                                 |
 | `config/`                        | YAML configuration files — all thresholds, paths, and tunable parameters live here                                                                                                |
 
@@ -38,19 +42,19 @@ When generating code, refer to these documents for exact schemas, DTO definition
 - Modules communicate **only** through immutable DTO types defined in `contracts/`
 - No direct imports between module internals — only public contracts
 - No raw dicts/maps/objects, no untyped data crossing module boundaries
-- See `docs/dto_contracts.md` for DTO definitions and validation rules
+- See `docs/reference/dto_contracts.md` for DTO definitions and validation rules
 
 ### Pipeline Architecture
 
 Stages execute in **strict sequential order** — never reorder, skip, or parallelize stages at runtime.
 
-**Canonical pipeline** (per `docs/architecture.md` § 1):
+**Canonical pipeline** (per `docs/reference/architecture.md` § 1):
 
 ```
 DETECT → FILTER → SCORE → SELECT → EXECUTE → EXIT → EVALUATE → ADJUST
 ```
 
-Mapped to the 10 layers (`docs/architecture.md` § 3):
+Mapped to the 10 layers (`docs/reference/architecture.md` § 3):
 
 ```
 Layer 0   Data Ingestion            (DEX events, new pool detection, MarketDataDTO)
@@ -98,7 +102,7 @@ If any factor → 0, profit → 0. Every change must preserve every factor.
 ### State Authority
 
 - **The database is the single source of truth** for all pipeline state
-- Define tables per domain in `docs/architecture.md`
+- Define tables per domain in `docs/reference/architecture.md`
 - Pipeline run states: `started → processing → completed | partial | failed`
 - Entity states: `created → queued → processed → completed | failed`
 - No in-memory-only state that isn't backed by the database
@@ -111,14 +115,14 @@ If any factor → 0, profit → 0. Every change must preserve every factor.
 - The adapter accepts and returns immutable DTOs — no raw rows, no dicts/maps
 - Only the orchestrator calls the adapter — modules never touch the database
 - All SQL uses portable syntax (`ON CONFLICT DO NOTHING`, not `INSERT OR IGNORE`)
-- See `docs/db_adapter_spec.md` for the full adapter interface and migration strategy
+- See `docs/reference/db_adapter_spec.md` for the full adapter interface and migration strategy
 
 ### Orchestrator Rules
 
 - The orchestrator is the **only** component that calls modules — modules never call each other
 - Checkpoint after every stage completion (write to database)
 - Resume from last successful checkpoint on restart
-- See `docs/orchestrator_spec.md` for the full execution model
+- See `docs/reference/orchestrator_spec.md` for the full execution model
 
 ### Orchestrator Authority Rule
 
@@ -143,23 +147,23 @@ Modules MUST:
 
 ## Sniper-Specific Architecture Invariants
 
-These rules extend the skeleton-parallel framework with the specific architecture defined in `docs/architecture.md`. All code generation MUST comply.
+These rules extend the skeleton-parallel framework with the specific architecture defined in `docs/reference/architecture.md`. All code generation MUST comply.
 
-### Event-Sourced Backbone (per `docs/architecture.md` § 2)
+### Event-Sourced Backbone (per `docs/reference/architecture.md` § 2)
 
 - **Append-only event bus** in Postgres (`events` table) is the authoritative log of all DTO transitions
 - Modules **publish events** (INSERT); they never mutate past events
 - **Workers consume via `SELECT ... FOR UPDATE SKIP LOCKED`** with `consumer_offsets` tracking — no polling queues, no in-memory queues
 - **Full state is reconstructible** from the event log alone (replay guarantee)
-- See `docs/architecture.md` § 2.2–2.3 for SQL and worker loop
+- See `docs/reference/architecture.md` § 2.2–2.3 for SQL and worker loop
 
-### Per-Market Isolation (per `docs/architecture.md` § 2.4)
+### Per-Market Isolation (per `docs/reference/architecture.md` § 2.4)
 
 - The pipeline runs **one independent instance per market** (`eth-uniswap-v2`, `bsc-pancake-v2`, etc.)
 - No cross-market coupling — each market has isolated configs, workers, checkpoints
 - Horizontal scalability = add more market workers; no shared mutable state
 
-### Rescan Worker — Layer 0.5 (per `docs/architecture.md` § 3.0.5, `docs/RESCAN_PLAN.md`)
+### Rescan Worker — Layer 0.5 (per `docs/reference/architecture.md` § 3.0.5, `docs/plans/2026-05-10-rescan-plan.md`)
 
 - **Pure DB reader + event emitter** — no RPC, no on-chain calls, no private keys, no new event types or DTOs
 - Re-emits `market_data_event` at **14 fixed age bands (15m → 48h)** across two phases:
@@ -171,21 +175,21 @@ These rules extend the skeleton-parallel framework with the specific architectur
 - **Fully generic**: worker iterates `cfg.Rescan.Bands` at runtime — add/remove bands via `config/pipeline.yaml` only, no code changes
 - **Configured in:** `config/pipeline.yaml` → `rescan:` block (enabled by default); defaults in `internal/app/config/rescan_config.go`
 
-### Telegram via Event Bus Only (per `docs/architecture.md` § 2.5, § 4.4)
+### Telegram via Event Bus Only (per `docs/reference/architecture.md` § 2.5, § 4.4)
 
 - Modules **MUST NOT** call Telegram APIs directly
 - All user-facing events emit to `events` → dedicated **Telegram dispatcher service** reads from the bus and sends messages
 - Operator commands (`/status`, `/mode`, `/pnl`, `/positions`, `/executions`, `/kill`, `/resume`, `/version`) are logged and require confirmation for destructive actions
 - No remote code execution via Telegram — ever
 
-### Strategy Versioning & Replay (per `docs/architecture.md` § 4.1–4.2)
+### Strategy Versioning & Replay (per `docs/reference/architecture.md` § 4.1–4.2)
 
 - Every configuration update creates an **immutable `StrategyVersion`** — thresholds, feature weights, model params, cohort multipliers
 - Every trade logs `strategy_version_id` for attribution
 - **A/B promotion is bounded**: promote only if `expectancy(V2) > expectancy(V1) × 1.05` AND `drawdown(V2) ≤ drawdown(V1)` AND `N ≥ 30–50` samples
 - **Replay must be bit-for-bit deterministic**: no wall-clock dependencies, no randomness, no external nondeterministic calls — use event timestamps only
 
-### Operational Modes (per `docs/architecture.md` § 7)
+### Operational Modes (per `docs/reference/architecture.md` § 7)
 
 The system runs in exactly one of four modes at any time:
 
@@ -196,7 +200,7 @@ The system runs in exactly one of four modes at any time:
 
 Mode transitions are **bounded**: one transition per window, auto-downgrade on starvation, auto-upgrade on rug/FP spike, manual override via `/mode` (logged, reversible). Values live in `config/` YAML.
 
-### Learning Safety (per `docs/architecture.md` § 3.10.12, § 5.3)
+### Learning Safety (per `docs/reference/architecture.md` § 3.10.12, § 5.3)
 
 All adaptive updates are non-negotiably:
 
@@ -207,7 +211,7 @@ All adaptive updates are non-negotiably:
 - **Single-family per cycle** — never tune multiple parameter families simultaneously (prevents oscillation)
 - **Must store rejected shadow trades** in `LearningRecord` — without them false negatives cannot be computed
 
-### Execution Engine Rules (per `docs/architecture.md` § 3.8)
+### Execution Engine Rules (per `docs/reference/architecture.md` § 3.8)
 
 - **Wallet sharding is mandatory** — `hash(TokenAddress) % n` or round-robin; one in-flight tx per wallet; strictly increasing nonce per wallet
 - **Prebuilt calldata** on hot path — no recomputation during submission
@@ -231,7 +235,7 @@ All adaptive updates are non-negotiably:
   2. **No real social profile / website** — tokens with no profile-level Twitter/X (profile URL, not tweet link) or Telegram and no real project website are REJECTED via `no_social_links`. Websites pointing to DEX scanners, pump.fun pages, or known non-project domains (dexscreener.com, birdeye.so, solscan.io, raydium.io, jup.ag, etc.) are not accepted. When the metadata probe fails (`SocialLinksKnown=false`), reject via `unknown_social_links` (fail-closed). Config: `reject_unknown_social_links: true`.
   3. **Excessive total supply** — tokens with supply > `max_total_supply` (1B canonical) are REJECTED via `high_total_supply`. When the LP probe fails (`TotalSupplyKnown=false`), reject via `unknown_total_supply` (fail-closed). Config: `reject_unknown_total_supply: true`.
 
-  **Never add conditional logic that bypasses these three rejects.** The canonical implementation is in `internal/modules/data_quality/data_quality.go` (`ProcessForMode`) and `internal/modules/probes/solana_metadata.go` (`isSocialProfileURL`, `isTwitterProfileURL`, `isBlockedWebsiteDomain`, `isSocialMediaWebsiteDomain`). See `docs/architecture.md` § 3.1.11 for the canonical specification.
+  **Never add conditional logic that bypasses these three rejects.** The canonical implementation is in `internal/modules/data_quality/data_quality.go` (`ProcessForMode`) and `internal/modules/probes/solana_metadata.go` (`isSocialProfileURL`, `isTwitterProfileURL`, `isBlockedWebsiteDomain`, `isSocialMediaWebsiteDomain`). See `docs/reference/architecture.md` § 3.1.11 for the canonical specification.
 
   **Twitter/X profile URL validation rules** (enforced in `isTwitterProfileURL` via `net/url.Parse` — positive validation):
   - Allowed hosts: `twitter.com`, `www.twitter.com`, `x.com`, `www.x.com` only
@@ -247,7 +251,7 @@ All adaptive updates are non-negotiably:
   - Blocked domains: `twitter.com`, `x.com`, `t.me`, `telegram.me`, `telegram.org`, `discord.com`, `discord.gg`, `discordapp.com`, `facebook.com`, `fb.com`, `instagram.com`, `tiktok.com`, `youtube.com`, `youtu.be`, `medium.com`, `linktr.ee`, `reddit.com`, `bio.link`
   - DEX-scanner / pump-platform domains are blocked separately via `isBlockedWebsiteDomain`
 
-### DTO Contract Rules (per `docs/architecture.md` § 2.1, § 4.5)
+### DTO Contract Rules (per `docs/reference/architecture.md` § 2.1, § 4.5)
 
 The canonical DTO registry — no ad-hoc types allowed:
 
@@ -275,12 +279,12 @@ Do not introduce any of these unless the project explicitly requires them:
 | Cloud        | AWS, GCP, Azure, any cloud compute or storage                                                                | Unless project needs |
 | Runtime      | Agent loops, autonomous planners, async message brokers (Kafka/RabbitMQ/NATS) outside the Postgres event bus | Unless project needs |
 
-> **Override policy:** If your project legitimately requires a forbidden technology (e.g., Redis for caching, Docker for deployment, OpenAI for an LLM-powered feature), document the justification in `docs/architecture.md` and proceed. The defaults exist to prevent accidental complexity, not to block valid requirements.
+> **Override policy:** If your project legitimately requires a forbidden technology (e.g., Redis for caching, Docker for deployment, OpenAI for an LLM-powered feature), document the justification in `docs/reference/architecture.md` and proceed. The defaults exist to prevent accidental complexity, not to block valid requirements.
 
 ### Database Engine Policy
 
 - **The database engine is project-specific.** Choose the appropriate engine when setting up a new project.
-- **Supported engines are configured via `database/adapter.*`.** See `docs/db_adapter_spec.md`.
+- **Supported engines are configured via `database/adapter.*`.** See `docs/reference/db_adapter_spec.md`.
 - **Modules MUST remain database-agnostic.** No module may reference any specific database engine.
 - Direct use of any database driver in `app/modules/` is forbidden.
 - The adapter is the **sole abstraction boundary** — switching engines requires changes only in `database/`.
@@ -367,7 +371,7 @@ Each concept or specification MUST have **one canonical location** across all `d
 **MUST:**
 
 - Identify the **canonical document** for each concept using the Reference Documents table above
-- Use cross-references: "See `docs/orchestrator_spec.md` § Failure Handling" instead of restating the rules
+- Use cross-references: "See `docs/reference/orchestrator_spec.md` § Failure Handling" instead of restating the rules
 - When a document needs summarized context from another, keep it to a one-line summary + cross-reference
 - Before adding a new section to any `docs/` file, verify no existing document already covers that topic
 - Each document owns its domain — `architecture.md` owns system design, `orchestrator_spec.md` owns execution model, `PARALLEL_DEV.md` owns parallel development, etc.
@@ -376,15 +380,15 @@ Each concept or specification MUST have **one canonical location** across all `d
 
 | Topic                        | Canonical Document               |
 | ---------------------------- | -------------------------------- |
-| System architecture & design | `docs/architecture.md`           |
-| Pipeline execution model     | `docs/orchestrator_spec.md`      |
-| DTO definitions & rules      | `docs/dto_contracts.md`          |
-| Database adapter interface   | `docs/db_adapter_spec.md`        |
-| Parallel development         | `docs/PARALLEL_DEV.md`           |
-| Agent/skill system           | `docs/AGENTS_AND_SKILLS.md`      |
-| Implementation phases        | `docs/implementation_roadmap.md` |
-| Getting started              | `docs/STARTER_GUIDE.md`          |
-| Progress tracking            | `docs/PROGRESS_REPORT.md`        |
+| System architecture & design | `docs/reference/architecture.md`           |
+| Pipeline execution model     | `docs/reference/orchestrator_spec.md`      |
+| DTO definitions & rules      | `docs/reference/dto_contracts.md`          |
+| Database adapter interface   | `docs/reference/db_adapter_spec.md`        |
+| Parallel development         | `docs/guides/PARALLEL_DEV.md`           |
+| Agent/skill system           | `docs/guides/AGENTS_AND_SKILLS.md`      |
+| Implementation phases        | `docs/reference/implementation_roadmap.md` |
+| Getting started              | `docs/guides/STARTER_GUIDE.md`          |
+| Progress tracking            | `docs/ops/PROGRESS_REPORT.md`        |
 
 ---
 
@@ -584,21 +588,21 @@ These files/directories have strict modification rules during parallel developme
 | `contracts/*`             | **Additive only** — new DTOs allowed, existing fields never modified                                                                                                              |
 | `database/*`              | **Migrations immutable** — new migrations and adapter/engine additions allowed in any phase; existing migration files in `database/migrations/` must never be modified or deleted |
 | `docs/*`                  | **Read-only** — no agent may modify documentation                                                                                                                                 |
-| `docs/PROGRESS_REPORT.md` | **Exception** — must be updated after each phase completion (see below)                                                                                                           |
+| `docs/ops/PROGRESS_REPORT.md` | **Exception** — must be updated after each phase completion (see below)                                                                                                           |
 | `config/*`                | **Append-only** — new keys allowed, existing keys never removed                                                                                                                   |
 
 ### PROGRESS_REPORT.md Exception
 
-`docs/PROGRESS_REPORT.md` is the **sole writable file** under `docs/`. It tracks implementation
+`docs/ops/PROGRESS_REPORT.md` is the **sole writable file** under `docs/`. It tracks implementation
 status and must be kept current:
 
 - **Automated:** `run_parallel.sh` updates it automatically on pipeline success/failure/rollback.
 - **Manual:** After any manual implementation session, update Phase Progress, Agent Pipeline
-  Results, Quality Gates, and Session History tables in `docs/PROGRESS_REPORT.md`.
+  Results, Quality Gates, and Session History tables in `docs/ops/PROGRESS_REPORT.md`.
 - **Agents:** The `phase-builder` agent updates it after completing a phase.
 - **All other `docs/` files remain strictly read-only.** Never modify `architecture.md`,
   `dto_contracts.md`, `orchestrator_spec.md`, `db_adapter_spec.md`, `implementation_roadmap.md`,
-  `PARALLEL_DEV.md`, `AGENTS_AND_SKILLS.md`, `STARTER_GUIDE.md`, or any file in `docs/architecture-context/`.
+  `PARALLEL_DEV.md`, `AGENTS_AND_SKILLS.md`, `STARTER_GUIDE.md`, or any file in `docs/archive/architecture-context/`.
 
 ---
 

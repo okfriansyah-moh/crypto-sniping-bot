@@ -136,7 +136,7 @@ func (w *EdgeWorker) Process(ctx context.Context, evt *database.Event) (*databas
 }
 
 // resolveEdgeStrengthMin maps the active operational mode to edge_strength_min
-// from config/priority.yaml via Config.ResolveModeThresholds (docs/PLAN.md Task 3).
+// from config/priority.yaml via Config.ResolveModeThresholds (docs/plans/2026-06-10-profit-restoration-plan.md Task 3).
 func (w *EdgeWorker) resolveEdgeStrengthMin(ctx context.Context) float64 {
 	sysMode := "balanced"
 	if w.cfg != nil && w.cfg.Priority.ActiveMode != "" {

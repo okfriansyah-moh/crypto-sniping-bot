@@ -236,7 +236,7 @@ if pnlPct >= cfg.TP1 && pos.ExitStage == "none" { return sellPartial("tp1_hit") 
 
 ## Phase 9 Notes (Profitability Restoration)
 
-Per `docs/implementation_roadmap.md` § 9.5, Phase 9 closes **GAP-02** by wiring a real
+Per `docs/reference/implementation_roadmap.md` § 9.5, Phase 9 closes **GAP-02** by wiring a real
 `PriceClient` into `RunPositionPoll`. Without this, every TP/SL/Trail rule in this skill
 is dead code — positions exit only on `max_hold_seconds` time expiry. **This is the
 single highest-impact fix in Phase 9.**
@@ -262,7 +262,7 @@ pattern, failure handling).
 
 ## References
 
-- Architecture context: `docs/architecture-context/11_position_engine.md`
-- DTO spec: `docs/dto_contracts.md` § 3.10 (PositionStateDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 2.9
+- Architecture context: `docs/archive/architecture-context/11_position_engine.md`
+- DTO spec: `docs/reference/dto_contracts.md` § 3.10 (PositionStateDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.9
 - Config: `config/position.yaml`, `config/cohorts.yaml`

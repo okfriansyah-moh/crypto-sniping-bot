@@ -6,7 +6,7 @@ package workers
 //
 // Architecture: Layer 0.5 (between raw ingestion and DQ). Re-uses the
 // existing market_data_event type so the downstream pipeline is unchanged.
-// See docs/PLAN.md § Task 5 for full design rationale.
+// See docs/plans/2026-06-10-profit-restoration-plan.md § Task 5 for full design rationale.
 
 import (
 	"context"

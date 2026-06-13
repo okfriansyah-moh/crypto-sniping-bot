@@ -48,7 +48,7 @@ For every stage boundary (output of stage N → input of stage N+1):
 
 ### 2. Pipeline Flow Verification
 
-Using the stage sequence from `docs/architecture.md`, verify:
+Using the stage sequence from `docs/reference/architecture.md`, verify:
 
 - Each stage's output DTO matches the next stage's expected input
 - Aggregation points (fan-in) correctly combine multiple DTOs
@@ -95,9 +95,9 @@ def test_stage_a_to_stage_b():
 
 Before any work, read:
 
-1. `docs/orchestrator_spec.md` — execution model, stage ordering, checkpoint behavior
-2. `docs/dto_contracts.md` — input/output DTO compatibility
-3. `docs/db_adapter_spec.md` — database adapter interface and SQL compatibility rules
+1. `docs/reference/orchestrator_spec.md` — execution model, stage ordering, checkpoint behavior
+2. `docs/reference/dto_contracts.md` — input/output DTO compatibility
+3. `docs/reference/db_adapter_spec.md` — database adapter interface and SQL compatibility rules
 4. `.github/copilot-instructions.md` — hard architectural constraints
 
 ## Output

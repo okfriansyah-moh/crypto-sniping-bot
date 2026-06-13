@@ -339,10 +339,10 @@ Full offline scenario matrix — production thresholds, mock inputs only, DQ gua
 
 ```bash
 make battle-test
-# docs: docs/BATTLE_TESTED.md
+# docs: docs/analysis/battle-tested-certification.md
 ```
 
-Expect `BATTLE_TEST: 11/11 scenarios passed` and `BATTLE_TEST_CERTIFICATION: READY`. AI agents may cite `docs/BATTLE_TESTED.md` as proof the pipeline mechanics and capital-defense paths are regression-tested.
+Expect `BATTLE_TEST: 11/11 scenarios passed` and `BATTLE_TEST_CERTIFICATION: READY`. AI agents may cite `docs/analysis/battle-tested-certification.md` as proof the pipeline mechanics and capital-defense paths are regression-tested.
 
 ---
 
@@ -454,7 +454,7 @@ Every stage emits a structured JSON log line. Use these `msg` field values with 
 | L9    | `position_closed`     | `exit_reason` (TP1/TP2/SL/TIME/FORCE), `pnl_bps`, `hold_seconds`        |
 | L10   | `learning_record`     | `outcome`, `loss_bucket`, `strategy_version_id`                         |
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design and invariants.
+See [`docs/reference/architecture.md`](docs/reference/architecture.md) for the full design and invariants.
 
 ### AI Enrichment Flow (Cross-Cutting Layers 0/1/3/10)
 
@@ -731,16 +731,16 @@ crypto-sniping-bot/
 │   ├── validate_pipeline_proof.sh    # PIPELINE_PROOF acceptance harness (Task 18)
 │   ├── validate_phase2_acceptance.sh # Phase 2 full §1.1 acceptance gate (Task 19)
 │   └── run_parallel.sh             # Parallel development orchestrator (3-mode)
-├── docs/                       # Architecture specs and implementation roadmap
-│   ├── architecture.md         # Single source of truth — system design
-│   ├── implementation_roadmap.md # Phase-by-phase build guide (execution-grade)
-│   ├── dto_contracts.md        # DTO registry — all fields, types, constraints
-│   ├── db_adapter_spec.md      # Database adapter interface + migration strategy
-│   ├── orchestrator_spec.md    # Orchestrator execution model, checkpointing, resume
-│   ├── PARALLEL_DEV.md         # Parallel development operator guide
-│   ├── AGENTS_AND_SKILLS.md    # Agent and skill registry
-│   ├── PROGRESS_REPORT.md      # Implementation phase progress tracking
-│   └── STARTER_GUIDE.md        # Getting started playbook (beginner-friendly)
+├── docs/                       # Documentation — see docs/README.md
+│   ├── README.md               # Index (only file at docs root besides REDIRECTS.md)
+│   ├── reference/              # Canonical specs (architecture, DTOs, DB, orchestrator)
+│   ├── guides/                   # STARTER_GUIDE, PARALLEL_DEV, AGENTS_AND_SKILLS
+│   ├── ops/                      # PROGRESS_REPORT
+│   ├── plans/                    # Implementation plans
+│   ├── analysis/                 # Dated investigations
+│   ├── specs/                    # Pre-plan design specs
+│   ├── archive/                  # Superseded chunks
+│   └── mockups/                  # UI mockups
 ├── tests/
 │   ├── unit/                   # Unit tests per module
 │   ├── integration/            # End-to-end pipeline wiring tests
@@ -777,7 +777,7 @@ crypto-sniping-bot/
 
 **Group rules:** Groups A → B → C → D are sequential. Phases within the same group may run in parallel.
 
-See [`docs/implementation_roadmap.md`](docs/implementation_roadmap.md) for exact file paths, function signatures, and exit criteria per phase.
+See [`docs/reference/implementation_roadmap.md`](docs/reference/implementation_roadmap.md) for exact file paths, function signatures, and exit criteria per phase.
 
 ---
 
@@ -803,7 +803,7 @@ Each phase runs through a mandatory agent pipeline:
 phase-builder → dto-guardian → integration → security-auditor → test-builder → refactor (remediation only)
 ```
 
-See [`docs/PARALLEL_DEV.md`](docs/PARALLEL_DEV.md) for the full operator guide, model routing, phase grouping, and parallel safety invariants.
+See [`docs/guides/PARALLEL_DEV.md`](docs/guides/PARALLEL_DEV.md) for the full operator guide, model routing, phase grouping, and parallel safety invariants.
 
 ---
 
@@ -953,19 +953,18 @@ All values below live in `config/pipeline.yaml` unless noted.
 | `ai_enrichment.narrative_probe.copy_paste_rug_reject` | `false`        | Hard-reject (not soft) on copy-paste detection when `true`                          |
 | `ai_enrichment.loss_explainer.enabled`                | `false`        | Enable `LossExplainer` (Layer 10); adds AI category + reason to `LearningRecordDTO` |
 
-See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION` / `VERY_EXPLORATION`).
+See [`docs/reference/architecture.md § 7`](docs/reference/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION` / `VERY_EXPLORATION`).
 
 ---
 
 ## Documentation
 
-| Document                                                           | Purpose                                                       |
-| ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| [`docs/architecture.md`](docs/architecture.md)                     | System design, pipeline layers, invariants, operational modes |
-| [`docs/implementation_roadmap.md`](docs/implementation_roadmap.md) | Phase-by-phase build guide with exact code                    |
-| [`docs/dto_contracts.md`](docs/dto_contracts.md)                   | DTO registry — all fields, types, constraints                 |
-| [`docs/db_adapter_spec.md`](docs/db_adapter_spec.md)               | Database adapter interface + migration strategy               |
-| [`docs/orchestrator_spec.md`](docs/orchestrator_spec.md)           | Orchestrator execution model and checkpointing                |
-| [`docs/PARALLEL_DEV.md`](docs/PARALLEL_DEV.md)                     | Parallel development operator guide                           |
-| [`docs/AGENTS_AND_SKILLS.md`](docs/AGENTS_AND_SKILLS.md)           | Agent and skill registry (41 skills, 12 agents)               |
-| [`docs/PROGRESS_REPORT.md`](docs/PROGRESS_REPORT.md)               | Live phase progress tracking                                  |
+**Start at [`docs/README.md`](docs/README.md)** — seven folders, no loose spec files at root. Old bookmarks: [`docs/REDIRECTS.md`](docs/REDIRECTS.md).
+
+| Folder | Purpose |
+| ------ | ------- |
+| [`docs/reference/`](docs/reference/) | Canonical specs (architecture, DTOs, DB, orchestrator, roadmap) |
+| [`docs/guides/`](docs/guides/) | STARTER_GUIDE, PARALLEL_DEV, AGENTS_AND_SKILLS |
+| [`docs/ops/`](docs/ops/) | PROGRESS_REPORT |
+| [`docs/plans/`](docs/plans/) | Executable implementation plans |
+| [`docs/analysis/`](docs/analysis/) | Dated investigations and certifications |

@@ -20,7 +20,7 @@ import (
 //   - Routes DTOs between modules
 //   - Handles failures (decides retry, skip, or abort)
 //
-// See docs/orchestrator_spec.md for the full execution model.
+// See docs/reference/orchestrator_spec.md for the full execution model.
 type Orchestrator struct {
 	db        database.Adapter
 	cfg       *config.Config

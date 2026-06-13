@@ -3,7 +3,7 @@
 // Consumes FeatureDTO and emits EdgeDTO. Pure function: no DB, no
 // network, no clocks except those injected via ProcessWithContext.
 //
-// Taxonomy (canonical — see docs/architecture.md § 3.3 and the
+// Taxonomy (canonical — see docs/reference/architecture.md § 3.3 and the
 // edge-detection / momentum-detector / signal-normalizer skills):
 //
 //	NEW_LAUNCH_EDGE — fires on freshly created pools (age <
@@ -246,7 +246,7 @@ func (m *Module) ProcessWithContext(
 }
 
 // applyModeStrengthFloor rejects a qualifying edge whose strength is below
-// the operational-mode floor from config/priority.yaml (docs/PLAN.md Task 3).
+// the operational-mode floor from config/priority.yaml (docs/plans/2026-06-10-profit-restoration-plan.md Task 3).
 func applyModeStrengthFloor(chosen edgeCandidate, edgeStrengthMin float64) edgeCandidate {
 	if chosen.edgeType == contracts.EdgeTypeNone || edgeStrengthMin <= 0 {
 		return chosen

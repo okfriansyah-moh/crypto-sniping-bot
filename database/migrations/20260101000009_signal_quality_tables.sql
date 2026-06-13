@@ -1,6 +1,6 @@
 -- Phase 4 Signal Quality projections: probability, slippage, latency models.
 -- All SQL uses portable syntax: ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP.
--- See docs/implementation_roadmap.md § Phase 4 and docs/db_adapter_spec.md.
+-- See docs/reference/implementation_roadmap.md § Phase 4 and docs/reference/db_adapter_spec.md.
 
 BEGIN;
 

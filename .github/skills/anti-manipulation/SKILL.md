@@ -429,9 +429,9 @@ for _, f := range flags {
 
 ## References
 
-- Architecture context: `docs/architecture-context/3_data_quality_engine.md`
-- Architecture: `docs/architecture.md` § 3.1 (Data Quality Engine)
-- DTO spec: `docs/dto_contracts.md` § 3.2 (DataQualityDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 2.1
+- Architecture context: `docs/archive/architecture-context/3_data_quality_engine.md`
+- Architecture: `docs/reference/architecture.md` § 3.1 (Data Quality Engine)
+- DTO spec: `docs/reference/dto_contracts.md` § 3.2 (DataQualityDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.1
 - Config: `config/data_quality.yaml`
 - `.github/skills/liquidity-event-detector/SKILL.md` — Full cascade + imbalance algorithms

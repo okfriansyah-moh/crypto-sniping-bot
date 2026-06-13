@@ -4,7 +4,7 @@
 > **Date:** 2026-06-10
 > **Author:** Plan Management (from production gate review + prior codebase review)
 > **Status:** Phase 1 complete (Tasks 1–12 ✅ 2026-06-10) · Phase 2 complete (Tasks 13–19 ✅ 2026-06-10)
-> **Source of Truth:** Phase 1 — `docs/architecture.md` §3.6–3.10 + `docs/PROFITABILITY_GAPS.md` · Phase 2 — production gate review `output/logs/gate_*_20260612_174145.*` + `docs/architecture.md` §3.1 (L0/L1)
+> **Source of Truth:** Phase 1 — `docs/reference/architecture.md` §3.6–3.10 + `docs/analysis/profitability-gaps.md` · Phase 2 — production gate review `output/logs/gate_*_20260612_174145.*` + `docs/reference/architecture.md` §3.1 (L0/L1)
 > **Pipeline Layers Affected:** L0, L1, L10, Platform (ingestion, probes workers, DB adapter, gate scripts)
 > **Profit Factors Affected:** DataQuality, AdaptationQuality (Phase 2 restores pipeline proof → enables all downstream factors)
 
@@ -217,9 +217,9 @@ Task 19 (Tests + build validation + PROGRESS_REPORT.md) ✅
 
 ### Task Completion Protocol (required for every task)
 
-A task is **not complete** until all validation commands pass **and** `docs/PROGRESS_REPORT.md` is updated in the same session. Do not defer the progress report to Task 12.
+A task is **not complete** until all validation commands pass **and** `docs/ops/PROGRESS_REPORT.md` is updated in the same session. Do not defer the progress report to Task 12.
 
-**After completing Tasks 1–11**, append a row to the progress log in `docs/PROGRESS_REPORT.md` with:
+**After completing Tasks 1–11**, append a row to the progress log in `docs/ops/PROGRESS_REPORT.md` with:
 
 | Field  | What to record                                                                       |
 | ------ | ------------------------------------------------------------------------------------ |
@@ -228,9 +228,9 @@ A task is **not complete** until all validation commands pass **and** `docs/PROG
 | Status | `completed`                                                                          |
 | Notes  | Files changed, key behavior delivered, `go build` / `go vet` / `go test` exit status |
 
-Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and `Task *` entries). Update the **Last Updated** date in the Summary section.
+Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*` and `Task *` entries). Update the **Last Updated** date in the Summary section.
 
-**Task 12** additionally records plan-level completion (all 12 tasks done, link to `docs/PLAN.md`).
+**Task 12** additionally records plan-level completion (all 12 tasks done, link to `docs/plans/2026-06-10-profit-restoration-plan.md`).
 
 ---
 
@@ -255,7 +255,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/app/config/...`: all packages green
 
 **Prompt context needed:** §7.1 mode table
@@ -285,7 +285,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/validation/... ./internal/workers/...`: all packages green
 
 **Prompt context needed:** §7.1, §7.2 EV formula
@@ -314,7 +314,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/edge/...`: all packages green
 
 ---
@@ -345,7 +345,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/selection/...`: all packages green
 
 **Prompt context needed:** §7.3 selection algorithm
@@ -376,7 +376,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/learning/...`: all packages green
 
 ---
@@ -402,7 +402,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/evaluation/...`: all packages green
 
 ---
@@ -429,7 +429,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/ingestion_solana/...`: all packages green
 
 **Prompt context needed:** §7.4 Helius credit rules
@@ -460,7 +460,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/probes/...`: all packages green
 
 ---
@@ -487,7 +487,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/ingestion_solana/...`: all packages green
 
 ---
@@ -517,7 +517,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/rpc/... ./internal/modules/position/...`: all packages green
 
 ---
@@ -544,20 +544,20 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./internal/modules/health/...`: all packages green
 
 ---
 
 ### Task 12 — Tests, Build Validation, PROGRESS_REPORT ✅
 
-**Goal:** Full green build; record plan-level completion in `docs/PROGRESS_REPORT.md` (per-task entries for Tasks 1–11 must already exist).
+**Goal:** Full green build; record plan-level completion in `docs/ops/PROGRESS_REPORT.md` (per-task entries for Tasks 1–11 must already exist).
 
 **Layer(s) affected:** Platform
 
 **Files to create/modify:**
 
-- `docs/PROGRESS_REPORT.md` (modify) — append final plan completion entry (`docs/PLAN.md` — all 12 tasks done); verify Tasks 1–11 each have their own row
+- `docs/ops/PROGRESS_REPORT.md` (modify) — append final plan completion entry (`docs/plans/2026-06-10-profit-restoration-plan.md` — all 12 tasks done); verify Tasks 1–11 each have their own row
 
 **Invariant check:**
 
@@ -567,7 +567,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
-- `docs/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry for this task (see §4 Task Completion Protocol) — **required**
 - `go test ./...`: all packages green
 
 ---
@@ -609,7 +609,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
 - `go test ./internal/modules/ingestion_solana/...`: all packages green (new WSOL regression tests pass)
-- `docs/PROGRESS_REPORT.md`: append completion entry — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry — **required**
 
 **Prompt context needed:** §7.10 MarketDataDTO mint fields, §7.11 Gate run evidence
 
@@ -652,7 +652,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
 - `go test ./internal/modules/ingestion_solana/... ./internal/workers/...`: all packages green
-- `docs/PROGRESS_REPORT.md`: append completion entry — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry — **required**
 
 **Prompt context needed:** §7.10, §7.12 Creator profile aggregator rules
 
@@ -688,7 +688,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 - `go vet ./...`: zero vet issues
 - `go test ./database/engines/postgres/...`: all packages green
 - Manual: 5-minute run shows **zero** `shadow_observer_failed` lines
-- `docs/PROGRESS_REPORT.md`: append completion entry — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry — **required**
 
 **Prompt context needed:** §7.13 Shadow trade schema
 
@@ -728,7 +728,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 - `go build ./...`: zero build errors
 - `go vet ./...`: zero vet issues
 - `go test ./internal/modules/ingestion_solana/...`: all packages green
-- `docs/PROGRESS_REPORT.md`: append completion entry with yield metrics — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry with yield metrics — **required**
 
 **Prompt context needed:** §7.14 Raydium-v4 account layout, §7.11 gate evidence
 
@@ -765,7 +765,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - Run `scripts/gate_review_collect.sh` against existing `gate_clean_20260612_174145.log` — must classify `THROUGHPUT_VERDICT: CODE_DEFECT`
 - After Tasks 13–16 deployed, 30-minute run must show `wsol_token_address_emitted=0`
-- `docs/PROGRESS_REPORT.md`: append completion entry — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry — **required**
 
 **Prompt context needed:** §1.1 success criteria table
 
@@ -783,7 +783,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
   - **PASS** iff `traces_completed >= 1` AND `duplicate_execution == 0` AND `wsol_token_address_emitted == 0`
   - Exit code 0 = PASS, 1 = FAIL with single-line reason
   - Print `PRODUCTION_DECISION: SHADOW_READY | NOT_READY`
-- `docs/PLAN.md` (modify) — cross-link script in §6 (this file)
+- `docs/plans/2026-06-10-profit-restoration-plan.md` (modify) — cross-link script in §6 (this file)
 - `Makefile` or `scripts/README` (modify if exists) — add `make gate-proof` target wrapping collect + validate
 
 **Invariant check:**
@@ -795,7 +795,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 - Against `gate_20260612_174145` artifacts: exit code **1**, reason `traces_completed=0`
 - Against synthetic fixture log with 1 full trace: exit code **0**
-- `docs/PROGRESS_REPORT.md`: append completion entry — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry — **required**
 
 **Prompt context needed:** §1.1, §7.15 Pipeline proof trace sequence
 
@@ -809,7 +809,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 
 **Files to create/modify:**
 
-- `docs/PROGRESS_REPORT.md` (modify) — append Tasks 13–18 rows + Phase 2 completion entry with gate run metrics
+- `docs/ops/PROGRESS_REPORT.md` (modify) — append Tasks 13–18 rows + Phase 2 completion entry with gate run metrics
 
 **Acceptance gate (all must pass on fresh 30-minute run):**
 
@@ -832,7 +832,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 - `go vet ./...`: zero vet issues
 - `go test ./...`: all packages green
 - `scripts/gate_review_collect.sh` (30m live run) + `scripts/validate_pipeline_proof.sh`: PASS
-- `docs/PROGRESS_REPORT.md`: append completion entry — **required**
+- `docs/ops/PROGRESS_REPORT.md`: append completion entry — **required**
 
 ---
 
@@ -860,7 +860,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 | 18   | Pipeline-proof harness ✅    | `validate_pipeline_proof.sh`                                          | 17         | Low        |
 | 19   | Phase 2 final validation ✅  | PROGRESS_REPORT + live gate run                                       | 13–18      | Medium     |
 
-> **Progress tracking:** Every task row above requires a matching `docs/PROGRESS_REPORT.md` entry on completion (see §4 Task Completion Protocol).
+> **Progress tracking:** Every task row above requires a matching `docs/ops/PROGRESS_REPORT.md` entry on completion (see §4 Task Completion Protocol).
 
 ---
 
@@ -871,7 +871,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
 1. Implement Tasks 1–3 first — mode-aware gates unlock EXPLORATION without touching age/mcap floors.
 2. Tasks 7–9 can run **in parallel** with 1–4 (Helius track independent).
 3. Task 10 before flipping shadow→live (Task 11 confirms readiness).
-4. **After every task:** run validation commands, then update `docs/PROGRESS_REPORT.md`.
+4. **After every task:** run validation commands, then update `docs/ops/PROGRESS_REPORT.md`.
 
 ### Phase 2 (Tasks 13–19) — pipeline proof hardening ✅
 
@@ -890,7 +890,7 @@ Use the existing table format in `docs/PROGRESS_REPORT.md` (see prior `PG-*` and
    scripts/validate_phase2_acceptance.sh   # full §1.1 six-criteria gate (Task 19)
    # or: make phase2-proof MINS=30
    ```
-8. **After every task (13–19):** run validation commands, then update `docs/PROGRESS_REPORT.md`.
+8. **After every task (13–19):** run validation commands, then update `docs/ops/PROGRESS_REPORT.md`.
 
 **Operator workflow to answer "code vs market":**
 

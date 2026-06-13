@@ -278,8 +278,8 @@ FOR UPDATE SKIP LOCKED
 
 ## References
 
-- Architecture: `docs/architecture.md` § 2.2–2.3 (Event Bus, Worker Loop)
-- Architecture context: `docs/architecture-context/2_system_backbone.md`
-- DB spec: `docs/db_adapter_spec.md` § 6.1 (events table)
-- Roadmap: `docs/implementation_roadmap.md` Phase 0 §0.6
+- Architecture: `docs/reference/architecture.md` § 2.2–2.3 (Event Bus, Worker Loop)
+- Architecture context: `docs/archive/architecture-context/2_system_backbone.md`
+- DB spec: `docs/reference/db_adapter_spec.md` § 6.1 (events table)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 0 §0.6
 - Config: `config/pipeline.yaml` → `worker.poll_interval_ms`, `worker.error_delay_ms`

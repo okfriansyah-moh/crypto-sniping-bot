@@ -4,6 +4,20 @@
 
 ---
 
+## 0. Documentation map
+
+Before reading agents/skills, use [`../README.md`](../README.md) as the entry point.
+
+| Need | Path |
+| ---- | ---- |
+| System design | `docs/reference/architecture.md` |
+| Active implementation plan | `docs/plans/` (e.g. `2026-06-13-operator-dashboard-plan.md`) |
+| Completed plans | `docs/plans/2026-06-10-profit-restoration-plan.md`, `2026-05-10-rescan-plan.md` |
+| Dated investigations | `docs/analysis/` |
+| Layer-focused extracts (supplementary) | `docs/archive/architecture-context/` |
+
+---
+
 ## 1. Overview
 
 The skeleton-parallel framework uses a two-tier AI assistance system:

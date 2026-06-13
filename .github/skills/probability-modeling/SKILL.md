@@ -244,7 +244,7 @@ EV = prob.P * cfg.TargetReturn
 
 ## References
 
-- Architecture context: `docs/architecture-context/6_slippage_models.md`
-- DTO spec: `docs/dto_contracts.md` § 3.5 (ProbabilityEstimateDTO, SlippageEstimateDTO, LatencyProfileDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 4
+- Architecture context: `docs/archive/architecture-context/6_slippage_models.md`
+- DTO spec: `docs/reference/dto_contracts.md` § 3.5 (ProbabilityEstimateDTO, SlippageEstimateDTO, LatencyProfileDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 4
 - Config: `config/models.yaml`

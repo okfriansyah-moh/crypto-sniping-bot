@@ -35,7 +35,7 @@ Even simple modules benefit from a one-paragraph design. Unexamined assumptions 
 
 ### Step 1 — Explore project context
 
-Check existing files, `docs/architecture.md`, recent changes, and current module structure before proposing anything.
+Check existing files, `docs/reference/architecture.md`, recent changes, and current module structure before proposing anything.
 
 ### Step 2 — Ask clarifying questions
 

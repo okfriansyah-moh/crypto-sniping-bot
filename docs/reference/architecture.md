@@ -1750,7 +1750,7 @@ Examples: `"rescan_15m"`, `"rescan_8h"`, `"rescan_48h"`. Used by log-reviewer an
 - **No module coupling** — worker in `internal/workers/run_rescan.go`; no imports from `internal/modules/`
 - **Fully generic** — iterates `cfg.Rescan.Bands` at runtime; add/remove bands via `config/pipeline.yaml` only, no code changes required
 - **Configured in:** `config/pipeline.yaml` → `rescan:` block; defaults in `internal/app/config/rescan_config.go`
-- **Full design:** `docs/RESCAN_PLAN.md`
+- **Full design:** `docs/plans/2026-05-10-rescan-plan.md`
 
 ---
 
@@ -6050,7 +6050,7 @@ type MarketDataDTO struct {
 }
 ```
 
-This is an **additive** change: `OrderingKey` is appended to the existing DTO; existing producers MUST populate it; existing consumers ignore it until they migrate. See `docs/dto_contracts.md` for the formal field entry.
+This is an **additive** change: `OrderingKey` is appended to the existing DTO; existing producers MUST populate it; existing consumers ignore it until they migrate. See `docs/reference/dto_contracts.md` for the formal field entry.
 
 The `events` table gains a column `logical_order_key BYTEA NOT NULL` indexed `(chain, consumer, logical_order_key)`.
 

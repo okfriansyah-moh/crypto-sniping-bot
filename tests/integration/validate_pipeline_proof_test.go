@@ -70,7 +70,7 @@ func TestValidatePipelineProof_SyntheticLog_EndToEnd_Passes(t *testing.T) {
 	// gate_review_collect derives timestamp from filename gate_raw_*; fixture uses plain name.
 	// Re-analyze writes gate_evidence_reanalysis_*.json — pick newest evidence under output/logs.
 	evidenceDir := filepath.Join(root, "output/logs")
-	entries, err := filepath.Glob(filepath.Join(evidenceDir, "gate_evidence_*.json"))
+	entries, err := filepath.Glob(filepath.Join(evidenceDir, "gate_evidence_reanalysis_*.json"))
 	if err != nil || len(entries) == 0 {
 		t.Fatal("no gate evidence written after fixture analyze")
 	}

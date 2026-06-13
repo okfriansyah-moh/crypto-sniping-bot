@@ -5,7 +5,7 @@ package workers
 // adjusts the database state when discrepancies exceed the tolerance.
 // This worker is NON-DESTRUCTIVE: it adjusts amounts but never books losses
 // directly — that is handled by the learning engine on position close.
-// See docs/implementation_roadmap.md § 8.4.
+// See docs/reference/implementation_roadmap.md § 8.4.
 
 import (
 	"context"

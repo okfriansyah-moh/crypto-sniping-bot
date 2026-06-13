@@ -116,11 +116,10 @@ type RPCProgramAccountsMemcmp struct {
 // solana_holder_dist.go requires. It is satisfied at runtime by the
 // *solanaProbeRPCAdapter in cmd/server.go, which wraps *rpc.SolanaClient.
 //
-// Using a separate local interface (rather than extending SolanaProbeRPCClient)
-// keeps existing test stubs compilable without modification — the primary
-// interface is unchanged. The fallback is activated via a type assertion
-// on the injected SolanaProbeRPCClient: if it also satisfies this interface
-// the fallback runs; otherwise the probe fails closed (HolderDistKnown=false).
+// Using a separate local interface (rather than further extending SolanaProbeRPCClient)
+// keeps the fallback RPC contract isolated and testable. The fallback is activated
+// via a type assertion on the injected SolanaProbeRPCClient: if it also satisfies this
+// interface the fallback runs; otherwise the probe fails closed (HolderDistKnown=false).
 type holderDistFallbackClient interface {
 	// GetTokenSupply returns the raw total supply (u64 atomic units) and
 	// decimal count for mint. Used as the denominator for Top5HolderPct.

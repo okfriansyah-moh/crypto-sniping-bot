@@ -283,7 +283,7 @@ func TestValidation_CombinedJoin_HalvesRoundtrips(t *testing.T) {
 	}
 }
 
-// ── 4. Mode-aware EV threshold (docs/PLAN.md Task 2) ─────────────────────────
+// ── 4. Mode-aware EV threshold (docs/plans/2026-06-10-profit-restoration-plan.md Task 2) ─────────────────────────
 
 type validationModeStubAdapter struct {
 	validationStubAdapter

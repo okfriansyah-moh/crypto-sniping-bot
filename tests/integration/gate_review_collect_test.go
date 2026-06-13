@@ -16,13 +16,13 @@ import (
 )
 
 const (
-	juneGateRawLog       = "output/logs/gate_raw_20260601_161344.log"
-	juneGateEvidence     = "output/logs/gate_evidence_20260601_161344.json"
-	juneGateBrief        = "output/logs/gate_brief_20260601_161344.txt"
-	june12GateRawLog     = "output/logs/gate_raw_20260612_174145.log"
-	june12GateEvidence   = "output/logs/gate_evidence_20260612_174145.json"
-	june12GateBrief      = "output/logs/gate_brief_20260612_174145.txt"
-	gateReviewScript     = "scripts/gate_review_collect.sh"
+	juneGateRawLog     = "output/logs/gate_raw_20260601_161344.log"
+	juneGateEvidence   = "output/logs/gate_evidence_20260601_161344.json"
+	juneGateBrief      = "output/logs/gate_brief_20260601_161344.txt"
+	june12GateRawLog   = "output/logs/gate_raw_20260612_174145.log"
+	june12GateEvidence = "output/logs/gate_evidence_20260612_174145.json"
+	june12GateBrief    = "output/logs/gate_brief_20260612_174145.txt"
+	gateReviewScript   = "scripts/gate_review_collect.sh"
 	legacyDeadWorkerL2 = "features_extracted"
 	legacyDeadWorkerL3 = "edge_decision"
 	legacyDeadWorkerL4 = "probability_scored"
@@ -30,9 +30,9 @@ const (
 )
 
 type gateEvidenceSnapshot struct {
-	DetectedMode       string `json:"detected_mode"`
-	ProductionDecision string `json:"production_decision"`
-	BlockerCount       int    `json:"blocker_count"`
+	DetectedMode        string `json:"detected_mode"`
+	ProductionDecision  string `json:"production_decision"`
+	BlockerCount        int    `json:"blocker_count"`
 	OperationalEvidence struct {
 		TracesCompleted int `json:"traces_completed"`
 		LearningRecords int `json:"learning_records"`
@@ -47,6 +47,8 @@ type gateEvidenceSnapshot struct {
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
+	// NOTE: This function is duplicated in internal/modules/validation/safety_floor_test.go
+	// Consolidation into a shared tests/helpers.go is a future cleanup task to reduce duplication.
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}

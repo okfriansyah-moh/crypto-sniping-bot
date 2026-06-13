@@ -115,8 +115,8 @@ scripts/                     ← Automation (run_parallel.sh, hooks, etc.)
 The user provides one or more of:
 
 - A spec file from `docs/specs/`
-- A section from `docs/PRODUCTION_GATE_ANALYSIS.md`, `docs/PROFITABILITY_GAPS.md`, or
-  `docs/implementation_roadmap.md`
+- A section from `docs/analysis/2026-05-20-production-gate-analysis.md`, `docs/analysis/profitability-gaps.md`, or
+  `docs/reference/implementation_roadmap.md`
 - A Confluence URL or page content
 - A problem statement or feature description
 
@@ -150,16 +150,16 @@ The user provides one or more of:
      - The **last task** is always: tests + build validation + PROGRESS_REPORT.md update
    - Number tasks sequentially: Task 1, Task 2, … Task N
 
-5. **Write Section 8 (Deep Knowledge)** — extract from `docs/architecture.md` and the
+5. **Write Section 8 (Deep Knowledge)** — extract from `docs/reference/architecture.md` and the
    source spec:
-   - DTO fields involved in this plan (from `contracts/` and `docs/dto_contracts.md`)
+   - DTO fields involved in this plan (from `contracts/` and `docs/reference/dto_contracts.md`)
    - Profit invariant rules relevant to this feature
    - Config fields and YAML paths (from `config/`)
    - Event bus emit/consume patterns (if this plan touches the backbone)
    - Hard rejects that must not be bypassed (if plan touches Layer 1)
    - Security rules relevant to this plan
    - Operational mode behavior (if plan is mode-aware)
-   - Any algorithm pseudocode (exact, from `docs/architecture.md`)
+   - Any algorithm pseudocode (exact, from `docs/reference/architecture.md`)
 
 6. **Produce the PLAN.md** — following the exact structure from
    `./reference/reference.md`:
@@ -268,7 +268,7 @@ The user provides:
 
 2. **Read both files:**
    - The PLAN.md under review
-   - Its source of truth (spec, `docs/architecture.md` section, or problem statement)
+   - Its source of truth (spec, `docs/reference/architecture.md` section, or problem statement)
 
 3. **Check every section** against the quality checklist in `./reference/reference.md §10`.
 
@@ -329,7 +329,7 @@ The user provides:
 
 - Additive-only: new fields with Go zero-value defaults only
 - Must precede ALL module tasks that produce or consume the new fields
-- DTO struct changes require a comment update in `docs/dto_contracts.md` (add to §7 of plan)
+- DTO struct changes require a comment update in `docs/reference/dto_contracts.md` (add to §7 of plan)
 
 ### Database migration tasks
 

@@ -1,7 +1,7 @@
 # Capital Engine — Phase 9 (Profitability Restoration § 9.4)
 # ─────────────────────────────────────────────────────────────────
 # Dynamic edge-proportional capital sizing.
-# Closes GAP-05 from docs/PROFITABILITY_GAPS.md.
+# Closes GAP-05 from docs/analysis/profitability-gaps.md.
 # Replaces fixed `$50` with size ∝ score × probability × confidence.
 # ─────────────────────────────────────────────────────────────────
 

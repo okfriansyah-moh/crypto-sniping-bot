@@ -342,7 +342,7 @@ func CheckCorrelationLimit(
 
 ## Phase 9 Notes (Profitability Restoration)
 
-Per `docs/implementation_roadmap.md` § 9.4, Phase 9 closes **GAP-05** by replacing the
+Per `docs/reference/implementation_roadmap.md` § 9.4, Phase 9 closes **GAP-05** by replacing the
 fixed `cfg.FixedEntrySizeUsd = $50` constant with a Kelly-adjacent edge-proportional
 sizing function. Configuration lives in `config/capital.yaml`.
 
@@ -375,9 +375,9 @@ mode-multiplier effect observable (STRICT mean ≈ 0.5 × BALANCED mean within �
 
 ## References
 
-- Architecture context: `docs/architecture-context/9_capital_engine.md`
-- DTO spec: `docs/dto_contracts.md` § 3.8 (AllocationDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 2.7
+- Architecture context: `docs/archive/architecture-context/9_capital_engine.md`
+- DTO spec: `docs/reference/dto_contracts.md` § 3.8 (AllocationDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.7
 - Config: `config/capital.yaml`, `config/cohorts.yaml`
 - `.github/skills/drawdown-protection/SKILL.md` — HWM tier multiplier on final allocation
 - `.github/skills/exposure-monitor/SKILL.md` — Hard position count and ceiling enforcement

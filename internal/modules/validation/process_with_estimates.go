@@ -24,7 +24,7 @@ import (
 //     and use_model_output=true. NOTE: this used to silently substitute
 //     PriorProbability and tag "prob_join_timeout" as a fallback, which
 //     drove every trade to ev_bps≈-1900 and starved Layers 6–10 in
-//     production. Per docs/architecture.md § 3.5 the prior is acceptable
+//     production. Per docs/reference/architecture.md § 3.5 the prior is acceptable
 //     ONLY for replay/backtest paths (UseModelOutput=false). When the
 //     model is enabled but its estimate has not joined within the
 //     ValidationWorker's bounded join window, the correct response is
@@ -49,7 +49,7 @@ func (m *Module) ProcessWithEstimates(
 // every timestamp emitted in the resulting ValidatedEdgeDTO
 // (ValidatedAt, ExpiresAt). Callers replaying the event log MUST pass
 // `evt.OccurredAt` (the bus-recorded creation time) so the function is
-// bit-for-bit reproducible across replays — see docs/architecture.md
+// bit-for-bit reproducible across replays — see docs/reference/architecture.md
 // § 4.2 (replay must be bit-for-bit deterministic).
 func (m *Module) ProcessWithEstimatesAt(
 	_ context.Context,

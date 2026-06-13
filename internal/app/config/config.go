@@ -13,7 +13,7 @@ import (
 
 // Config holds the complete application configuration loaded from YAML files.
 // All thresholds and tunable parameters must come from YAML — no hardcoded values.
-// See docs/implementation_roadmap.md § 0.5.
+// See docs/reference/implementation_roadmap.md § 0.5.
 type Config struct {
 	Pipeline     PipelineConfig         `yaml:"pipeline"`
 	Database     DatabaseConfig         `yaml:"database"`
@@ -58,7 +58,7 @@ type Config struct {
 	Probes ProbesConfig `yaml:"probes"`
 
 	// Phase 10 — time-banded rescan worker (Layer 0.5).
-	// Disabled by default. See docs/PLAN.md § Task 1 and
+	// Disabled by default. See docs/plans/2026-06-10-profit-restoration-plan.md § Task 1 and
 	// internal/app/config/rescan_config.go for struct definitions.
 	Rescan RescanConfig `yaml:"rescan"`
 
@@ -173,7 +173,7 @@ type EdgeConfig struct {
 	MinDevWalletAgeSeconds int64 `yaml:"min_dev_wallet_age_seconds"`
 
 	// ── F-4 fix: edge taxonomy + adaptive momentum threshold ──────────
-	// (per docs/architecture.md § 3.3 and the edge-detection /
+	// (per docs/reference/architecture.md § 3.3 and the edge-detection /
 	// momentum-detector / signal-normalizer skills).
 
 	// NewLaunchWindowSeconds: pool-age ceiling (seconds) for the
@@ -286,7 +286,7 @@ type ValidationConfig struct {
 	// with an explicit reason ("probability_unavailable") rather than
 	// silently substituting the prior into EV — that substitution
 	// produces deterministic mass-rejects at large negative bps and
-	// starves Layers 6–10 (see docs/architecture.md § 2 / § 3.5).
+	// starves Layers 6–10 (see docs/reference/architecture.md § 2 / § 3.5).
 	//
 	// JoinTimeoutMs        — hard cap on the bounded wait, ms.
 	// JoinPollIntervalMs   — DB poll cadence within the bounded wait, ms.
@@ -301,11 +301,11 @@ type ValidationConfig struct {
 type SelectionConfig struct {
 	// MaxOpenPositions is the legacy Phase-2 ceiling when mode thresholds
 	// are unavailable. Active Top-K cap comes from priority.modes.*.max_positions
-	// via Config.ResolveModeThresholds (docs/PLAN.md Task 4).
+	// via Config.ResolveModeThresholds (docs/plans/2026-06-10-profit-restoration-plan.md Task 4).
 	MaxOpenPositions int `yaml:"max_open_positions"`
 
 	// BatchWindowMs coalesces validated_edge_event inputs per chain before
-	// Top-K ranking (docs/PLAN.md Task 4). 0 flushes immediately.
+	// Top-K ranking (docs/plans/2026-06-10-profit-restoration-plan.md Task 4). 0 flushes immediately.
 	BatchWindowMs int `yaml:"batch_window_ms"`
 
 	// TopK overrides mode max_positions when > 0. 0 = use mode threshold.
@@ -475,7 +475,7 @@ type ExecutionConfig struct {
 	Solana SolanaExecutionConfig `yaml:"solana"`
 
 	// ShadowGate defines readiness thresholds before operators flip mode to live.
-	// See docs/PLAN.md Task 11 — no auto-promotion; manual YAML change only.
+	// See docs/plans/2026-06-10-profit-restoration-plan.md Task 11 — no auto-promotion; manual YAML change only.
 	ShadowGate ShadowGateConfig `yaml:"shadow_gate"`
 
 	// Phase 10 (Reference-Repo Improvements / Task C) — adaptive priority fee.
@@ -841,7 +841,7 @@ func Load(paths ...string) (*Config, error) {
 	// Apply rescan defaults (Phase 10) before validation.
 	applyRescanDefaults(&cfg.Rescan)
 
-	// Apply operational-mode threshold defaults (docs/PLAN.md Task 1).
+	// Apply operational-mode threshold defaults (docs/plans/2026-06-10-profit-restoration-plan.md Task 1).
 	applyPriorityDefaults(&cfg.Priority)
 
 	applyPriceOracleDefaults(&cfg.PriceOracle)

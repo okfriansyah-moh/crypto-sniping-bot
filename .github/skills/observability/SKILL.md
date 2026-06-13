@@ -424,9 +424,9 @@ func CheckArchivalCompliance(
 
 ## References
 
-- Architecture context: `docs/architecture-context/13_observability_finalization.md` § 16
-- Architecture: `docs/architecture.md` § 5 (KPIs), § 7 (Operational Modes)
-- Architecture context: `docs/architecture-context/1_global_control_loop.md`
-- Roadmap: `docs/implementation_roadmap.md` Phase 6
+- Architecture context: `docs/archive/architecture-context/13_observability_finalization.md` § 16
+- Architecture: `docs/reference/architecture.md` § 5 (KPIs), § 7 (Operational Modes)
+- Architecture context: `docs/archive/architecture-context/1_global_control_loop.md`
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 6
 - Config: `config/observability.yaml`
 - `.github/skills/event-bus/SKILL.md` — Event bus worker patterns (SKIP LOCKED, offsets)

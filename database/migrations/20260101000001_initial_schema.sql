@@ -1,6 +1,6 @@
 -- Phase 0 initial schema: event bus, consumer offsets, strategy versions, pipeline runs, migration log.
 -- All tables use portable SQL syntax (ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP).
--- See docs/db_adapter_spec.md § 6.1, § 6.8.
+-- See docs/reference/db_adapter_spec.md § 6.1, § 6.8.
 
 BEGIN;
 

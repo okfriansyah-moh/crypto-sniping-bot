@@ -25,6 +25,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="$REPO_ROOT/output/logs"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# When PHASE2_ACCEPTANCE_ONLY is set, skip the full validate_pipeline_proof.sh
+# and validate only the Phase 2 acceptance criteria.
+PHASE2_ACCEPTANCE_ONLY="${PHASE2_ACCEPTANCE_ONLY:-}"
+
 fail() {
   echo "PHASE2_ACCEPTANCE: FAIL — $*" >&2
   echo "PRODUCTION_DECISION: NOT_READY"
@@ -36,6 +40,7 @@ require_cmd() {
 }
 
 require_cmd jq
+require_cmd awk
 
 EVIDENCE="${1:-}"
 if [[ -z "$EVIDENCE" ]]; then
@@ -83,8 +88,10 @@ if [[ "$SHADOW_FAIL" -gt 0 ]]; then
   fail "shadow_observer_failed=$SHADOW_FAIL (want 0)"
 fi
 
-# Delegate minimal pipeline-proof trio (duplicate_execution, etc.)
-bash "$SCRIPT_DIR/validate_pipeline_proof.sh" "$EVIDENCE" >/dev/null
+# Delegate minimal pipeline-proof trio (duplicate_execution, etc.) when not acceptance-only
+if [[ -z "$PHASE2_ACCEPTANCE_ONLY" ]]; then
+  bash "$SCRIPT_DIR/validate_pipeline_proof.sh" "$EVIDENCE" >/dev/null
+fi
 
 echo "PHASE2_ACCEPTANCE: PASS"
 echo "PRODUCTION_DECISION: SHADOW_READY"

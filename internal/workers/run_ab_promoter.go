@@ -13,7 +13,7 @@ import (
 )
 
 // RunABPromoter evaluates the shadow strategy candidate against the active
-// baseline and promotes when ABPromoter.ShouldPromote passes (docs/PLAN.md Task 5).
+// baseline and promotes when ABPromoter.ShouldPromote passes (docs/plans/2026-06-10-profit-restoration-plan.md Task 5).
 func RunABPromoter(
 	ctx context.Context,
 	adapter database.Adapter,
@@ -152,12 +152,24 @@ func shadowVersionReady(shadow *database.StrategyVersion, windowMinutes int) boo
 	if shadow.ShadowStartedAt != nil && *shadow.ShadowStartedAt != "" {
 		ts = *shadow.ShadowStartedAt
 	}
-	started, err := time.Parse(time.RFC3339Nano, ts)
+	started, err := parseShadowTimestamp(ts)
 	if err != nil {
-		started, err = time.Parse(time.RFC3339, ts)
-	}
-	if err != nil {
-		return true
+		return false
 	}
 	return time.Since(started) >= time.Duration(windowMinutes)*time.Minute
+}
+
+func parseShadowTimestamp(ts string) (time.Time, error) {
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05Z07:00",
+	}
+	for _, layout := range layouts {
+		if started, err := time.Parse(layout, ts); err == nil {
+			return started, nil
+		}
+	}
+	return time.Time{}, errors.New("unsupported timestamp format")
 }

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 )
 
 const (
-	scenarioManifest      = "tests/fixtures/scenarios/manifest.json"
+	scenarioManifest        = "tests/fixtures/scenarios/manifest.json"
 	validateScenariosScript = "scripts/validate_pipeline_scenarios.sh"
 )
 
@@ -38,13 +39,17 @@ func TestBattleTest_AllScenariosPass(t *testing.T) {
 func TestBattleTest_Manifest_HasElevenScenarios(t *testing.T) {
 	root := findRepoRoot(t)
 	manifest := filepath.Join(root, scenarioManifest)
-	cmd := exec.Command("jq", "-r", ".scenarios | length", manifest)
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
+	raw, err := os.ReadFile(manifest)
 	if err != nil {
-		t.Fatalf("jq manifest: %v", err)
+		t.Fatalf("read manifest: %v", err)
 	}
-	if strings.TrimSpace(string(out)) != "11" {
-		t.Errorf("expected 11 scenarios, got %q", strings.TrimSpace(string(out)))
+	var decoded struct {
+		Scenarios []json.RawMessage `json:"scenarios"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	if got := len(decoded.Scenarios); got != 11 {
+		t.Errorf("expected 11 scenarios, got %d", got)
 	}
 }

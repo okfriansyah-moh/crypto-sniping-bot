@@ -97,7 +97,7 @@ validation:
   # If those upstream events have not committed by join_timeout_ms,
   # validation REJECTs with reject_reason=probability_unavailable rather
   # than silently using the prior to compute EV (that path produced the
-  # mass -1900 bps reject regression — see docs/architecture.md § 3.5).
+  # mass -1900 bps reject regression — see docs/reference/architecture.md § 3.5).
   # join_poll_interval_ms is the DB poll cadence within the wait.
   join_timeout_ms: 250
   join_poll_interval_ms: 20
@@ -431,7 +431,7 @@ probes:
 
 # Phase 10 — time-banded rescan worker (Layer 0.5).
 # Enabled by default for Phase 10+ pipelines.
-# See docs/PLAN.md for full design rationale.
+# See docs/plans/2026-06-10-profit-restoration-plan.md for full design rationale.
 rescan:
   enabled: true
   interval_seconds: 60

@@ -394,7 +394,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 					}
 				}
 				if w.batchPumpfunLpEnabled && req.Pool != "" {
-					if res.Pool != nil && enriched.ReserveBaseRaw != md.ReserveBaseRaw {
+					if res.Pool != nil {
 						batchSkipProbes["solana_pumpfun_lp"] = true
 					}
 				}

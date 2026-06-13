@@ -14,7 +14,7 @@ description: >
 
 Every loss must be classified so the Learning Engine can route corrective feedback
 to the correct upstream component. Blind parameter tightening without root cause
-analysis leads to oscillation (see `docs/architecture.md` § 0.5.3).
+analysis leads to oscillation (see `docs/reference/architecture.md` § 0.5.3).
 
 **7 root cause categories — every loss gets exactly one primary category:**
 
@@ -261,8 +261,8 @@ loss_pattern:
 
 ## References
 
-- `docs/architecture.md` § 3.10 — Learning Engine
-- `docs/architecture-context/12_learning_engine.md` — FP/FN computation
+- `docs/reference/architecture.md` § 3.10 — Learning Engine
+- `docs/archive/architecture-context/12_learning_engine.md` — FP/FN computation
 - `.github/skills/learning-engine/SKILL.md` — Bounded updates, shadow trades
 - `.github/skills/observability/SKILL.md` — system_event constants
 - `contracts/learning_record.go` — `LearningRecordDTO` fields

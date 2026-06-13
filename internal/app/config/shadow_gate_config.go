@@ -8,7 +8,7 @@ type ShadowGateConfig struct {
 	MinAggregatePnlBps float64 `yaml:"min_aggregate_pnl_bps"`
 }
 
-// DefaultShadowGateConfig returns production-gate defaults from docs/PLAN.md Task 11.
+// DefaultShadowGateConfig returns production-gate defaults from docs/plans/2026-06-10-profit-restoration-plan.md Task 11.
 func DefaultShadowGateConfig() ShadowGateConfig {
 	return ShadowGateConfig{
 		MinTrades:          30,

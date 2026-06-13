@@ -1,5 +1,8 @@
 # RPC Provider Analysis — Helius vs QuickNode
 
+> **Historical snapshot** · 2026-05-14 · Operational reference — verify against current
+> [`config/chains.yaml`](../../config/chains.yaml) before applying.
+
 ## Profit-First Infrastructure Decision Guide
 
 > **Audience:** Operator deploying the crypto-sniping-bot for the first time with a ~$50/month total budget.
@@ -29,8 +32,8 @@ Before comparing providers, understand what is **hard-blocked** by the current f
 | ----------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | ETH RPC on public/free fallback endpoints | `config/chains.yaml` — `${ETH_RPC_1}`, `${ETH_RPC_2}` | **Edge** — public RPCs rate-limit `eth_getLogs` (needed for TxVelocity, WalletEntropy signals) |
 | BSC WS on free endpoint                   | `config/chains.yaml` — `${BSC_WS_1}`                  | **Edge** — free WS drops under load; misses PairCreated events                                 |
-| Honeypot `eth_call` simulation            | `docs/PROFITABILITY_GAPS.md` GAP-01                   | **DataQuality** — can only run if RPC allows simulations at scale                              |
-| `eth_getLogs` for feature extraction      | `docs/PROFITABILITY_GAPS.md` GAP-03                   | **Features** — TxVelocity, WalletEntropy, VolumeMomentum all need frequent getLogs calls       |
+| Honeypot `eth_call` simulation            | `docs/analysis/profitability-gaps.md` GAP-01                   | **DataQuality** — can only run if RPC allows simulations at scale                              |
+| `eth_getLogs` for feature extraction      | `docs/analysis/profitability-gaps.md` GAP-03                   | **Features** — TxVelocity, WalletEntropy, VolumeMomentum all need frequent getLogs calls       |
 
 ### 1.3 Jito / ZeroSlot (Solana MEV Protection)
 

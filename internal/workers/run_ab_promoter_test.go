@@ -105,3 +105,16 @@ func TestShadowVersionReady_RespectsWindow(t *testing.T) {
 		t.Fatal("old shadow should be ready")
 	}
 }
+
+func TestShadowVersionReady_PostgresTimestampFormat(t *testing.T) {
+	old := time.Now().UTC().Add(-2 * time.Hour).Format("2006-01-02 15:04:05.999999999Z07:00")
+	if !shadowVersionReady(&database.StrategyVersion{CreatedAt: old}, 60) {
+		t.Fatal("postgres-style timestamp should be parsed and considered ready")
+	}
+}
+
+func TestShadowVersionReady_MalformedTimestampFailsClosed(t *testing.T) {
+	if shadowVersionReady(&database.StrategyVersion{CreatedAt: "not-a-timestamp"}, 60) {
+		t.Fatal("malformed timestamp must fail closed")
+	}
+}

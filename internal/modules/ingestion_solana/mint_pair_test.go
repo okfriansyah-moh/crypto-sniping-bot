@@ -7,8 +7,6 @@ import (
 )
 
 func TestResolveTradableMint(t *testing.T) {
-	t.Parallel()
-
 	const wsol = ingestion_solana.WrappedSOLMint
 	const pump = "K93mdxqMgivPNTFEXnoUmN8WH5tNzrSJfaguevQpump"
 
@@ -61,7 +59,6 @@ func TestResolveTradableMint(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			token, base, ok := ingestion_solana.ResolveTradableMint(tc.base, tc.quote)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
@@ -80,7 +77,7 @@ func TestResolveTradableMint(t *testing.T) {
 }
 
 func TestIsSystemMint_WSOLOnly(t *testing.T) {
-	t.Parallel()
+	// Cannot t.Parallel() — modifies global state via ConfigureStableMints()
 	ingestion_solana.ConfigureStableMints([]string{ingestion_solana.WrappedSOLMint})
 	if !ingestion_solana.IsSystemMint(ingestion_solana.WrappedSOLMint) {
 		t.Fatal("expected WSOL to be system mint")
@@ -91,7 +88,7 @@ func TestIsSystemMint_WSOLOnly(t *testing.T) {
 }
 
 func TestMintPairWasSwapped(t *testing.T) {
-	t.Parallel()
+	// Cannot t.Parallel() — reads global state via mints configured in another test
 	if !ingestion_solana.MintPairWasSwapped(ingestion_solana.WrappedSOLMint, "MemeMint1111111111111111111111111111111") {
 		t.Error("expected swap when WSOL is base and quote is project mint")
 	}
@@ -101,7 +98,7 @@ func TestMintPairWasSwapped(t *testing.T) {
 }
 
 func TestResolveTradableMint_BaseUSDC_QuotePump(t *testing.T) {
-	t.Parallel()
+	// Cannot t.Parallel() — modifies global state via ConfigureStableMints()
 	const usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	const pump = "K93mdxqMgivPNTFEXnoUmN8WH5tNzrSJfaguevQpump"
 	ingestion_solana.ConfigureStableMints([]string{ingestion_solana.WrappedSOLMint, usdc})

@@ -59,7 +59,7 @@ You are a post-merge review specialist. Your job is to validate the merged codeb
 
 ### 4. Orchestrator Wiring
 
-- Pipeline stage order matches `docs/architecture.md`
+- Pipeline stage order matches `docs/reference/architecture.md`
 - All stages have correct DTO input/output wiring
 - Checkpoint logic covers all stages
 
@@ -87,8 +87,8 @@ You are a post-merge review specialist. Your job is to validate the merged codeb
 
 Before review, read:
 
-1. `docs/architecture.md` — expected pipeline structure
-2. `docs/dto_contracts.md` — expected DTO definitions
+1. `docs/reference/architecture.md` — expected pipeline structure
+2. `docs/reference/dto_contracts.md` — expected DTO definitions
 3. `.github/copilot-instructions.md` — all architectural constraints
 
 ## Output

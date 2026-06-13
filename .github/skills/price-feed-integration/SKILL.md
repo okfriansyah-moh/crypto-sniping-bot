@@ -6,7 +6,7 @@ description: >
   or reviewing the `PriceClient` interface, per-chain price fetchers (EVM `getAmountsOut`,
   Solana AMM-pool `getAccountInfo`), and the chain-resolving factory wired into
   `RunPositionPoll`. Without this, every TP/SL/Trail decision in `position.go` is dead
-  code. Closes GAP-02 from `docs/PROFITABILITY_GAPS.md`.
+  code. Closes GAP-02 from `docs/analysis/profitability-gaps.md`.
 ---
 
 # Price Feed Integration Skill
@@ -249,9 +249,9 @@ func (f *SolanaReservePriceFetcher) GetPrice(
 
 ## Cross-References
 
-- `docs/PROFITABILITY_GAPS.md` § GAP-02 (canonical gap definition)
-- `docs/implementation_roadmap.md` § 9.5 (Phase 9 implementation contract)
-- `docs/architecture.md` § 3.9 (Position Engine layer spec)
+- `docs/analysis/profitability-gaps.md` § GAP-02 (canonical gap definition)
+- `docs/reference/implementation_roadmap.md` § 9.5 (Phase 9 implementation contract)
+- `docs/reference/architecture.md` § 3.9 (Position Engine layer spec)
 - `.github/skills/position-management/SKILL.md` (consumer of this price feed)
 - `.github/skills/rpc-management/SKILL.md` (RPC pool / circuit breaker patterns)
 - `.github/skills/monitoring-loop-engine/SKILL.md` (poll loop that consumes prices)

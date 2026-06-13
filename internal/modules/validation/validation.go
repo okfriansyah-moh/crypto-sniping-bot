@@ -44,7 +44,7 @@ func (m *Module) WithProbabilityRuntime(p *config.ProbabilityRuntimeConfig) *Mod
 }
 
 // Process evaluates an EdgeDTO and emits ValidatedEdgeDTO.
-// EV gate per docs/implementation_roadmap.md §3.5.
+// EV gate per docs/reference/implementation_roadmap.md §3.5.
 // Phase 2: fixed probability priors, no real model (deferred to Phase 4).
 func (m *Module) Process(_ context.Context, in contracts.EdgeDTO) (contracts.ValidatedEdgeDTO, error) {
 	nowTime := time.Now().UTC()

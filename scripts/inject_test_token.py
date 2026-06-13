@@ -653,7 +653,7 @@ def print_runbook(event_id: str, trace_id: str, chain: str, token_address: str) 
     print(f"event_id:        {event_id}")
     print(f"trace_id:        {trace_id}")
     print()
-    print("Document any layer that produces no output in docs/PROGRESS_REPORT.md")
+    print("Document any layer that produces no output in docs/ops/PROGRESS_REPORT.md")
     print("Session History and file a new plan for fixes (Task 19 is read-only).")
     print("=" * 72)
 
@@ -829,26 +829,12 @@ def main() -> int:
     # Also inject market_data_enriched directly so dq_worker processes it regardless
     # of which worker wins the market_data_event race (creator_profile_aggregator vs
     # market_probes_worker share a single processed=TRUE flag — no fan-out isolation).
+    #
+    # Insert market_data row BEFORE publishing market_data_enriched so workers that
+    # consume the enriched event can always resolve GetMarketData(enriched_id).
     enriched_id = enriched_event_id(chain, token_address)
     causation_for_enriched = evt_id if not args.enriched_only else None
-    try:
-        insert_enriched_event(
-            conn=conn,
-            enriched_id=enriched_id,
-            causation_event_id=causation_for_enriched,
-            payload=payload,
-            chain=chain,
-            dry_run=False,
-        )
-    except psycopg2.Error as exc:
-        print(f"ERROR: Database write failed (enriched event): {exc}", file=sys.stderr)
-        conn.rollback()
-        conn.close()
-        return 1
 
-    # Insert market_data row keyed on enriched_id so the features worker can
-    # build a real MarketSnapshot (LiquidityUsd, TxCount1m, etc.) instead of
-    # cold-starting with zeros → LiquidityScore=0.5 < MinLiquidityScore=0.55.
     try:
         insert_market_data_row(
             conn=conn,
@@ -868,8 +854,23 @@ def main() -> int:
         conn.rollback()
         conn.close()
         return 1
-    finally:
+
+    try:
+        insert_enriched_event(
+            conn=conn,
+            enriched_id=enriched_id,
+            causation_event_id=causation_for_enriched,
+            payload=payload,
+            chain=chain,
+            dry_run=False,
+        )
+    except psycopg2.Error as exc:
+        print(f"ERROR: Database write failed (enriched event): {exc}", file=sys.stderr)
+        conn.rollback()
         conn.close()
+        return 1
+
+    conn.close()
 
     print_runbook(evt_id, t_id, chain, token_address)
     return 0

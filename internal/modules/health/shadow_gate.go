@@ -4,6 +4,7 @@ package health
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"crypto-sniping-bot/database"
@@ -92,7 +93,7 @@ func aggregatePnlPasses(aggregateBps, minBps float64) bool {
 }
 
 func roundBps(v float64) float64 {
-	return float64(int64(v*100+0.5)) / 100
+	return math.Round(v*100) / 100
 }
 
 func liveFlipRunbookHint() string {

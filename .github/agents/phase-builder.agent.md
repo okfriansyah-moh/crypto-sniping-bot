@@ -1,6 +1,6 @@
 ---
 name: phase-builder
-description: "Dynamic phase implementation agent. Implements any phase from docs/implementation_roadmap.md. Supports both sequential and parallel development with strict module isolation."
+description: "Dynamic phase implementation agent. Implements any phase from docs/reference/implementation_roadmap.md. Supports both sequential and parallel development with strict module isolation."
 argument-hint: "Specify the phase to implement, e.g.: 'implement Phase 3' or 'implement Phase 2 in parallel mode'"
 tools:
   [
@@ -68,7 +68,7 @@ When running inside `scripts/run_parallel.sh`, the orchestrator validates protec
 
 - `contracts/` is **ADDITIVE-ONLY** outside Phase 0. You MAY add new `.go` files for new DTOs. You MUST NEVER modify, reformat, rename, or delete any existing file under `contracts/` — `allocation.go`, `contracts.go`, `data_quality.go`, `edge.go`, `evaluation.go`, `event_envelope.go`, `execution.go`, `expired_event.go`, `feature.go`, `latency.go`, `learning_record.go`, `market_data.go`, `position.go`, `probability.go`, `selection.go`, `slippage.go`, `system_state.go`, `trace.go`, `validated_edge.go`, or any `_test.go` siblings of these.
 - `database/migrations/` already-committed `.sql` files are **IMMUTABLE**. Add NEW migration files only, with a strictly later `YYYYMMDD000NNN_` prefix. Never edit or delete existing migrations.
-- `docs/` is **READ-ONLY**. Only the orchestrator may update `docs/PROGRESS_REPORT.md`.
+- `docs/` is **READ-ONLY**. Only the orchestrator may update `docs/ops/PROGRESS_REPORT.md`.
 
 If compile/test errors seem to require touching an existing contract file, STOP. Adjust the consumer code or add a NEW additive contract instead. Never edit the existing one — even for "trivial" reformatting, gofmt, import grouping, or comment changes. The check is line-deletion based: any removed line in a tracked contracts/ file is a violation.
 
@@ -76,12 +76,12 @@ If compile/test errors seem to require touching an existing contract file, STOP.
 
 The user will specify a **phase number** (e.g., "Phase 0", "Phase 3"). You must:
 
-1. Read the exact requirements for that phase from `docs/implementation_roadmap.md`
+1. Read the exact requirements for that phase from `docs/reference/implementation_roadmap.md`
 2. Read the **System Priority Layer** section — know which priority tier your phase belongs to
-3. Read `docs/architecture.md` — the master reference for the system
-4. Read `docs/orchestrator_spec.md` — for execution model, checkpointing, and resume behavior
-5. Read `docs/dto_contracts.md` — for DTO definitions and validation rules
-6. Read `docs/db_adapter_spec.md` — for database adapter interface and SQL compatibility rules
+3. Read `docs/reference/architecture.md` — the master reference for the system
+4. Read `docs/reference/orchestrator_spec.md` — for execution model, checkpointing, and resume behavior
+5. Read `docs/reference/dto_contracts.md` — for DTO definitions and validation rules
+6. Read `docs/reference/db_adapter_spec.md` — for database adapter interface and SQL compatibility rules
 7. Read `.github/copilot-instructions.md` — for hard architectural constraints
 8. Read the relevant DTO definitions from `contracts/` consumed/emitted by this phase
 9. Implement the phase following the execution protocol below
@@ -96,7 +96,7 @@ These documents + `contracts/` are your **absolute source of truth**. Never cont
 
 When the user says "implement Phase X", you MUST:
 
-1. **Read `docs/implementation_roadmap.md`** — find the section `## Phase X — <Name>`
+1. **Read `docs/reference/implementation_roadmap.md`** — find the section `## Phase X — <Name>`
 2. **Extract** from that section:
    - Phase invariants and objectives
    - Tasks checklist (implement sequentially, 2–3 tasks at a time)
@@ -106,7 +106,7 @@ When the user says "implement Phase X", you MUST:
    - Exit criteria
 3. **Determine the priority tier** from the System Priority Layer
 4. **Identify file ownership** — only create/modify files within the scope of the target phase
-5. **Identify frozen DTO contracts** — determine input/output DTOs from `docs/dto_contracts.md`
+5. **Identify frozen DTO contracts** — determine input/output DTOs from `docs/reference/dto_contracts.md`
 
 ---
 
@@ -197,13 +197,13 @@ Resume:
 
 ## Progress Report
 
-After completing all implementation tasks for the phase, update `docs/PROGRESS_REPORT.md`:
+After completing all implementation tasks for the phase, update `docs/ops/PROGRESS_REPORT.md`:
 
 1. Find the row for the phase number in the **Phase Progress** table and update **Status** to `completed` (or `failed` if the phase could not be completed).
 2. Update the **Agent Pipeline Results** table row for the phase with `pass`/`fail` per agent.
 3. Update **Last Updated** in the Summary table to today's date (ISO 8601, `YYYY-MM-DD`).
 4. If any DTO violations were found and fixed, log them in the **Failure Log** table.
 
-> **Note:** `docs/PROGRESS_REPORT.md` is the **sole exception** to the `docs/` read-only policy.
+> **Note:** `docs/ops/PROGRESS_REPORT.md` is the **sole exception** to the `docs/` read-only policy.
 > All other files under `docs/` remain read-only — never modify them.
 > The automated pipeline (`run_parallel.sh`) also updates PROGRESS_REPORT.md automatically on pipeline success/failure. Manual updates are only needed when running outside the automated pipeline.

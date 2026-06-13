@@ -22,7 +22,7 @@ Enforce configuration-driven design. All tunable parameters, paths, thresholds, 
 
 - YAML configuration files under `config/`
 - Module code that consumes configuration
-- `docs/architecture.md` — expected configuration structure
+- `docs/reference/architecture.md` — expected configuration structure
 
 ## Outputs
 

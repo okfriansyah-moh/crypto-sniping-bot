@@ -3,7 +3,7 @@
 > **Version:** 2.0
 > **Date:** May 10, 2026 (v1.0: May 3, 2026 — 4 bands; v2.0: May 10, 2026 — extended to 14 bands, 48h coverage)
 > **Status:** Implemented (Phase 10 — Group G, fully extended)
-> **Source of Truth:** `docs/architecture.md`, `docs/PROFITABILITY_GAPS.md`, `.github/copilot-instructions.md`
+> **Source of Truth:** `docs/reference/architecture.md`, `docs/analysis/profitability-gaps.md`, `.github/copilot-instructions.md`
 > **Related design notes:** `docs/specs/2026-05-03-time-banded-rescan-design.md` (this file is the executable spec)
 > **Runnable via:** `./scripts/run_parallel.sh start --mode=2 10`
 
@@ -115,13 +115,13 @@ Phase 2 — Recovery checkpoints (Goals B+C: reversal + CEX catalyst, 12–48h):
 | Disabled by default in `pipeline.yaml`                                              | Safe rollout; operators flip `rescan.enabled: true` when ready.                        |
 
 **Layer placement:**
-The rescan worker sits at **Layer 0.5** — between Layer 0 (raw ingestion) and Layer 1 (DQ). It is documented as a Layer 0 satellite in `docs/architecture.md` § 3.0.x (additive update — see § 8 Documentation).
+The rescan worker sits at **Layer 0.5** — between Layer 0 (raw ingestion) and Layer 1 (DQ). It is documented as a Layer 0 satellite in `docs/reference/architecture.md` § 3.0.x (additive update — see § 8 Documentation).
 
 ---
 
 ## 3. Profit Hypothesis (Profit-First Justification)
 
-Per `docs/PROFITABILITY_GAPS.md`, current `Edge` factor estimate is ~0.60 and `AdaptationQuality` ~0.20.
+Per `docs/analysis/profitability-gaps.md`, current `Edge` factor estimate is ~0.60 and `AdaptationQuality` ~0.20.
 
 The rescan layer raises Edge × AdaptationQuality through three concrete mechanisms:
 
@@ -339,7 +339,7 @@ ModeOverrides: {
 ```sql
 -- Phase 10 — rescan layer support indexes.
 -- Pure additive: CREATE INDEX IF NOT EXISTS only. No table or column changes.
--- See docs/PLAN.md § Task 2.
+-- See docs/plans/2026-06-10-profit-restoration-plan.md § Task 2.
 
 BEGIN;
 
@@ -498,7 +498,7 @@ package workers
 
 // run_rescan.go — periodic worker that re-emits market_data_event for
 // tokens in configured age bands. Pure DB reader + event emitter; no
-// RPC, no keys, no on-chain calls. See docs/PLAN.md § Task 5.
+// RPC, no keys, no on-chain calls. See docs/plans/2026-06-10-profit-restoration-plan.md § Task 5.
 
 func RunRescan(
     ctx context.Context,
@@ -686,13 +686,13 @@ go func() {
 
 ### Task 8 — Documentation Sync
 
-**Goal:** Update `docs/architecture.md` and the `log-reviewer` skill to recognise the rescan layer.
+**Goal:** Update `docs/reference/architecture.md` and the `log-reviewer` skill to recognise the rescan layer.
 
-> Per copilot-instructions § Protected Files, `docs/` is read-only. **Exception:** this PLAN's Task 8 must update `docs/architecture.md` because the rescan worker introduces a new layer — this is the same exception that applies to `PROGRESS_REPORT.md`. Operator must approve before this single edit.
+> Per copilot-instructions § Protected Files, `docs/` is read-only. **Exception:** this PLAN's Task 8 must update `docs/reference/architecture.md` because the rescan worker introduces a new layer — this is the same exception that applies to `PROGRESS_REPORT.md`. Operator must approve before this single edit.
 
 **Files:**
 
-- `docs/architecture.md` — add § 3.0.5 "Rescan Layer (0.5)" describing the worker, its profit hypothesis, and its position in the pipeline. **One section, additive.**
+- `docs/reference/architecture.md` — add § 3.0.5 "Rescan Layer (0.5)" describing the worker, its profit hypothesis, and its position in the pipeline. **One section, additive.**
 - `.github/skills/log-reviewer/SKILL.md` — extend R4 detectors with rescan patterns and add PRS dimension #11 _or_ fold into existing dimensions (see § 9 below).
 - `.github/skills/rescan-orchestration/SKILL.md` — **NEW** skill capturing the rescan band pattern for future reuse.
 - `config/phases.yaml` — add Phase 10 entry under Group G (this is config, not docs — additive).
@@ -859,10 +859,10 @@ The phase is complete when **all** of the following are true:
 6. With `cfg.Rescan.Enabled = true` and seeded DB fixtures, the structured log shows ≥1 `rescan_band_completed` line per configured band.
 7. With seeded data designed to produce a `MOMENTUM_EDGE` (aged token + growing volume), the end-to-end pipeline produces an `edge_event` whose `EdgeType=MOMENTUM_EDGE` and whose causation trail leads back to a `transport='rescan_*'` `market_data_event`.
 8. `log-reviewer` skill PRS run on the test logs scores ≥ Dimension #1 = 10 pts (rescan trace observed at edge layer).
-9. `docs/architecture.md` § 3.0.5 exists and cross-references this plan.
+9. `docs/reference/architecture.md` § 3.0.5 exists and cross-references this plan.
 10. `phases.yaml` Phase 10 entry parses; `./scripts/run_parallel.sh status` lists Phase 10 in Group G.
 11. `.github/skills/rescan-orchestration/SKILL.md` exists with the seven-item checklist.
-12. `docs/PROGRESS_REPORT.md` updated with Phase 10 completion entry (this is the standard exit step for any phase).
+12. `docs/ops/PROGRESS_REPORT.md` updated with Phase 10 completion entry (this is the standard exit step for any phase).
 
 ---
 
@@ -903,11 +903,11 @@ make logs | grep rescan_band_completed | tail -20
 
 ## 14. References
 
-- `docs/architecture.md` § 1 (pipeline), § 2.4 (per-market isolation), § 3.0 (Layer 0 ingestion), § 3.3 (edge taxonomy), § 7 (operational modes)
-- `docs/PROFITABILITY_GAPS.md` (current factor estimates, target uplift)
-- `docs/dto_contracts.md` (`MarketDataDTO`, `DataQualityDTO`)
-- `docs/db_adapter_spec.md` (adapter interface conventions)
-- `docs/orchestrator_spec.md` (worker lifecycle conventions)
+- `docs/reference/architecture.md` § 1 (pipeline), § 2.4 (per-market isolation), § 3.0 (Layer 0 ingestion), § 3.3 (edge taxonomy), § 7 (operational modes)
+- `docs/analysis/profitability-gaps.md` (current factor estimates, target uplift)
+- `docs/reference/dto_contracts.md` (`MarketDataDTO`, `DataQualityDTO`)
+- `docs/reference/db_adapter_spec.md` (adapter interface conventions)
+- `docs/reference/orchestrator_spec.md` (worker lifecycle conventions)
 - `.github/copilot-instructions.md` (architectural invariants)
 - `.github/skills/profit-first/SKILL.md` (profit-factor evaluation gate)
 - `.github/skills/event-bus/SKILL.md` (PostgreSQL append-only event bus rules)

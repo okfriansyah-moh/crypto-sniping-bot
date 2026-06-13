@@ -18,7 +18,7 @@ func noopLogger() *slog.Logger {
 // Must be called after every stage completion — never skip.
 // Idempotent: calling twice with the same stage is safe.
 //
-// See docs/orchestrator_spec.md for checkpoint rules.
+// See docs/reference/orchestrator_spec.md for checkpoint rules.
 func Checkpoint(ctx context.Context, adapter database.Adapter, logger *slog.Logger, runID, stage string) error {
 	if logger == nil {
 		logger = noopLogger()

@@ -1,7 +1,7 @@
 # Data Quality Engine — Phase 9 (Profitability Restoration § 9.1)
 # ─────────────────────────────────────────────────────────────────
 # Real RPC-backed scam detector configuration.
-# Closes GAP-01 from docs/PROFITABILITY_GAPS.md.
+# Closes GAP-01 from docs/analysis/profitability-gaps.md.
 # All values tunable per chain via config/chains.yaml `data_quality` block (additive override).
 # No hardcoded values in module code (per copilot-instructions § 0.5).
 # ─────────────────────────────────────────────────────────────────

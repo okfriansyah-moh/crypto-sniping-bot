@@ -41,7 +41,7 @@ func (m *Module) Process(
 	return outs[0], nil
 }
 
-// ProcessBatch ranks ACCEPT edges via greedy Top-K (docs/PLAN.md §7.3 Task 4).
+// ProcessBatch ranks ACCEPT edges via greedy Top-K (docs/plans/2026-06-10-profit-restoration-plan.md §7.3 Task 4).
 func (m *Module) ProcessBatch(
 	_ context.Context,
 	items []BatchItem,

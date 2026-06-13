@@ -531,7 +531,7 @@ Exit gate: 10× Phase 2 baseline throughput without unbounded queue growth, p95 
 
 #### GROUP D — MARKET EXTENSION (runs after Group C)
 
-Adds an additional `(ingestion + execution)` market without touching shared layers. Must run after Phase 6 is merged, validated, and exit criteria met. See [docs/architecture.md § 3.11](architecture.md#311-multi-market-architecture-evm--solana) for the full multi-market contract.
+Adds an additional `(ingestion + execution)` market without touching shared layers. Must run after Phase 6 is merged, validated, and exit criteria met. See [docs/reference/architecture.md § 3.11](architecture.md#311-multi-market-architecture-evm--solana) for the full multi-market contract.
 
 ---
 
@@ -555,7 +555,7 @@ Adds an additional `(ingestion + execution)` market without touching shared laye
 
 **Files NEVER touched by Phase 7:** `contracts/` (DTO schemas), `internal/modules/ingestion/` (EVM ingestion), `internal/modules/data_quality/`, `internal/modules/feature/`, `internal/modules/edge/`, `internal/modules/probability/`, `internal/modules/slippage/`, `internal/modules/selection/`, `internal/modules/capital/`, `internal/modules/position/`, `internal/modules/evaluation/`, `internal/modules/learning/`, EVM execution code paths in `internal/modules/execution/` (Phase 2/6 files), the `database.Adapter` interface (additive methods only).
 
-**Exit gate:** ≥ 10 Solana **devnet** swaps confirmed end-to-end, replay determinism for Solana fixtures, zero EVM regression on full Phase 2 testnet replay, zero cross-market imports (verified by import-graph guard), `AllocateNonce` never invoked when `chain="solana"`. Full criteria in [docs/implementation_roadmap.md § Phase 7 Exit Criteria](implementation_roadmap.md#phase-7--solana-market-extension-p2).
+**Exit gate:** ≥ 10 Solana **devnet** swaps confirmed end-to-end, replay determinism for Solana fixtures, zero EVM regression on full Phase 2 testnet replay, zero cross-market imports (verified by import-graph guard), `AllocateNonce` never invoked when `chain="solana"`. Full criteria in [docs/reference/implementation_roadmap.md § Phase 7 Exit Criteria](implementation_roadmap.md#phase-7--solana-market-extension-p2).
 
 ---
 
@@ -565,7 +565,7 @@ Adds an additional `(ingestion + execution)` market without touching shared laye
 - Group B (Phase 3–5) MAY run in parallel — they own separate `internal/modules/` subdirs
 - Group C (Phase 6) MUST run after all Group B phases are merged and validated
 - Group D (Phase 7) MUST run after Phase 6 is merged and validated; MUST NOT touch EVM ingestion (`internal/modules/ingestion/`), EVM execution code paths (Phase 2/6 files in `internal/modules/execution/`), `contracts/*.go` schemas, or the `database.Adapter` interface (additive methods only)
-- Group D (Phase 7) production-grade hardening (per [docs/architecture.md § 3.11.10](architecture.md#31110-solana-ingestion--execution-guarantees-production-grade)) is mandatory: deterministic replay, `EventID` PK dedup, monotonic ingestion watermark, bounded retries (≤ 5), multi-RPC failover with health scoring, latency-aware execution gate, and the full `FailureCategory` enum on every non-confirmed Solana `ExecutionResultDTO` — these are exit criteria, not optional polish
+- Group D (Phase 7) production-grade hardening (per [docs/reference/architecture.md § 3.11.10](architecture.md#31110-solana-ingestion--execution-guarantees-production-grade)) is mandatory: deterministic replay, `EventID` PK dedup, monotonic ingestion watermark, bounded retries (≤ 5), multi-RPC failover with health scoring, latency-aware execution gate, and the full `FailureCategory` enum on every non-confirmed Solana `ExecutionResultDTO` — these are exit criteria, not optional polish
 - No phase modifies `contracts/` or `database/` without going through the DTO guardian
 - `internal/orchestrator/` is a SHARED file — requires merge validation before any edit
 
@@ -605,9 +605,9 @@ All agents use the skills system from `.github/skills/` instead of re-reading fu
 
 | Full Doc                    | Tokens | Equivalent Skill              | Tokens | Savings |
 | --------------------------- | ------ | ----------------------------- | ------ | ------- |
-| `docs/architecture.md`      | ~5000  | pipeline + modularity skills  | ~600   | 88%     |
-| `docs/dto_contracts.md`     | ~6000  | dto skill                     | ~400   | 93%     |
-| `docs/orchestrator_spec.md` | ~4000  | pipeline + idempotency skills | ~500   | 88%     |
+| `docs/reference/architecture.md`      | ~5000  | pipeline + modularity skills  | ~600   | 88%     |
+| `docs/reference/dto_contracts.md`     | ~6000  | dto skill                     | ~400   | 93%     |
+| `docs/reference/orchestrator_spec.md` | ~4000  | pipeline + idempotency skills | ~500   | 88%     |
 
 ### Token Optimization Rules
 

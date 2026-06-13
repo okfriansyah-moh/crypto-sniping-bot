@@ -18,7 +18,7 @@ events through the same pipeline code that runs in production. The key constrain
 is **complete isolation** — replay must not affect live trading state, and replay
 results must be **bit-for-bit reproducible** (same replay input → identical output).
 
-**Determinism requirement (from `docs/architecture.md` § 6):**
+**Determinism requirement (from `docs/reference/architecture.md` § 6):**
 
 - All timestamps come from historical event data, never from `time.Now()`
 - No random values — same input always produces identical output
@@ -231,8 +231,8 @@ func CompareReplayToProduction(
 
 ## References
 
-- `docs/architecture.md` § 6 — System Guarantees (determinism, idempotency)
-- `docs/architecture.md` § 4.1 — Strategy Versioning & Replay
+- `docs/reference/architecture.md` § 6 — System Guarantees (determinism, idempotency)
+- `docs/reference/architecture.md` § 4.1 — Strategy Versioning & Replay
 - `.github/skills/event-bus/SKILL.md` — PostgreSQL event bus patterns
 - `.github/skills/determinism/SKILL.md` — No-randomness enforcement
 - `.github/skills/strategy-versioning/SKILL.md` — Version replay determinism

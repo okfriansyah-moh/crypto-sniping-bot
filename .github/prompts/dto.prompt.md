@@ -1,15 +1,15 @@
 # DTO Contracts Prompt
 
-You are a Staff+ backend architect. Generate a complete `docs/dto_contracts.md`.
+You are a Staff+ backend architect. Generate a complete `docs/reference/dto_contracts.md`.
 
 ## Instructions
 
-1. Read `docs/architecture.md` — pipeline stages and DTO registry
+1. Read `docs/reference/architecture.md` — pipeline stages and DTO registry
 2. Read `.github/copilot-instructions.md` — DTO enforcement rules
 
 ## Document Structure
 
-Generate `docs/dto_contracts.md` with:
+Generate `docs/reference/dto_contracts.md` with:
 
 ### 1. DTO Design Rules
 
@@ -66,4 +66,4 @@ Common mistakes with examples:
 
 ## Output
 
-Write the completed contracts to `docs/dto_contracts.md`.
+Write the completed contracts to `docs/reference/dto_contracts.md`.

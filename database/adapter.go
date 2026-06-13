@@ -12,7 +12,7 @@ import (
 // Every write method is idempotent (ON CONFLICT DO NOTHING semantics).
 // Only the orchestrator calls the adapter — modules NEVER import database/.
 //
-// See docs/db_adapter_spec.md § 2 for the full specification.
+// See docs/reference/db_adapter_spec.md § 2 for the full specification.
 type Adapter interface {
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -783,7 +783,7 @@ type Config struct {
 }
 
 // Event is the event bus row representation.
-// See docs/db_adapter_spec.md § 2.
+// See docs/reference/db_adapter_spec.md § 2.
 type Event struct {
 	EventID       string // SHA256(payload_signature)[:16]
 	EventType     string // e.g., "market_data_event"
@@ -813,7 +813,7 @@ type Event struct {
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
-// See docs/implementation_roadmap.md § 0.7.
+// See docs/reference/implementation_roadmap.md § 0.7.
 type TransitionRequest struct {
 	LifecycleID       string
 	ExpectedFromState string // current_state value at time of read

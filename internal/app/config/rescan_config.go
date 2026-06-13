@@ -8,7 +8,7 @@ import "fmt"
 // the MOMENTUM_EDGE path to capture alpha that NEW_LAUNCH_EDGE missed.
 //
 // Disabled by default — operators must set enabled: true in pipeline.yaml.
-// See docs/PLAN.md § Task 1 for full design rationale.
+// See docs/plans/2026-06-10-profit-restoration-plan.md § Task 1 for full design rationale.
 type RescanConfig struct {
 	Enabled                bool                         `yaml:"enabled"`
 	IntervalSeconds        int                          `yaml:"interval_seconds"`
@@ -54,7 +54,7 @@ func applyRescanDefaults(r *RescanConfig) {
 	// SkipOpenPositions is a CAPITAL SAFETY enforced invariant — always true.
 	// This is not an operator-configurable toggle; it prevents double-entry
 	// into open positions. Setting `skip_open_positions: false` in YAML has
-	// no effect. See docs/RESCAN_PLAN.md § 3 (capital protection).
+	// no effect. See docs/plans/2026-05-10-rescan-plan.md § 3 (capital protection).
 	if !r.SkipOpenPositions {
 		r.SkipOpenPositions = true
 	}
@@ -82,7 +82,7 @@ func applyRescanDefaults(r *RescanConfig) {
 
 	if len(r.Bands) == 0 {
 		// 14-band design: Phase 1 (early dense, 0–8h) + Phase 2 (recovery, 12–48h).
-		// See docs/RESCAN_PLAN.md § Band Design Rationale for data-driven justification.
+		// See docs/plans/2026-05-10-rescan-plan.md § Band Design Rationale for data-driven justification.
 		r.Bands = []RescanBand{
 			// Phase 1 — Early dense (Goal A: catch organic momentum, 0–8h)
 			{Name: "15m", MinAgeSeconds: 900, MaxAgeSeconds: 1800, Priority: 80},

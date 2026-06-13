@@ -1,16 +1,16 @@
 # Roadmap Generation Prompt
 
-You are a Staff+ backend architect. Generate a complete `docs/implementation_roadmap.md` from the project's architecture.
+You are a Staff+ backend architect. Generate a complete `docs/reference/implementation_roadmap.md` from the project's architecture.
 
 ## Instructions
 
-1. Read `docs/architecture.md` — the system architecture
-2. Read `docs/dto_contracts.md` — DTO definitions (if they exist)
+1. Read `docs/reference/architecture.md` — the system architecture
+2. Read `docs/reference/dto_contracts.md` — DTO definitions (if they exist)
 3. Read `.github/copilot-instructions.md` — hard constraints
 
 ## Roadmap Structure
 
-Generate `docs/implementation_roadmap.md` with:
+Generate `docs/reference/implementation_roadmap.md` with:
 
 ### Phase 0 — Core Infrastructure
 
@@ -78,4 +78,4 @@ Define which phases can run in parallel:
 
 ## Output
 
-Write the completed roadmap to `docs/implementation_roadmap.md`.
+Write the completed roadmap to `docs/reference/implementation_roadmap.md`.

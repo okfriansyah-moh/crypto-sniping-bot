@@ -217,7 +217,7 @@ if errors.Is(err, database.ErrInvalidTransition) { return nil }  // already move
 
 ## References
 
-- Architecture: `docs/architecture.md` § 4.7 (Token Lifecycle State Machine)
-- DB spec: `docs/db_adapter_spec.md` § 6.4 (token_lifecycle table)
-- Roadmap: `docs/implementation_roadmap.md` Phase 0 (schema), Phase 2
+- Architecture: `docs/reference/architecture.md` § 4.7 (Token Lifecycle State Machine)
+- DB spec: `docs/reference/db_adapter_spec.md` § 6.4 (token_lifecycle table)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 0 (schema), Phase 2
 - Config: `config/pipeline.yaml` → `lifecycle.token_expire_sec`

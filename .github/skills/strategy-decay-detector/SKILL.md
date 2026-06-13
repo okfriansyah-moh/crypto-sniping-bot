@@ -295,8 +295,8 @@ strategy_decay:
 
 ## References
 
-- `docs/architecture.md` § 3.10 — Learning Engine (Layer 10)
-- `docs/architecture.md` § 4.1-4.2 — Strategy Versioning & Replay
+- `docs/reference/architecture.md` § 3.10 — Learning Engine (Layer 10)
+- `docs/reference/architecture.md` § 4.1-4.2 — Strategy Versioning & Replay
 - `.github/skills/learning-engine/SKILL.md` — Bounded updates and sample gates
 - `.github/skills/strategy-versioning/SKILL.md` — Version rollback mechanics
 - `.github/skills/strategy-auto-disable/SKILL.md` — Lifecycle state machine

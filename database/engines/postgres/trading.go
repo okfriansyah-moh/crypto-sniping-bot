@@ -442,7 +442,7 @@ ON CONFLICT (event_id) DO NOTHING`
 
 // GetProbabilityForLifecycle returns ProbabilityUsed from the validated-edge
 // chain for a token lifecycle. Prefers validated_edges; falls back to the
-// validated_edge_event payload in the events table (docs/PLAN.md Task 6).
+// validated_edge_event payload in the events table (docs/plans/2026-06-10-profit-restoration-plan.md Task 6).
 func (d *DB) GetProbabilityForLifecycle(ctx context.Context, lifecycleID string) (float64, bool, error) {
 	if lifecycleID == "" {
 		return 0, false, nil
