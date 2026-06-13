@@ -1,0 +1,1697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Crypto Sniping Bot — Operator Dashboard (Mockup)</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface-2: #243044;
+      --border: #2d3a4f;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.15);
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --radius: 10px;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+      --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace;
+      --sidebar-w: 260px;
+      --sidebar-collapsed-w: 56px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .app {
+      display: flex;
+      align-items: stretch;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1rem 0.75rem;
+      position: sticky;
+      top: 0;
+      align-self: flex-start;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: width 0.2s ease, padding 0.2s ease;
+    }
+
+    body.sidebar-collapsed .sidebar {
+      width: var(--sidebar-collapsed-w);
+      padding: 0.65rem 0.35rem;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.25rem 0.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 0.75rem;
+      min-width: 0;
+    }
+
+    body.sidebar-collapsed .sidebar-header {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0.15rem 0 0.75rem;
+      gap: 0.45rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      min-width: 0;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #6366f1);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .brand-text { min-width: 0; }
+    .brand h1 { font-size: 0.95rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .brand p { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    body.sidebar-collapsed .brand-text,
+    body.sidebar-collapsed .nav-section,
+    body.sidebar-collapsed .nav .label,
+    body.sidebar-collapsed .nav .badge,
+    body.sidebar-collapsed .sidebar-extra,
+    body.sidebar-collapsed .sidebar-tip { display: none !important; }
+
+    body.sidebar-collapsed .brand {
+      justify-content: center;
+      width: 100%;
+    }
+
+    body.sidebar-collapsed .brand-icon {
+      width: 32px;
+      height: 32px;
+      font-size: 0.72rem;
+    }
+
+    body.sidebar-collapsed .nav a {
+      justify-content: center;
+      padding: 0.55rem 0;
+      gap: 0;
+    }
+
+    body.sidebar-collapsed .nav-icon {
+      margin: 0;
+      width: auto;
+      font-size: 0.85rem;
+    }
+
+    body.sidebar-collapsed .chain-label { display: none; }
+
+    body.sidebar-collapsed .sidebar-toggle {
+      width: 36px;
+      height: 36px;
+    }
+
+    .sidebar-toggle {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      display: grid;
+      place-items: center;
+    }
+
+    .sidebar-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+    .nav-section {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin: 0.75rem 0 0.35rem 0.75rem;
+    }
+
+    .nav {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-height: 0;
+    }
+
+    .nav a {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-bottom: 2px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+    }
+
+    .nav a:hover { background: var(--surface-2); color: var(--text); }
+    .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+
+    .nav-icon {
+      width: 18px;
+      text-align: center;
+      font-size: 0.75rem;
+      opacity: 0.85;
+      flex-shrink: 0;
+    }
+
+    .nav .badge {
+      margin-left: auto;
+      font-size: 0.65rem;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+    }
+
+    .main {
+      flex: 1;
+      min-width: 0;
+      width: 100%;
+      padding: 1.25rem 1.5rem 2rem;
+    }
+
+    .view-panel { display: none; animation: fadeIn 0.15s ease; }
+    .view-panel.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .page-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .page-header h2 { font-size: 1.35rem; font-weight: 600; }
+    .page-header .subtitle { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .pill.ok { border-color: rgba(34, 197, 94, 0.4); color: var(--ok); }
+    .pill.warn { border-color: rgba(245, 158, 11, 0.4); color: var(--warn); }
+    .pill.bad { border-color: rgba(239, 68, 68, 0.4); color: var(--bad); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+    .grid { display: grid; gap: 1rem; }
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+    @media (max-width: 1100px) {
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      .grid-3 { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 768px) {
+      .app { flex-direction: column; }
+      .sidebar {
+        width: 100% !important;
+        position: relative;
+        height: auto;
+        max-height: none;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        padding: 1rem 0.75rem !important;
+      }
+      .sidebar-header {
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+      }
+      body.sidebar-collapsed .brand-text,
+      body.sidebar-collapsed .nav-section,
+      body.sidebar-collapsed .nav .label,
+      body.sidebar-collapsed .nav .badge,
+      body.sidebar-collapsed .sidebar-extra,
+      body.sidebar-collapsed .sidebar-tip { display: block !important; }
+      body.sidebar-collapsed .nav a {
+        justify-content: flex-start !important;
+        padding: 0.55rem 0.75rem !important;
+        gap: 0.6rem !important;
+      }
+      body.sidebar-collapsed .brand { width: auto !important; }
+      body.sidebar-collapsed .brand-icon { width: 36px !important; height: 36px !important; }
+      .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      .main { padding: 1rem; }
+      .config-browser { grid-template-columns: 1fr !important; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      box-shadow: var(--shadow);
+    }
+
+    .card h3 {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .card .value {
+      font-size: 1.5rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .card .hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
+
+    .help {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      font-size: 0.6rem;
+      color: var(--muted);
+      cursor: help;
+    }
+
+    .section-desc {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 1rem;
+      max-width: 70ch;
+    }
+
+    .funnel {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: stretch;
+    }
+
+    .funnel-step {
+      flex: 1;
+      min-width: 72px;
+      text-align: center;
+      padding: 0.65rem 0.4rem;
+      background: var(--surface-2);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .funnel-step.active { border-color: var(--accent); background: var(--accent-soft); }
+    .funnel-step.stalled { border-color: var(--bad); opacity: 0.85; }
+    .funnel-step .layer { font-size: 0.6rem; color: var(--muted); text-transform: uppercase; }
+    .funnel-step .count { font-size: 1.1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .funnel-step .label { font-size: 0.68rem; color: var(--muted); margin-top: 0.15rem; }
+    .funnel-arrow { display: flex; align-items: center; color: var(--muted); font-size: 0.85rem; padding: 0 0.15rem; }
+
+    @media (max-width: 600px) {
+      .funnel { flex-direction: column; }
+      .funnel-arrow { transform: rotate(90deg); justify-content: center; }
+    }
+
+    .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { padding: 0.65rem 0.85rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th {
+      background: var(--surface-2);
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    .mono { font-family: var(--mono); font-size: 0.78rem; }
+    .truncate { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .tag {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 500;
+    }
+    .tag.pass { background: rgba(34,197,94,0.15); color: var(--ok); }
+    .tag.skip { background: rgba(139,156,179,0.15); color: var(--muted); }
+    .tag.pnl-pos { color: var(--ok); }
+    .tag.pnl-neg { color: var(--bad); }
+
+    .banner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1rem 1.15rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin-bottom: 1rem;
+    }
+    .banner.warn { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35); }
+    .banner.compact { padding: 0.75rem 1rem; }
+    .banner h3 { font-size: 0.95rem; margin-bottom: 0.25rem; }
+    .banner p { font-size: 0.82rem; color: var(--muted); }
+
+    .criteria-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      width: 100%;
+    }
+    .criterion {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.45rem 0.65rem;
+      background: var(--surface);
+      border-radius: 6px;
+      font-size: 0.78rem;
+    }
+    .criterion .status-ok { color: var(--ok); }
+    .criterion .status-bad { color: var(--bad); }
+
+    .mode-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+    @media (max-width: 600px) { .mode-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    .mode-btn {
+      padding: 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      text-align: left;
+      cursor: pointer;
+      color: inherit;
+      font-family: inherit;
+    }
+    .mode-btn strong { display: block; font-size: 0.85rem; margin-bottom: 0.2rem; }
+    .mode-btn span { font-size: 0.72rem; color: var(--muted); }
+    .mode-btn.selected { border-color: var(--accent); background: var(--accent-soft); }
+    .mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: var(--bad); border: 1px solid rgba(239,68,68,0.35); }
+    .btn-link {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 0.8rem;
+      cursor: pointer;
+      padding: 0;
+      font-family: inherit;
+    }
+    .btn-link:hover { text-decoration: underline; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+
+    .footer-note {
+      margin-top: 1.5rem;
+      padding: 1rem;
+      border-radius: var(--radius);
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .progress-bar {
+      height: 6px;
+      background: var(--surface-2);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 0.5rem;
+    }
+    .progress-bar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+
+    .chain-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      padding: 0.75rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .chain-bar label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .chain-switch {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      padding: 0.25rem;
+      background: var(--surface-2);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    .chain-switch button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.75rem;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .chain-switch button:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .chain-switch button.active {
+      background: var(--surface);
+      color: var(--text);
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    }
+    .chain-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .chain-dot.all { background: linear-gradient(135deg, #9945ff 33%, #627eea 33%, #627eea 66%, #f0b90b 66%); }
+    .chain-dot.solana { background: #9945ff; }
+    .chain-dot.eth { background: #627eea; }
+    .chain-dot.bsc { background: #f0b90b; }
+
+    .market-filter { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
+    .market-filter select {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.4rem 0.65rem;
+      font-size: 0.8rem;
+      font-family: inherit;
+      min-width: 160px;
+    }
+
+    @media (max-width: 900px) {
+      .market-filter { margin-left: 0; width: 100%; }
+      .market-filter select { flex: 1; }
+    }
+
+    .chain-status-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+    @media (max-width: 700px) { .chain-status-strip { grid-template-columns: 1fr; } }
+
+    .chain-status-card {
+      padding: 0.65rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.78rem;
+    }
+    .chain-status-card .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem; }
+    .chain-status-card .meta { color: var(--muted); font-size: 0.7rem; }
+
+    .chain-tag {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .chain-tag.solana { background: rgba(153,69,255,0.15); color: #c084fc; }
+    .chain-tag.eth { background: rgba(98,126,234,0.15); color: #93c5fd; }
+    .chain-tag.bsc { background: rgba(240,185,11,0.12); color: #fcd34d; }
+
+    .chain-only-solana { display: none; }
+    body[data-chain="solana"] .chain-only-solana,
+    body[data-chain="all"] .chain-only-solana { display: block; }
+    .chain-filter-hidden { display: none !important; }
+
+    /* Overview drill-down cards */
+    .glance-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .glance-card:hover { border-color: var(--accent); }
+    .glance-card .glance-title { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+    .glance-card .glance-meta { font-size: 0.78rem; color: var(--muted); }
+    .glance-card .glance-action { margin-top: auto; font-size: 0.75rem; color: var(--accent); }
+
+    /* Config browser */
+    .config-browser {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 1rem;
+      min-height: 480px;
+    }
+    .config-list {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .config-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 0.6rem 0.85rem;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .config-list button:hover { background: var(--surface-2); color: var(--text); }
+    .config-list button.active { background: var(--accent-soft); color: var(--accent); }
+    .config-list button:last-child { border-bottom: none; }
+
+    .config-viewer {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .config-viewer-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.82rem;
+    }
+    .config-viewer-header code { color: var(--accent); }
+    .config-viewer pre {
+      flex: 1;
+      margin: 0;
+      padding: 1rem;
+      overflow: auto;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      line-height: 1.55;
+      color: #c5d4e8;
+      max-height: 520px;
+    }
+    .config-viewer .config-note {
+      padding: 0.65rem 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <script>try{if(localStorage.getItem('sidebar-collapsed')==='1')document.body.classList.add('sidebar-collapsed')}catch(e){}</script>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-icon">CS</div>
+          <div class="brand-text">
+            <h1>Sniping Bot</h1>
+            <p>Operator dashboard</p>
+          </div>
+        </div>
+        <button type="button" class="sidebar-toggle" id="sidebar-toggle" title="Collapse sidebar" aria-label="Toggle sidebar">&#9776;</button>
+      </div>
+
+      <nav class="nav" aria-label="Main">
+        <div class="nav-section">Monitor</div>
+        <a href="#" data-view="overview" class="active"><span class="nav-icon">&#9673;</span><span class="label">Overview</span></a>
+        <a href="#" data-view="pipeline"><span class="nav-icon">&#8644;</span><span class="label">Pipeline health</span><span class="badge">L0–L10</span></a>
+        <a href="#" data-view="positions"><span class="nav-icon">&#9638;</span><span class="label">Open positions</span><span class="badge" id="nav-pos-badge">3</span></a>
+        <a href="#" data-view="activity"><span class="nav-icon">&#9889;</span><span class="label">Recent activity</span></a>
+
+        <div class="nav-section">Quality</div>
+        <a href="#" data-view="dq"><span class="nav-icon">&#10003;</span><span class="label">Data quality</span></a>
+        <a href="#" data-view="gate"><span class="nav-icon">&#9878;</span><span class="label">Gate review</span></a>
+
+        <div class="nav-section">Control</div>
+        <a href="#" data-view="mode"><span class="nav-icon">&#9675;</span><span class="label">Trading mode</span></a>
+        <a href="#" data-view="safety"><span class="nav-icon">&#9888;</span><span class="label">Safety</span></a>
+        <a href="#" data-view="configs"><span class="nav-icon">&#9881;</span><span class="label">Configs</span><span class="badge">12</span></a>
+      </nav>
+
+      <div class="sidebar-extra" id="sidebar-quick-chain" style="margin-top: auto; padding: 0.75rem; font-size: 0.72rem; color: var(--muted); border-top: 1px solid var(--border);">
+        <label style="display:block;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.4rem;">Quick chain</label>
+        <div class="chain-switch" id="chain-switch-sidebar" role="group" aria-label="Chain filter sidebar"></div>
+      </div>
+
+      <div class="sidebar-tip" style="margin-top: 0.75rem; padding: 0.75rem; font-size: 0.72rem; color: var(--muted);">
+        <strong style="color: var(--text);">Tip</strong><br />
+        Chain filter appears only on views that use per-chain data.
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Global chain filter (applies to all views) -->
+      <div class="chain-bar" id="chain-bar" role="region" aria-label="Chain and market filter">
+        <label>Chain</label>
+        <div class="chain-switch" id="chain-switch-main" role="group" aria-label="Select chain"></div>
+        <div class="market-filter">
+          <label for="market-select">Market</label>
+          <select id="market-select" aria-label="Filter by market within chain">
+            <option value="all">All markets on chain</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ═══ OVERVIEW (helicopter view) ═══ -->
+      <div class="view-panel active" data-view="overview" id="view-overview">
+        <header class="page-header">
+          <div>
+            <h2>Overview <span class="chain-tag solana" id="overview-chain-tag">solana</span></h2>
+            <p class="subtitle" id="overview-subtitle">Helicopter view · high-level health only</p>
+          </div>
+          <div class="pill-row" id="overview-pills">
+            <span class="pill ok"><span class="dot"></span> Bot running</span>
+            <span class="pill warn"><span class="dot"></span> Shadow mode</span>
+            <span class="pill" id="pill-mode">EXPLORATION</span>
+          </div>
+        </header>
+
+        <div class="chain-status-strip" id="chain-status-strip" aria-label="Chain health summary"></div>
+
+        <div class="banner warn compact" id="overview-alert">
+          <div style="flex:1;">
+            <h3 id="overview-alert-title">Attention needed on Solana</h3>
+            <p id="overview-alert-text">Pipeline proof incomplete · throughput CODE_DEFECT · 0 full L0→L10 traces.</p>
+          </div>
+          <button type="button" class="btn-link" data-goto="gate">Open gate review &rarr;</button>
+        </div>
+
+        <div class="grid grid-4" style="margin-bottom: 1.25rem;" id="kpi-grid">
+          <div class="card">
+            <h3>Today's PnL <span class="help" title="Realized PnL today">?</span></h3>
+            <div class="value" id="kpi-pnl" style="color: var(--ok);">+$12.40</div>
+            <div class="hint" id="kpi-pnl-hint">4 wins · 2 losses</div>
+          </div>
+          <div class="card">
+            <h3>Open positions</h3>
+            <div class="value" id="kpi-positions">3</div>
+            <div class="hint" id="kpi-positions-hint">$15 deployed</div>
+          </div>
+          <div class="card">
+            <h3>Exposure</h3>
+            <div class="value" id="kpi-exposure">$15 / $500</div>
+            <div class="progress-bar"><span id="kpi-exposure-bar" style="width: 3%;"></span></div>
+            <div class="hint" id="kpi-exposure-hint">3% of max</div>
+          </div>
+          <div class="card">
+            <h3>Win rate (7d)</h3>
+            <div class="value" id="kpi-winrate">58%</div>
+            <div class="hint" id="kpi-winrate-hint">29 closed</div>
+          </div>
+        </div>
+
+        <h3 style="font-size:0.85rem;color:var(--muted);margin-bottom:0.65rem;">Drill down</h3>
+        <div class="grid grid-3">
+          <div class="card glance-card" data-goto="pipeline" tabindex="0" role="button">
+            <div class="glance-title">Pipeline health</div>
+            <div class="glance-meta" id="glance-pipeline">L0: 124/hr · stalled at L10 · CODE_DEFECT</div>
+            <div class="glance-action">View full funnel &rarr;</div>
+          </div>
+          <div class="card glance-card" data-goto="positions" tabindex="0" role="button">
+            <div class="glance-title">Open positions</div>
+            <div class="glance-meta" id="glance-positions">3 active · best +21.4%</div>
+            <div class="glance-action">View positions table &rarr;</div>
+          </div>
+          <div class="card glance-card" data-goto="activity" tabindex="0" role="button">
+            <div class="glance-title">Recent activity</div>
+            <div class="glance-meta" id="glance-activity">Last: position_opened 12:04:18</div>
+            <div class="glance-action">View event log &rarr;</div>
+          </div>
+          <div class="card glance-card" data-goto="dq" tabindex="0" role="button">
+            <div class="glance-title">Data quality</div>
+            <div class="glance-meta" id="glance-dq">Pass rate 1.1% · 1,842 decisions</div>
+            <div class="glance-action">View DQ breakdown &rarr;</div>
+          </div>
+          <div class="card glance-card" data-goto="gate" tabindex="0" role="button">
+            <div class="glance-title">Gate review</div>
+            <div class="glance-meta" id="glance-gate">NOT_READY · PIPELINE_PROOF</div>
+            <div class="glance-action">View gate criteria &rarr;</div>
+          </div>
+          <div class="card glance-card" data-goto="configs" tabindex="0" role="button">
+            <div class="glance-title">Configuration</div>
+            <div class="glance-meta">12 YAML files in config/</div>
+            <div class="glance-action">Browse configs &rarr;</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ PIPELINE HEALTH ═══ -->
+      <div class="view-panel" data-view="pipeline" id="view-pipeline">
+        <header class="page-header">
+          <div>
+            <h2>Pipeline health <span class="chain-tag solana" id="pipeline-chain-tag">solana</span></h2>
+            <p class="section-desc">L0 through L10 stage counts, ingestion heartbeats, and shadow flip progress for the selected chain.</p>
+          </div>
+          <span class="pill bad" id="pipeline-verdict-pill">CODE_DEFECT</span>
+        </header>
+
+        <div class="card" style="margin-bottom: 1rem;">
+          <h3>Stage funnel (last hour)</h3>
+          <div class="funnel" id="pipeline-funnel" role="list" aria-label="Pipeline stages"></div>
+          <p class="hint" style="margin-top:0.75rem;">
+            <strong style="color:var(--warn);">Stalled at L10?</strong> No position reached exit + evaluation yet.
+          </p>
+        </div>
+
+        <div class="card" style="margin-bottom: 1rem;">
+          <h3>Layer detail (L0 → L10)</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Layer</th><th>Stage</th><th>Count/hr</th><th>Drop-off</th><th>Status</th></tr>
+              </thead>
+              <tbody id="layer-detail-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid grid-2">
+          <div class="card">
+            <h3>Ingestion by market (last heartbeat)</h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Market</th><th>Chain</th><th>Events in</th><th>Emitted</th><th>Valid %</th></tr></thead>
+                <tbody id="ingestion-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Rescan worker (L0.5)</h3>
+            <p class="hint" style="margin-bottom:0.5rem;">Re-emits eligible tokens at 14 age bands (15m → 48h).</p>
+            <div class="value" style="font-size:1.1rem;">14 bands</div>
+            <p class="hint">Last cycle: 42 eligible · 8 re-emitted · transport <code class="mono">rescan_8h</code></p>
+          </div>
+        </div>
+
+        <div class="grid grid-2" style="margin-top:1rem;">
+          <div class="card">
+            <h3>Probe backlog</h3>
+            <div class="value" id="probe-backlog">3%</div>
+            <p class="hint">Metadata / LP / creator reputation probes pending</p>
+          </div>
+          <div class="card">
+            <h3>Shadow live-flip gate</h3>
+            <div class="value" style="font-size:1.1rem;">47 <span style="color:var(--muted);font-size:0.85rem;">/ 500</span></div>
+            <div class="progress-bar"><span style="width: 9.4%;"></span></div>
+            <p class="hint">Aggregate PnL: <span style="color:var(--ok);">+842 bps</span> · Gate: <span class="tag skip">FAIL</span></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ OPEN POSITIONS ═══ -->
+      <div class="view-panel" data-view="positions" id="view-positions">
+        <header class="page-header">
+          <div>
+            <h2>Open positions</h2>
+            <p class="section-desc">Live positions monitored for TP/SL/time exits. Click a row (future) for full L0→L10 trace.</p>
+          </div>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Token</th><th>Chain</th><th>Market</th><th>Entry</th><th>Current</th><th>PnL</th><th>Age</th><th>Exit plan</th>
+              </tr>
+            </thead>
+            <tbody id="positions-tbody"></tbody>
+          </table>
+        </div>
+        <div class="grid grid-3" style="margin-top:1rem;">
+          <div class="card">
+            <h3>Deployed capital</h3>
+            <div class="value" id="pos-deployed">$15</div>
+          </div>
+          <div class="card">
+            <h3>Unrealized PnL</h3>
+            <div class="value" id="pos-unrealized" style="color:var(--ok);">+$2.18</div>
+          </div>
+          <div class="card">
+            <h3>Oldest position</h3>
+            <div class="value" id="pos-oldest" style="font-size:1.1rem;">6m 44s</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ RECENT ACTIVITY ═══ -->
+      <div class="view-panel" data-view="activity" id="view-activity">
+        <header class="page-header">
+          <div>
+            <h2>Recent activity</h2>
+            <p class="section-desc">Event bus stream — ingestion, DQ, execution, position lifecycle.</p>
+          </div>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>Event</th><th>Chain</th><th>Token</th><th>Detail</th></tr>
+            </thead>
+            <tbody id="activity-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ═══ DATA QUALITY ═══ -->
+      <div class="view-panel" data-view="dq" id="view-dq">
+        <header class="page-header">
+          <div>
+            <h2>Data quality</h2>
+            <p class="section-desc">DQ engine decisions in the last 24h — mandatory hard-rejects never bypassed by mode.</p>
+          </div>
+        </header>
+        <div class="grid grid-3" id="dq-grid">
+          <div class="card">
+            <h3>Decisions</h3>
+            <div class="value" id="dq-total">1,842</div>
+            <div class="hint" id="dq-breakdown">PASS 12 · RISKY 8 · REJECT 890 · SKIP 932</div>
+          </div>
+          <div class="card">
+            <h3>Pass rate</h3>
+            <div class="value" id="dq-pass-rate">1.1%</div>
+            <div class="hint">Rises in EXPLORATION mode</div>
+          </div>
+          <div class="card">
+            <h3>Mandatory rejects</h3>
+            <ul style="font-size:0.78rem;color:var(--muted);margin-top:0.35rem;padding-left:1.1rem;">
+              <li>serial_launcher</li>
+              <li>no_social_links</li>
+              <li>high_total_supply</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <h3>Top reject reasons</h3>
+          <ul id="dq-rejects" style="font-size:0.82rem;color:var(--muted);margin-top:0.5rem;padding-left:1.1rem;"></ul>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <h3>Detector status</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Detector</th><th>Enabled</th><th>Calls (24h)</th><th>Timeout rate</th></tr></thead>
+              <tbody>
+                <tr><td>honeypot_simulation</td><td><span class="tag skip">EVM only</span></td><td class="mono">—</td><td>—</td></tr>
+                <tr><td>wash_trading</td><td><span class="tag pass">on</span></td><td class="mono">412</td><td>0.2%</td></tr>
+                <tr><td>lp_lock</td><td><span class="tag pass">on</span></td><td class="mono">388</td><td>1.1%</td></tr>
+                <tr><td>rugcheck (Solana)</td><td><span class="tag pass">on</span></td><td class="mono">1,102</td><td>0.4%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ GATE REVIEW ═══ -->
+      <div class="view-panel" data-view="gate" id="view-gate">
+        <header class="page-header">
+          <div>
+            <h2>Gate review</h2>
+            <p class="section-desc">Mirrors <code class="mono">scripts/gate_review_collect.sh</code> — is the market quiet, or is something broken?</p>
+          </div>
+        </header>
+
+        <div class="banner warn" id="gate-banner">
+          <div style="flex: 1;">
+            <h3 id="gate-banner-title">Pipeline proof not complete yet</h3>
+            <p id="gate-banner-text">
+              No full L0→L10 trace in the last 30 minutes.
+              Run <code class="mono">make phase2-proof MINS=30</code> after fixes deploy.
+            </p>
+            <div class="criteria-grid" id="gate-criteria"></div>
+            <p class="hint chain-only-solana" style="margin-top:0.5rem;">
+              <strong>WSOL check</strong> applies to Solana only (<code class="mono">config/chains.yaml</code>).
+            </p>
+          </div>
+          <div>
+            <span class="pill bad" id="throughput-verdict">THROUGHPUT: CODE_DEFECT</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="grid grid-2">
+            <div>
+              <strong style="font-size:0.8rem;color:var(--muted);">PRODUCTION DECISION</strong>
+              <p style="font-size:1.1rem;margin-top:0.25rem;" id="gate-production">NOT_READY</p>
+            </div>
+            <div>
+              <strong style="font-size:0.8rem;color:var(--muted);">MODE DETECTED</strong>
+              <p style="font-size:1.1rem;margin-top:0.25rem;">PIPELINE_PROOF</p>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" type="button" disabled>Run 30m gate collection</button>
+            <button class="btn btn-ghost" type="button" disabled>Download brief (.txt)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TRADING MODE ═══ -->
+      <div class="view-panel" data-view="mode" id="view-mode">
+        <header class="page-header">
+          <div>
+            <h2>Trading mode</h2>
+            <p class="section-desc">Per-chain operational mode. Same as Telegram <code class="mono">/mode</code>. One transition per window.</p>
+          </div>
+          <span class="pill" id="mode-chain-pill">solana · EXPLORATION</span>
+        </header>
+        <div class="mode-grid">
+          <button class="mode-btn" type="button" disabled><strong>STRICT</strong><span>Hardest filters · safest</span></button>
+          <button class="mode-btn" type="button" disabled><strong>BALANCED</strong><span>Default day-to-day</span></button>
+          <button class="mode-btn selected" type="button" disabled><strong>EXPLORATION</strong><span>More trades · testing</span></button>
+          <button class="mode-btn" type="button" disabled><strong>VERY EXPLORATION</strong><span>Maximum aggression</span></button>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <h3>Mode thresholds (from config)</h3>
+          <p class="hint">Loaded from <code class="mono">config/pipeline.yaml</code> → <code class="mono">operational_modes</code>. Changes are versioned as StrategyVersion.</p>
+        </div>
+      </div>
+
+      <!-- ═══ SAFETY ═══ -->
+      <div class="view-panel" data-view="safety" id="view-safety">
+        <header class="page-header">
+          <div>
+            <h2>Safety controls</h2>
+            <p class="section-desc">Destructive actions require confirmation (Telegram <code class="mono">/kill</code>, <code class="mono">/resume</code>).</p>
+          </div>
+        </header>
+        <div class="card">
+          <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem;">Mockup shows layout only — no live actions.</p>
+          <div class="actions">
+            <button class="btn btn-danger" type="button" disabled>Kill switch — stop all trading</button>
+            <button class="btn btn-ghost" type="button" disabled>Resume trading</button>
+            <button class="btn btn-ghost" type="button" disabled>Force close position…</button>
+          </div>
+          <p class="hint" style="margin-top:0.75rem;">Kill switch: <span class="pill ok"><span class="dot"></span> Active (not halted)</span></p>
+        </div>
+        <div class="grid grid-2" style="margin-top:1rem;">
+          <div class="card">
+            <h3>Drawdown tier</h3>
+            <div class="value" style="font-size:1rem;">Tier 0 — normal</div>
+            <p class="hint">From <code class="mono">config/budgets.yaml</code> risk controller</p>
+          </div>
+          <div class="card">
+            <h3>Gas daily cap</h3>
+            <div class="value" style="font-size:1rem;">12% used</div>
+            <p class="hint"><code class="mono">gas_system_daily_cap_gwei</code></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ CONFIGS ═══ -->
+      <div class="view-panel" data-view="configs" id="view-configs">
+        <header class="page-header">
+          <div>
+            <h2>Configuration</h2>
+            <p class="section-desc">Read-only view of all YAML files under <code class="mono">config/</code>. Production loads these at startup; secrets stay in env vars.</p>
+          </div>
+        </header>
+        <div class="config-browser">
+          <div class="config-list" id="config-list" role="tablist" aria-label="Config files"></div>
+          <div class="config-viewer">
+            <div class="config-viewer-header">
+              <span><code id="config-filename">pipeline.yaml</code></span>
+              <span class="hint" id="config-path">config/pipeline.yaml</span>
+            </div>
+            <pre id="config-content"></pre>
+            <div class="config-note">Mockup shows representative excerpts. Full files live in the repo. API keys and RPC URLs use <code class="mono">${ENV_VAR}</code> placeholders.</div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="footer-note">
+        <strong>Static mockup</strong> — sidebar switches views (no giant scroll). Chain filter applies globally.
+        Configs mirror <code class="mono">config/*.yaml</code>.
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    const CHAINS = {
+      all: {
+        label: 'All chains', short: 'all', mode: 'EXPLORATION',
+        kpi: { pnl: '+$18.75', pnlHint: '7 wins · 4 losses', positions: 5, posHint: '$25 deployed', exposure: '$25 / $500', exposurePct: 5, winrate: '54%', winHint: '41 closed' },
+        funnel: [198, 24, 16, 10, 4, 3, 1],
+        layers: [
+          ['L0', 'Data ingestion', 198, '—', 'ok'], ['L0.5', 'Rescan worker', 42, '—', 'ok'],
+          ['L1', 'Data quality', 24, '88%', 'ok'], ['L2', 'Features', 16, '67%', 'ok'],
+          ['L3', 'Edge discovery', 10, '63%', 'ok'], ['L4', 'Probability models', 8, '80%', 'ok'],
+          ['L5', 'Edge validation', 4, '50%', 'warn'], ['L6', 'Selection', 4, '100%', 'ok'],
+          ['L7', 'Capital', 3, '75%', 'ok'], ['L8', 'Execution', 3, '100%', 'ok'],
+          ['L9', 'Position engine', 2, '67%', 'ok'], ['L10', 'Learning', 1, '50%', 'ok'],
+        ],
+        gate: { verdict: 'CODE_DEFECT', wsol: 0, validRatio: '88%', backlog: '4%', dqPass: 1, traces: 0, shadow: 0 },
+        dq: { total: '2,410', breakdown: 'PASS 18 · RISKY 11 · REJECT 1,102 · SKIP 1,279', passRate: '1.2%', rejects: ['no_social_links — 512', 'serial_launcher — 401', 'honeypot_sim — 88'] },
+        status: { running: true, positions: 5, l0: 198, verdict: 'MIXED' },
+      },
+      solana: {
+        label: 'Solana', short: 'solana', mode: 'EXPLORATION',
+        markets: ['all', 'solana-pumpfun-amm', 'solana-raydium-v4', 'solana-pumpfun', 'solana-raydium-clmm'],
+        kpi: { pnl: '+$12.40', pnlHint: '4 wins · 2 losses', positions: 3, posHint: '$15 deployed', exposure: '$15 / $500', exposurePct: 3, winrate: '58%', winHint: '29 closed' },
+        funnel: [124, 18, 12, 8, 3, 2, 0],
+        layers: [
+          ['L0', 'Solana ingestion', 124, '—', 'ok'], ['L0.5', 'Rescan', 28, '—', 'ok'],
+          ['L1', 'Data quality', 18, '85%', 'ok'], ['L2', 'Features', 12, '67%', 'ok'],
+          ['L3', 'Edge', 8, '67%', 'ok'], ['L4', 'Models', 6, '75%', 'ok'],
+          ['L5', 'Validation', 3, '50%', 'warn'], ['L6', 'Selection', 3, '100%', 'ok'],
+          ['L7', 'Capital', 2, '67%', 'ok'], ['L8', 'Execution', 2, '100%', 'ok'],
+          ['L9', 'Positions', 0, '0%', 'bad'], ['L10', 'Learning', 0, '—', 'bad'],
+        ],
+        gate: { verdict: 'CODE_DEFECT', wsol: 0, validRatio: '91%', backlog: '3%', dqPass: 0, traces: 0, shadow: 0 },
+        dq: { total: '1,842', breakdown: 'PASS 12 · RISKY 8 · REJECT 890 · SKIP 932', passRate: '1.1%', rejects: ['no_social_links — 412', 'serial_launcher — 318', 'system_mint_rejected — 201'] },
+        status: { running: true, positions: 3, l0: 124, verdict: 'CODE_DEFECT' },
+        ingestion: [
+          { market: 'solana-pumpfun-amm', chain: 'solana', in: '602,758', out: '42', valid: '95%' },
+          { market: 'solana-raydium-v4', chain: 'solana', in: '34,706', out: '8', valid: '100%' },
+        ],
+        positions: [
+          { token: '7xKX…dMZ', chain: 'solana', market: 'pumpfun-amm', entry: '$0.00042', current: '$0.00051', pnl: '+21.4%', age: '4m 12s' },
+          { token: 'EPjF…Dt1v', chain: 'solana', market: 'raydium-v4', entry: '$0.00110', current: '$0.00105', pnl: '-4.5%', age: '2m 08s' },
+          { token: 'DezX…B263', chain: 'solana', market: 'pumpfun-amm', entry: '$0.00008', current: '$0.00009', pnl: '+12.5%', age: '6m 44s' },
+        ],
+        activity: [
+          ['12:04:18', 'position_opened', 'solana', '7xKX…', 'pumpfun-amm · shadow $5'],
+          ['12:03:55', 'dq_decision', 'solana', 'Ab3c…', 'RISKY_PASS'],
+          ['12:03:52', 'solana_ingestion_emitted', 'solana', 'Ab3c…', 'pumpfun-amm pool create'],
+          ['12:03:01', 'dq_decision', 'solana', 'So11…', 'SKIP · system mint'],
+          ['12:02:44', 'position_closed', 'solana', '9WzD…', 'TP1 · +18.2%'],
+          ['12:01:30', 'solana_ingestion_emitted', 'solana', 'Xy9z…', 'raydium-v4 init'],
+        ],
+      },
+      eth: {
+        label: 'Ethereum', short: 'eth', mode: 'BALANCED',
+        markets: ['all', 'eth-uniswap-v2', 'eth-uniswap-v3', 'eth-sushiswap-v2', 'eth-sushiswap-v3'],
+        kpi: { pnl: '+$4.20', pnlHint: '2 wins · 1 loss', positions: 1, posHint: '$5 deployed', exposure: '$5 / $500', exposurePct: 1, winrate: '48%', winHint: '8 closed' },
+        funnel: [48, 4, 3, 1, 1, 1, 1],
+        layers: [
+          ['L0', 'EVM ingestion', 48, '—', 'ok'], ['L1', 'Data quality', 4, '92%', 'ok'],
+          ['L2', 'Features', 3, '75%', 'ok'], ['L3', 'Edge', 1, '33%', 'warn'],
+          ['L5', 'Validation', 1, '100%', 'ok'], ['L8', 'Execution', 1, '100%', 'ok'],
+          ['L10', 'Learning', 1, '100%', 'ok'],
+        ],
+        gate: { verdict: 'HEALTHY', wsol: null, validRatio: '96%', backlog: '2%', dqPass: 1, traces: 1, shadow: 0 },
+        dq: { total: '312', breakdown: 'PASS 4 · RISKY 2 · REJECT 180 · SKIP 126', passRate: '1.9%', rejects: ['honeypot_sim — 42', 'no_social_links — 38', 'high_buy_tax — 21'] },
+        status: { running: true, positions: 1, l0: 48, verdict: 'HEALTHY' },
+        ingestion: [
+          { market: 'eth-uniswap-v2', chain: 'eth', in: '12,400', out: '6', valid: '100%' },
+          { market: 'eth-uniswap-v3', chain: 'eth', in: '8,210', out: '3', valid: '100%' },
+          { market: 'eth-sushiswap-v2', chain: 'eth', in: '2,105', out: '1', valid: '100%' },
+        ],
+        positions: [
+          { token: '0xabc…f901', chain: 'eth', market: 'uniswap-v2', entry: '$0.00210', current: '$0.00235', pnl: '+11.9%', age: '8m 22s' },
+        ],
+        activity: [
+          ['11:58:02', 'dex_pool_detected', 'eth', '0xabc…', 'eth-uniswap-v2 PairCreated'],
+          ['11:57:44', 'dq_decision', 'eth', '0xdef…', 'PASS'],
+          ['11:55:10', 'position_closed', 'eth', '0x999…', 'TP1 · +9.1%'],
+        ],
+      },
+      bsc: {
+        label: 'BNB Chain', short: 'bsc', mode: 'STRICT',
+        markets: ['all', 'bsc-pancake-v2', 'bsc-pancake-v3'],
+        kpi: { pnl: '+$2.15', pnlHint: '1 win · 1 loss', positions: 1, posHint: '$5 deployed', exposure: '$5 / $500', exposurePct: 1, winrate: '50%', winHint: '4 closed' },
+        funnel: [26, 2, 1, 1, 0, 0, 0],
+        layers: [
+          ['L0', 'EVM ingestion', 26, '—', 'ok'], ['L1', 'Data quality', 2, '92%', 'ok'],
+          ['L2', 'Features', 1, '50%', 'warn'], ['L3', 'Edge', 1, '100%', 'ok'],
+          ['L5', 'Validation', 0, '0%', 'bad'],
+        ],
+        gate: { verdict: 'MARKET_QUIET', wsol: null, validRatio: '100%', backlog: '8%', dqPass: 0, traces: 0, shadow: 0 },
+        dq: { total: '256', breakdown: 'PASS 2 · RISKY 1 · REJECT 32 · SKIP 221', passRate: '1.2%', rejects: ['serial_launcher — 45', 'insufficient_liquidity — 31'] },
+        status: { running: true, positions: 1, l0: 26, verdict: 'QUIET' },
+        ingestion: [
+          { market: 'bsc-pancake-v2', chain: 'bsc', in: '4,880', out: '2', valid: '100%' },
+          { market: 'bsc-pancake-v3', chain: 'bsc', in: '1,240', out: '0', valid: '—' },
+        ],
+        positions: [
+          { token: '0x71b…a891', chain: 'bsc', market: 'pancake-v2', entry: '$0.00031', current: '$0.00028', pnl: '-9.7%', age: '3m 40s' },
+        ],
+        activity: [
+          ['11:50:11', 'dex_pool_detected', 'bsc', '0x71b…', 'bsc-pancake-v2 PairCreated'],
+          ['11:49:58', 'dq_decision', 'bsc', '0x71b…', 'SKIP · serial launcher'],
+        ],
+      },
+    };
+
+    const CONFIG_FILES = {
+      'chains.yaml': `# config/chains.yaml — EVM chains + Solana programs
+chains:
+  eth:
+    name: "Ethereum Mainnet"
+    chain_id: 1
+    factories:
+      - protocol: uniswap-v2
+        market: eth-uniswap-v2
+  bsc:
+    name: "BNB Smart Chain"
+    chain_id: 56
+    factories:
+      - protocol: pancakeswap-v2
+        market: bsc-pancake-v2
+
+solana:
+  chain_id: "solana"
+  programs:
+    - name: pumpfun-amm
+    - name: raydium-v4
+      subscription_method: "transactionSubscribe"
+# ... truncated`,
+      'pipeline.yaml': `# config/pipeline.yaml
+pipeline:
+  schema_version: "1"
+
+database:
+  engine: postgres
+  host: localhost
+  port: 5432
+  database: sniper
+
+worker:
+  idle_backoff_ms: 100
+  max_retry_count: 3
+
+operational_modes:
+  default: BALANCED
+  exploration_budget_pct: 3.0
+# ... truncated`,
+      'data_quality.yaml': `# config/data_quality.yaml
+data_quality:
+  detector_timeout_ms: 800
+  detectors:
+    honeypot_simulation: false  # EVM-only
+    tax_anomaly: true
+    lp_lock: true
+    wash_trading: true
+  reject_unknown_social_links: true
+  reject_unknown_creator_count: true
+  reject_unknown_total_supply: true
+# ... truncated`,
+      'execution.yaml': `# config/execution.yaml
+execution:
+  concurrency_limit: 10
+  wallet_shard_count: 4
+  fee_bump_delta_pct: 15
+  fee_bump_max_attempts: 3
+  tx_timeout_seconds: 30
+  mempool_route: public
+# ... truncated`,
+      'budgets.yaml': `# config/budgets.yaml
+budgets:
+  rpc_requests_per_second: 50
+  rpc_burst_size: 100
+  gas_wallet_daily_cap_gwei: 1000000
+  gas_system_daily_cap_gwei: 5000000
+risk:
+  check_interval_seconds: 30
+  drawdown_window_hours: 24
+# ... truncated`,
+      'capital.yaml': `# config/capital.yaml
+capital:
+  use_dynamic_sizing: true
+  base_size_usd: 5.0
+  min_size_usd: 5.0
+  max_size_usd: 50.0
+  max_portfolio_exposure_usd: 500
+# ... truncated`,
+      'gas.yaml': `# config/gas.yaml
+gas:
+  eip1559_enabled: true
+  base_fee_multiplier: 1.2
+  priority_fee_gwei:
+    eth: 2
+    bsc: 1
+  gas_limits:
+    swap: 250000
+# ... truncated`,
+      'probability.yaml': `# config/probability.yaml
+probability:
+  model_version: "1"
+  slippage_alpha_default: 1.0
+  latency_p99_ms: 800
+# ... truncated`,
+      'feature.yaml': `# config/feature.yaml
+feature:
+  normalization: min_max
+  confidence_floor: 0.3
+  stability_window: 20
+# ... truncated`,
+      'priority.yaml': `# config/priority.yaml
+priority:
+  event_weights:
+    market_data_event: 100
+    execution_result: 90
+    position_state: 80
+# ... truncated`,
+      'phases.yaml': `# config/phases.yaml — parallel dev phase definitions
+phases:
+  - name: "Phase 2 Gate"
+    complexity: 8
+    group: B
+    skills: pipeline,observability
+# ... truncated`,
+      'historical_seeds.yaml': `# config/historical_seeds.yaml
+historical_seeds:
+  enabled: false
+  replay_window_days: 7
+# ... truncated`,
+    };
+
+    let activeChain = 'solana';
+    let activeMarket = 'all';
+    let activeView = 'overview';
+    let activeConfig = 'pipeline.yaml';
+
+    // Views where chain/market filter affects displayed data
+    const CHAIN_FILTER_VIEWS = new Set([
+      'overview', 'pipeline', 'positions', 'activity', 'dq', 'gate', 'mode',
+    ]);
+
+    function updateChainFilterVisibility(view) {
+      const show = CHAIN_FILTER_VIEWS.has(view);
+      document.getElementById('chain-bar').classList.toggle('chain-filter-hidden', !show);
+      document.getElementById('sidebar-quick-chain').classList.toggle('chain-filter-hidden', !show);
+    }
+
+    function chainTagHtml(chain) {
+      return `<span class="chain-tag ${chain}">${chain}</span>`;
+    }
+
+    function setView(view) {
+      activeView = view;
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.toggle('active', p.dataset.view === view));
+      document.querySelectorAll('.nav a[data-view]').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+      updateChainFilterVisibility(view);
+      window.scrollTo(0, 0);
+    }
+
+    function renderChainButtons(container) {
+      container.innerHTML = '';
+      Object.entries(CHAINS).forEach(([id, c]) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.chain = id;
+        btn.className = id === activeChain ? 'active' : '';
+        btn.innerHTML = `<span class="chain-dot ${id === 'all' ? 'all' : c.short}"></span><span class="chain-label">${c.label}</span>`;
+        btn.addEventListener('click', () => setChain(id));
+        container.appendChild(btn);
+      });
+    }
+
+    function renderStatusStrip() {
+      const strip = document.getElementById('chain-status-strip');
+      strip.innerHTML = '';
+      ['solana', 'eth', 'bsc'].forEach(id => {
+        const c = CHAINS[id];
+        const card = document.createElement('div');
+        card.className = 'chain-status-card';
+        card.innerHTML = `
+          <div class="row"><strong>${c.label}</strong>${chainTagHtml(id)}</div>
+          <div class="meta">L0: ${c.status.l0}/hr · ${c.status.positions} open · ${c.status.verdict}</div>
+          <button type="button" class="btn btn-ghost" style="margin-top:0.4rem;padding:0.25rem 0.5rem;font-size:0.72rem;width:100%;" data-jump="${id}">View chain</button>
+        `;
+        card.querySelector('[data-jump]').addEventListener('click', () => setChain(id));
+        strip.appendChild(card);
+      });
+    }
+
+    function renderMarketSelect() {
+      const sel = document.getElementById('market-select');
+      const c = CHAINS[activeChain];
+      sel.innerHTML = '';
+      if (activeChain === 'all') {
+        sel.disabled = true;
+        sel.innerHTML = '<option>Select a single chain to filter markets</option>';
+        return;
+      }
+      sel.disabled = false;
+      c.markets.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m === 'all' ? 'All markets on chain' : m;
+        if (m === activeMarket) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+
+    function renderFunnel(counts) {
+      const funnel = document.getElementById('pipeline-funnel');
+      if (!funnel) return;
+      funnel.innerHTML = '';
+      const stages = [
+        { layer: 'L0', count: counts[0], label: 'Ingestion' },
+        { layer: 'L1', count: counts[1], label: 'Data quality' },
+        { layer: 'L2', count: counts[2], label: 'Features' },
+        { layer: 'L3', count: counts[3], label: 'Edge' },
+        { layer: 'L5', count: counts[4], label: 'Validation' },
+        { layer: 'L8', count: counts[5], label: 'Execution' },
+        { layer: 'L10', count: counts[6], label: 'Learning', stalled: counts[6] === 0 },
+      ];
+      stages.forEach((s, i) => {
+        if (i > 0) {
+          const arrow = document.createElement('div');
+          arrow.className = 'funnel-arrow';
+          arrow.textContent = '→';
+          funnel.appendChild(arrow);
+        }
+        const step = document.createElement('div');
+        step.className = 'funnel-step' + (s.count > 0 ? ' active' : '') + (s.stalled ? ' stalled' : '');
+        step.innerHTML = `<div class="layer">${s.layer}</div><div class="count">${s.count}</div><div class="label">${s.label}</div>`;
+        funnel.appendChild(step);
+      });
+    }
+
+    function renderLayerDetail(layers) {
+      const tbody = document.getElementById('layer-detail-tbody');
+      if (!tbody || !layers) return;
+      tbody.innerHTML = layers.map(([layer, stage, count, drop, status]) => {
+        const statusTag = status === 'ok' ? 'pass' : status === 'warn' ? 'skip' : 'skip';
+        const statusLabel = status === 'ok' ? 'OK' : status === 'warn' ? 'WARN' : 'STALLED';
+        return `<tr>
+          <td class="mono">${layer}</td><td>${stage}</td><td class="mono">${count}</td>
+          <td>${drop}</td><td><span class="tag ${statusTag}">${statusLabel}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderGateCriteria(g) {
+      const el = document.getElementById('gate-criteria');
+      if (!el) return;
+      const items = [
+        ['Valid token ratio', g.validRatio, true],
+        ['Probe backlog', g.backlog, true],
+        ['DQ pass', g.dqPass >= 1 ? '≥1 ✓' : '0 ✗', g.dqPass >= 1],
+        ['Full traces', g.traces >= 1 ? '≥1 ✓' : '0 ✗', g.traces >= 1],
+        ['Shadow observer', g.shadow === 0 ? '0 errors ✓' : `${g.shadow} ✗`, g.shadow === 0],
+      ];
+      if (g.wsol !== null) items.unshift(['WSOL as token', g.wsol === 0 ? '0 ✓' : `${g.wsol} ✗`, g.wsol === 0]);
+      el.innerHTML = items.map(([label, val, ok]) =>
+        `<div class="criterion"><span>${label}</span><span class="${ok ? 'status-ok' : 'status-bad'}">${val}</span></div>`
+      ).join('');
+      const verdictEl = document.getElementById('throughput-verdict');
+      if (verdictEl) {
+        verdictEl.textContent = `THROUGHPUT: ${g.verdict}`;
+        verdictEl.className = 'pill ' + (g.verdict === 'HEALTHY' ? 'ok' : g.verdict === 'MARKET_QUIET' ? 'warn' : 'bad');
+      }
+      const pipelinePill = document.getElementById('pipeline-verdict-pill');
+      if (pipelinePill) {
+        pipelinePill.textContent = g.verdict;
+        pipelinePill.className = 'pill ' + (g.verdict === 'HEALTHY' ? 'ok' : g.verdict === 'MARKET_QUIET' ? 'warn' : 'bad');
+      }
+      const probe = document.getElementById('probe-backlog');
+      if (probe) probe.textContent = g.backlog;
+    }
+
+    function renderTableRows(tbody, rows, cols, emptyColspan) {
+      if (!tbody) return;
+      tbody.innerHTML = rows.length
+        ? rows.map(r => `<tr>${cols(r).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
+        : `<tr><td colspan="${emptyColspan}" style="color:var(--muted);">No data for this filter</td></tr>`;
+    }
+
+    function getChainData() {
+      const c = CHAINS[activeChain];
+      if (activeChain === 'all') {
+        return {
+          ...c,
+          ingestion: [...CHAINS.solana.ingestion, ...CHAINS.eth.ingestion, ...CHAINS.bsc.ingestion],
+          positions: [...CHAINS.solana.positions, ...CHAINS.eth.positions, ...CHAINS.bsc.positions],
+          activity: [...CHAINS.solana.activity, ...CHAINS.eth.activity, ...CHAINS.bsc.activity].sort((a, b) => b[0].localeCompare(a[0])),
+          layers: c.layers,
+        };
+      }
+      let ing = c.ingestion || [];
+      let pos = c.positions || [];
+      let act = c.activity || [];
+      if (activeMarket !== 'all') {
+        const m = activeMarket.replace(/^(solana|eth|bsc)-/, '');
+        pos = pos.filter(p => p.market.includes(m));
+        act = act.filter(a => a[4] && a[4].includes(m));
+        ing = ing.filter(r => r.market.includes(activeMarket.replace(/^solana-/, 'solana-').split('-').slice(1).join('-')) || r.market === activeMarket || r.market.includes(m));
+      }
+      return { ...c, ingestion: ing, positions: pos, activity: act };
+    }
+
+    function applyChainView() {
+      const c = getChainData();
+      document.body.dataset.chain = activeChain;
+
+      const tagClass = activeChain === 'all' ? 'solana' : c.short;
+      const tagText = activeChain === 'all' ? 'all chains' : c.short;
+      ['overview-chain-tag', 'pipeline-chain-tag'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = tagText; el.className = 'chain-tag ' + tagClass; }
+      });
+
+      document.getElementById('overview-subtitle').textContent =
+        activeChain === 'all' ? 'Helicopter view · all chains · mock data' : `Helicopter view · ${c.label} · ${c.mode}`;
+
+      document.getElementById('pill-mode').textContent = activeChain === 'all' ? 'multi-chain' : `${c.short} · ${c.mode}`;
+      const modePill = document.getElementById('mode-chain-pill');
+      if (modePill) modePill.textContent = activeChain === 'all' ? 'per-chain modes' : `${c.short} · ${c.mode}`;
+
+      document.getElementById('kpi-pnl').textContent = c.kpi.pnl;
+      document.getElementById('kpi-pnl-hint').textContent = c.kpi.pnlHint;
+      document.getElementById('kpi-positions').textContent = c.kpi.positions;
+      document.getElementById('kpi-positions-hint').textContent = c.kpi.posHint;
+      document.getElementById('kpi-exposure').textContent = c.kpi.exposure;
+      document.getElementById('kpi-exposure-bar').style.width = c.kpi.exposurePct + '%';
+      document.getElementById('kpi-winrate').textContent = c.kpi.winrate;
+      document.getElementById('kpi-winrate-hint').textContent = c.kpi.winHint;
+
+      renderFunnel(c.funnel);
+      renderLayerDetail(c.layers);
+      renderGateCriteria(c.gate);
+
+      document.getElementById('dq-total').textContent = c.dq.total;
+      document.getElementById('dq-breakdown').textContent = c.dq.breakdown;
+      document.getElementById('dq-pass-rate').textContent = c.dq.passRate;
+      document.getElementById('dq-rejects').innerHTML = c.dq.rejects.map(r => `<li>${r}</li>`).join('');
+
+      document.getElementById('nav-pos-badge').textContent = String(c.kpi.positions);
+
+      // Overview glance cards
+      const stalled = c.funnel[6] === 0 ? 'stalled at L10' : 'L10 flowing';
+      document.getElementById('glance-pipeline').textContent = `L0: ${c.funnel[0]}/hr · ${stalled} · ${c.gate.verdict}`;
+      document.getElementById('glance-positions').textContent = `${c.kpi.positions} active · ${c.kpi.pnl} today`;
+      const lastAct = c.activity[0];
+      document.getElementById('glance-activity').textContent = lastAct ? `Last: ${lastAct[1]} ${lastAct[0]}` : 'No recent events';
+      document.getElementById('glance-dq').textContent = `Pass rate ${c.dq.passRate} · ${c.dq.total} decisions`;
+      document.getElementById('glance-gate').textContent = `${c.gate.traces >= 1 ? 'READY' : 'NOT_READY'} · ${c.gate.verdict}`;
+
+      const alertTitle = document.getElementById('overview-alert-title');
+      const alertText = document.getElementById('overview-alert-text');
+      if (c.gate.verdict === 'HEALTHY') {
+        document.getElementById('overview-alert').className = 'banner compact';
+        alertTitle.textContent = `${c.label || 'Chain'} healthy`;
+        alertText.textContent = `${c.gate.traces} full trace(s) · throughput OK.`;
+      } else if (c.gate.verdict === 'MARKET_QUIET') {
+        document.getElementById('overview-alert').className = 'banner warn compact';
+        alertTitle.textContent = 'Market quiet';
+        alertText.textContent = 'Low L0 volume — may be normal off-peak. Check gate for details.';
+      } else {
+        document.getElementById('overview-alert').className = 'banner warn compact';
+        alertTitle.textContent = `Attention on ${activeChain === 'all' ? 'Solana' : c.label}`;
+        alertText.textContent = `Throughput ${c.gate.verdict} · ${c.gate.traces} full traces · DQ pass ${c.gate.dqPass}.`;
+      }
+
+      renderTableRows(document.getElementById('ingestion-tbody'), c.ingestion || [], r =>
+        [`<span class="mono">${r.market}</span>`, chainTagHtml(r.chain), `<span class="mono">${r.in}</span>`, `<span class="mono">${r.out}</span>`, `<span class="tag pass">${r.valid}</span>`], 5);
+
+      renderTableRows(document.getElementById('positions-tbody'), c.positions || [], p =>
+        [`<span class="mono truncate">${p.token}</span>`, chainTagHtml(p.chain), `<span class="mono">${p.market}</span>`,
+         `<span class="mono">${p.entry}</span>`, `<span class="mono">${p.current}</span>`,
+         `<span class="tag ${p.pnl.startsWith('+') ? 'pnl-pos' : 'pnl-neg'}">${p.pnl}</span>`, p.age, 'TP1 15% · SL 5%'], 8);
+
+      renderTableRows(document.getElementById('activity-tbody'), (c.activity || []).slice(0, 20), a =>
+        [`<span class="mono">${a[0]}</span>`, a[1], chainTagHtml(a[2]), `<span class="mono truncate">${a[3]}</span>`, a[4]], 5);
+
+      const pos = c.positions || [];
+      document.getElementById('pos-deployed').textContent = c.kpi.posHint.replace(' deployed', '');
+      const unrealized = pos.reduce((sum, p) => sum + parseFloat(p.pnl), 0);
+      const unrealEl = document.getElementById('pos-unrealized');
+      unrealEl.textContent = (unrealized >= 0 ? '+' : '') + unrealized.toFixed(1) + '%';
+      unrealEl.style.color = unrealized >= 0 ? 'var(--ok)' : 'var(--bad)';
+      document.getElementById('pos-oldest').textContent = pos.length ? pos.reduce((a, b) => a.age > b.age ? a : b).age : '—';
+
+      document.querySelectorAll('.chain-switch button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.chain === activeChain);
+      });
+
+      const modeLabels = { STRICT: 'STRICT', BALANCED: 'BALANCED', EXPLORATION: 'EXPLORATION' };
+      const activeModeLabel = activeChain === 'all' ? null : modeLabels[c.mode];
+      document.querySelectorAll('.mode-btn').forEach(btn => {
+        const label = btn.querySelector('strong')?.textContent;
+        btn.classList.toggle('selected', activeModeLabel !== null && label === activeModeLabel);
+      });
+
+      document.getElementById('gate-production').textContent = c.gate.traces >= 1 ? 'READY' : 'NOT_READY';
+    }
+
+    function setChain(id) {
+      activeChain = id;
+      activeMarket = 'all';
+      renderMarketSelect();
+      applyChainView();
+    }
+
+    function renderConfigList() {
+      const list = document.getElementById('config-list');
+      list.innerHTML = '';
+      Object.keys(CONFIG_FILES).sort().forEach(name => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = name;
+        btn.className = name === activeConfig ? 'active' : '';
+        btn.addEventListener('click', () => selectConfig(name));
+        list.appendChild(btn);
+      });
+      selectConfig(activeConfig);
+    }
+
+    function selectConfig(name) {
+      activeConfig = name;
+      document.querySelectorAll('#config-list button').forEach(b => b.classList.toggle('active', b.textContent === name));
+      document.getElementById('config-filename').textContent = name;
+      document.getElementById('config-path').textContent = 'config/' + name;
+      document.getElementById('config-content').textContent = CONFIG_FILES[name] || '# File not found in mockup';
+    }
+
+    // Sidebar collapse
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    function syncSidebarToggleState() {
+      const collapsed = document.body.classList.contains('sidebar-collapsed');
+      sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      sidebarToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      sidebarToggle.innerHTML = collapsed ? '&#9654;' : '&#9776;';
+      document.querySelectorAll('.nav a[data-view]').forEach(a => {
+        const label = a.querySelector('.label')?.textContent?.trim();
+        if (collapsed && label) a.title = label;
+        else a.removeAttribute('title');
+      });
+    }
+    syncSidebarToggleState();
+    sidebarToggle.addEventListener('click', () => {
+      document.body.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebar-collapsed', document.body.classList.contains('sidebar-collapsed') ? '1' : '0');
+      syncSidebarToggleState();
+    });
+
+    // Nav
+    document.querySelectorAll('.nav a[data-view]').forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        setView(a.dataset.view);
+      });
+    });
+
+    document.querySelectorAll('[data-goto]').forEach(el => {
+      el.addEventListener('click', () => setView(el.dataset.goto));
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setView(el.dataset.goto); } });
+    });
+
+    document.getElementById('market-select').addEventListener('change', e => {
+      activeMarket = e.target.value;
+      applyChainView();
+    });
+
+    renderChainButtons(document.getElementById('chain-switch-main'));
+    renderChainButtons(document.getElementById('chain-switch-sidebar'));
+    renderStatusStrip();
+    renderMarketSelect();
+    renderConfigList();
+    applyChainView();
+    setView('overview');
+  </script>
+</body>
+</html>

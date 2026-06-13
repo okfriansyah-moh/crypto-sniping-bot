@@ -708,6 +708,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the SQL and payload without writing to the database.",
     )
+    parser.add_argument(
+        "--enriched-only",
+        action="store_true",
+        help=(
+            "Skip replay: market_data_event — inject market_data_enriched + market_data only. "
+            "Avoids market_probes racing a second enriched row (duplicate_name reject)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -760,12 +768,14 @@ def main() -> int:
         print(json.dumps(payload, indent=2))
 
         # Dry-run: connect-less path — psycopg2 not required.
-        insert_replay_event(conn=None, event_id=evt_id, payload=payload, chain=chain, dry_run=True)
+        if not args.enriched_only:
+            insert_replay_event(conn=None, event_id=evt_id, payload=payload, chain=chain, dry_run=True)
         enriched_id = enriched_event_id(chain, token_address)
+        causation_for_enriched = evt_id if not args.enriched_only else None
         insert_enriched_event(
             conn=None,
             enriched_id=enriched_id,
-            causation_event_id=evt_id,
+            causation_event_id=causation_for_enriched,
             payload=payload,
             chain=chain,
             dry_run=True,
@@ -773,7 +783,7 @@ def main() -> int:
         insert_market_data_row(
             conn=None,
             enriched_id=enriched_id,
-            causation_event_id=evt_id,
+            causation_event_id=causation_for_enriched or enriched_id,
             payload=payload,
             chain=chain,
             symbol=args.symbol,
@@ -807,7 +817,10 @@ def main() -> int:
         return 1
 
     try:
-        insert_replay_event(conn=conn, event_id=evt_id, payload=payload, chain=chain, dry_run=False)
+        if not args.enriched_only:
+            insert_replay_event(conn=conn, event_id=evt_id, payload=payload, chain=chain, dry_run=False)
+        else:
+            print("[INFO] --enriched-only: skipping replay: market_data_event insert")
     except psycopg2.Error as exc:
         print(f"ERROR: Database write failed: {exc}", file=sys.stderr)
         conn.rollback()
@@ -817,11 +830,12 @@ def main() -> int:
     # of which worker wins the market_data_event race (creator_profile_aggregator vs
     # market_probes_worker share a single processed=TRUE flag — no fan-out isolation).
     enriched_id = enriched_event_id(chain, token_address)
+    causation_for_enriched = evt_id if not args.enriched_only else None
     try:
         insert_enriched_event(
             conn=conn,
             enriched_id=enriched_id,
-            causation_event_id=evt_id,
+            causation_event_id=causation_for_enriched,
             payload=payload,
             chain=chain,
             dry_run=False,
@@ -839,7 +853,7 @@ def main() -> int:
         insert_market_data_row(
             conn=conn,
             enriched_id=enriched_id,
-            causation_event_id=evt_id,
+            causation_event_id=causation_for_enriched or enriched_id,
             payload=payload,
             chain=chain,
             symbol=args.symbol,

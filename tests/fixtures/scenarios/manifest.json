@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "certification": "battle-tested",
+  "updated": "2026-06-10",
+  "description": "Offline scenario matrix proving L0-L10 pipeline behavior without relaxing DQ guardrails.",
+  "scenarios": [
+    {
+      "id": "01_golden_l0_l10_pass",
+      "file": "01_golden_l0_l10_pass.log",
+      "layer": "L0-L10",
+      "description": "Full shadow trace: ingestion through learning_record_emitted (PIPELINE_PROOF golden path).",
+      "expect_evidence": {
+        "traces_completed_min": 1,
+        "wsol_max": 0,
+        "dq_pass_min": 1,
+        "learning_records_min": 1
+      },
+      "pipeline_proof_pass": true
+    },
+    {
+      "id": "02_helius_serial_launcher_skip",
+      "file": "02_helius_serial_launcher_skip.log",
+      "layer": "L1",
+      "description": "Helius pump.fun-like feed: serial_launcher SKIP dominates; guardrails active, not a code defect.",
+      "expect_evidence": {
+        "traces_completed_max": 0,
+        "throughput_verdict": "GUARDRAILS_ACTIVE",
+        "dq_pass_max": 0
+      },
+      "expect_log": {
+        "serial_launcher_skip_min": 10
+      }
+    },
+    {
+      "id": "03_no_social_links_reject",
+      "file": "03_no_social_links_reject.log",
+      "layer": "L1",
+      "description": "Mandatory DQ hard-reject: no real social profile or website.",
+      "expect_log": {
+        "dq_decision": "REJECT",
+        "reject_reason_contains": "no_social_links"
+      }
+    },
+    {
+      "id": "04_high_total_supply_reject",
+      "file": "04_high_total_supply_reject.log",
+      "layer": "L1",
+      "description": "Mandatory DQ hard-reject: excessive total supply.",
+      "expect_log": {
+        "dq_decision": "REJECT",
+        "reject_reason_contains": "high_total_supply"
+      }
+    },
+    {
+      "id": "05_l3_edge_filtered",
+      "file": "05_l3_edge_filtered.log",
+      "layer": "L3",
+      "description": "Edge below adaptive threshold; pipeline stops at L3 filtered.",
+      "expect_log": {
+        "edge_filtered_min": 1,
+        "dq_decision": "PASS"
+      }
+    },
+    {
+      "id": "06_l5_validation_reject",
+      "file": "06_l5_validation_reject.log",
+      "layer": "L5",
+      "description": "EV gate rejects edge at validation layer.",
+      "expect_log": {
+        "validation_rejected_min": 1
+      }
+    },
+    {
+      "id": "07_l6_selection_pass",
+      "file": "07_l6_selection_pass.log",
+      "layer": "L6",
+      "description": "Validated edge selected into Top-K.",
+      "expect_log": {
+        "selection_emitted_min": 1
+      }
+    },
+    {
+      "id": "08_l6_selection_not_selected",
+      "file": "08_l6_selection_not_selected.log",
+      "layer": "L6",
+      "description": "Edge validated but filtered by selection (not in Top-K / diversity).",
+      "expect_log": {
+        "selection_filtered_min": 1
+      }
+    },
+    {
+      "id": "09_shadow_execution",
+      "file": "09_shadow_execution.log",
+      "layer": "L8",
+      "description": "Shadow-mode execution and position open (no real capital).",
+      "expect_log": {
+        "shadow_execution_min": 1,
+        "position_opened_shadow_min": 1
+      }
+    },
+    {
+      "id": "10_l10_time_exit_learning",
+      "file": "10_l10_time_exit_learning.log",
+      "layer": "L10",
+      "description": "TIME exit produces learning_record_emitted for attribution.",
+      "expect_evidence": {
+        "traces_completed_min": 1,
+        "learning_records_min": 1
+      },
+      "expect_log": {
+        "exit_reason": "TIME",
+        "learning_record_min": 1
+      },
+      "pipeline_proof_pass": true
+    },
+    {
+      "id": "11_shadow_fn_rejection",
+      "file": "11_shadow_fn_rejection.log",
+      "layer": "L1-shadow",
+      "description": "DQ SKIP triggers shadow recorder for false-negative learning.",
+      "expect_log": {
+        "shadow_record_emitted_min": 1,
+        "dq_decision": "SKIP"
+      }
+    }
+  ]
+}

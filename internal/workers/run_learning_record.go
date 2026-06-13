@@ -109,6 +109,7 @@ func RunLearningRecord(
 
 	logger.Info("learning_record_emitted",
 		"record_id", lrDTO.RecordID,
+		"trace_id", lrDTO.TraceID,
 		"classification", lrDTO.Classification,
 		"pnl_pct", lrDTO.PnlPct,
 	)

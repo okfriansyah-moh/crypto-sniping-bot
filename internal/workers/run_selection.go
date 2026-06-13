@@ -119,8 +119,15 @@ func (w *SelectionWorker) Process(ctx context.Context, evt *database.Event) (*da
 		if len(items) == 0 {
 			return
 		}
-		if _, err := w.flushItems(context.Background(), chain, items, triggerID); err != nil {
+		outEvt, err := w.flushItems(context.Background(), chain, items, triggerID)
+		if err != nil {
 			w.logger.Warn("selection_batch_flush_failed", "chain", chain, "error", err)
+			return
+		}
+		if outEvt != nil {
+			if insertErr := w.adapter.InsertEvent(context.Background(), *outEvt); insertErr != nil {
+				w.logger.Warn("selection_batch_emit_failed", "chain", chain, "event_id", outEvt.EventID, "error", insertErr)
+			}
 		}
 	})
 	w.mu.Unlock()

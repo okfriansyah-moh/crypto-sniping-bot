@@ -20,7 +20,7 @@
 #   wsol_token_address_emitted, ingestion_valid_token_ratio,
 #   market_probes_backlog_ratio, dq_pass_or_risky_pass, shadow_observer_failed,
 #   per-program ingestion heartbeat finals (pumpfun-amm, raydium-v4),
-#   THROUGHPUT_VERDICT: CODE_DEFECT | MARKET_QUIET | HEALTHY
+#   THROUGHPUT_VERDICT: CODE_DEFECT | MARKET_QUIET | GUARDRAILS_ACTIVE | HEALTHY
 #
 # After the script finishes, open a new Copilot chat and paste:
 #   "Review this using the production-gate-reviewer skill:" + brief content.
@@ -74,7 +74,9 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found — install it first."
 }
 
-require_cmd docker
+if [[ "$ANALYZE_ONLY" != "true" ]]; then
+  require_cmd docker
+fi
 require_cmd jq
 require_cmd awk
 require_cmd sort
@@ -260,6 +262,10 @@ WSOL_MINT="So11111111111111111111111111111111111111112"
 WSOL_TOKEN_ADDRESS_EMITTED=$(count_jq "select(.msg == \"solana_ingestion_emitted\" and .token == \"$WSOL_MINT\")")
 COUNT_PROBES_COMPLETED=$(count_jq 'select(.msg == "market_probes_completed")')
 COUNT_DQ_PASS=$(count_jq 'select(.msg == "dq_decision" and (.decision == "PASS" or .decision == "RISKY_PASS"))')
+COUNT_DQ_SKIP=$(count_jq 'select(.msg == "dq_decision" and .decision == "SKIP")')
+COUNT_DQ_REJECT=$(count_jq 'select(.msg == "dq_decision" and .decision == "REJECT")')
+# serial_launcher_skipped dominates Helius pump.fun — intentional capital guardrail, not a code defect.
+COUNT_SERIAL_LAUNCHER_SKIP=$(jq -r 'select(.msg == "dq_decision" and (.flags // [] | index("serial_launcher_skipped"))) | .trace_id' "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
 COUNT_SHADOW_OBS_FAIL=$(count_jq 'select(.msg == "shadow_observer_failed")')
 
 INGESTION_VALID_TOKEN_RATIO="N/A"
@@ -323,7 +329,18 @@ elif [[ "$COUNT_INGESTION" -gt 0 ]]; then
   elif ratio_lt "$MARKET_PROBES_COMPLETION_RATIO" 0.95; then
     THROUGHPUT_VERDICT="CODE_DEFECT"
   elif [[ "$TOTAL_INGESTION_NOTIFICATIONS" -ge 10000 && "$COUNT_DQ_PASS" -eq 0 ]]; then
-    THROUGHPUT_VERDICT="CODE_DEFECT"
+    # High-volume feed with zero DQ pass: distinguish guardrails doing their job
+    # (serial launcher / mandatory rejects) from a broken pipeline.
+    if [[ "$COUNT_DQ_SKIP" -gt 0 && "$COUNT_SERIAL_LAUNCHER_SKIP" -gt 0 ]]; then
+      _sl_pct=$(( COUNT_SERIAL_LAUNCHER_SKIP * 100 / (COUNT_DQ_SKIP + COUNT_DQ_REJECT + 1) ))
+      if [[ "$_sl_pct" -ge 50 ]]; then
+        THROUGHPUT_VERDICT="GUARDRAILS_ACTIVE"
+      else
+        THROUGHPUT_VERDICT="CODE_DEFECT"
+      fi
+    else
+      THROUGHPUT_VERDICT="CODE_DEFECT"
+    fi
   elif [[ "$TOTAL_INGESTION_NOTIFICATIONS" -lt 1000 && "$COUNT_INGESTION" -lt 5 ]]; then
     THROUGHPUT_VERDICT="MARKET_QUIET"
   else
@@ -653,6 +670,8 @@ SAFE_LIST=""
 [[ "$STUB_RISK" == INSUFFICIENT_SAMPLES* ]] \
                                           && SAFE_LIST="${SAFE_LIST}  - risk_score: $STUB_RISK — not enough samples yet\n"
 [[ "$COUNT_JOIN_TIMEOUT" -gt 0 ]]         && SAFE_LIST="${SAFE_LIST}  - ${COUNT_JOIN_TIMEOUT} join_timeout rejects — timing issue, not a code defect\n"
+[[ "$THROUGHPUT_VERDICT" == "GUARDRAILS_ACTIVE" ]] \
+                                          && SAFE_LIST="${SAFE_LIST}  - High-volume serial_launcher SKIP dominates — mandatory capital guardrails, not a pipeline defect\n"
 [[ "$TOTAL_ERROR" -gt 0 ]]               && SAFE_LIST="${SAFE_LIST}  - ${TOTAL_ERROR} ERROR lines — review individually; most are transient RPC errors\n"
 [[ -z "$SAFE_LIST" ]] && SAFE_LIST="  NONE"
 printf "%b\n" "$SAFE_LIST"

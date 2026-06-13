@@ -157,6 +157,23 @@ gate-proof:
 	@bash scripts/gate_review_collect.sh $(MINS) $(SVC) $(MODE)
 	@bash scripts/validate_pipeline_proof.sh
 
+# Mock pipeline proof — bypass Helius pump.fun serial-launcher SKIP at L1.
+.PHONY: gate-proof-mock gate-proof-inject
+gate-proof-mock:
+	@bash scripts/run_pipeline_proof_mock.sh offline
+
+gate-proof-inject:
+	@bash scripts/run_pipeline_proof_mock.sh live $(TOKEN_ARGS)
+
+# Battle-test certification — all 11 offline pipeline scenarios (no Docker/DB).
+.PHONY: battle-test
+battle-test:
+	@bash scripts/run_pipeline_scenarios.sh
+
+.PHONY: battle-test-go
+battle-test-go:
+	$(GOTEST) -v -count=1 ./tests/integration/... -run 'BattleTest'
+
 # Phase 2 full §1.1 acceptance (Task 19) — all six success criteria.
 .PHONY: phase2-validate
 phase2-validate:

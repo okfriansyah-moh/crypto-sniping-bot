@@ -59,6 +59,8 @@ All common operations are wrapped in `make` targets. Run `make <target>`.
 | `make gate-analyze`  | Re-analyse an existing gate raw log (`LOG=path`)           |
 | `make gate-validate`  | PIPELINE_PROOF acceptance check on latest evidence JSON    |
 | `make gate-proof`     | Collect gate logs, then run pipeline-proof acceptance      |
+| `make gate-proof-mock` | Offline L0→L10 proof via synthetic fixture (no Helius)   |
+| `make gate-proof-inject` | Live inject + wait for L10 (known-good token, no Helius) |
 | `make phase2-validate`| Phase 2 full §1.1 acceptance (six criteria) on evidence    |
 | `make phase2-proof`   | Collect gate logs, then run Phase 2 full acceptance        |
 
@@ -265,6 +267,8 @@ make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log   # re-analyse existing
 make gate-validate             # validate newest gate_evidence_*.json (PIPELINE_PROOF exit)
 make gate-validate EVIDENCE=output/logs/gate_evidence_TIMESTAMP.json
 make gate-proof MINS=30        # collect 30m, then run acceptance check in one step
+make gate-proof-mock           # offline fixture — prove L0→L10 without Helius (recommended first)
+make gate-proof-inject         # inject known-good token, wait for L10, validate (stack must be up)
 make phase2-validate           # full Phase 2 §1.1 gate (six criteria)
 make phase2-proof MINS=30      # collect 30m, then run full Phase 2 acceptance
 ```
@@ -300,10 +304,45 @@ make phase2-proof MINS=30      # collect 30m, then run full Phase 2 acceptance
 | Production Confidence Model | 5 dimensions scored 0–100: `pipeline_stability`, `execution_reliability`, `determinism_integrity`, `capital_safety`, `operational_consistency`           |
 | Production Decision         | `NOT_READY` → `PIPELINE_PROOF_READY` → `SHADOW_READY` → `MICRO_CAPITAL_READY` → `LIMITED_PRODUCTION_READY`                                               |
 | Throughput metrics        | `wsol_token_address_emitted`, `ingestion_valid_token_ratio`, probe backlog ratio, `dq_pass_or_risky_pass`, `shadow_observer_failed`, per-program heartbeat finals |
-| Throughput verdict        | `THROUGHPUT_VERDICT: CODE_DEFECT` \| `MARKET_QUIET` \| `HEALTHY` — distinguishes code defects from genuinely quiet markets                                |
+| Throughput verdict        | `THROUGHPUT_VERDICT: CODE_DEFECT` \| `GUARDRAILS_ACTIVE` \| `MARKET_QUIET` \| `HEALTHY` — distinguishes code defects from guardrail-dominated feeds and quiet markets |
 | Pipeline-proof acceptance | `scripts/validate_pipeline_proof.sh` — binary PASS/FAIL for advancing past PIPELINE_PROOF (`make gate-validate` / `make gate-proof`)                    |
 
 > **Difference from `make log-collect`:** `log-collect` uses the `log-reviewer` skill (health scoring, PRS dimensions, stub detection). `gate-collect` uses the `production-gate-reviewer` skill (operational progression, capital safety gate, BLOCKER/SAFE_TO_IGNORE classification, and production decision). `gate-validate` is the scripted exit gate for PIPELINE_PROOF — run it after every gate session before starting extended shadow trading.
+
+### Mock pipeline proof (no Helius)
+
+Live Helius pump.fun traffic almost always hits the mandatory L1 `serial_launcher` reject, so `make gate-proof` can sit at `traces_completed=0` forever even when L2–L10 code is fine. Use the mock harness to prove the full pipeline first:
+
+```bash
+make gate-proof-mock
+# or:
+scripts/run_pipeline_proof_mock.sh offline
+```
+
+This analyzes `tests/fixtures/gate_pipeline_proof_pass.log` (synthetic L0→L10 JSON log with `learning_record_emitted` + `trace_id`) and runs `validate_pipeline_proof.sh`. No Docker, database, or RPC required. Expect `PRODUCTION_DECISION: SHADOW_READY`.
+
+To exercise the **real workers** with a known-good injected token (still no Helius):
+
+```bash
+make docker-up                    # stack running
+export DATABASE_URL=postgres://...  # or SNIPER_DB_* vars
+make gate-proof-inject            # default mock token
+# optional custom token:
+scripts/run_pipeline_proof_mock.sh live --token YourTokenAddress...
+```
+
+Injection uses `scripts/inject_test_token.py` — pre-approved quality flags + `market_data_enriched` row so L1 passes and L2–L10 run in shadow mode.
+
+### Battle-tested certification (11 scenarios)
+
+Full offline scenario matrix — production thresholds, mock inputs only, DQ guardrails never relaxed:
+
+```bash
+make battle-test
+# docs: docs/BATTLE_TESTED.md
+```
+
+Expect `BATTLE_TEST: 11/11 scenarios passed` and `BATTLE_TEST_CERTIFICATION: READY`. AI agents may cite `docs/BATTLE_TESTED.md` as proof the pipeline mechanics and capital-defense paths are regression-tested.
 
 ---
 

@@ -89,7 +89,10 @@ func RunShadowRecorder(
 
 	tokenAddress, lifecycleID, stage, isRejection := rejectionDecision(evt.EventType, evt.Payload)
 	if !isRejection {
-		return adapter.MarkEventProcessed(ctx, evt.EventID)
+		// Not our event — release the claim so the stage worker (e.g. features_worker
+		// for PASS data_quality_event) can process it. Marking processed here would
+		// permanently skip downstream layers (single shared processed flag).
+		return adapter.ReleaseEventClaim(ctx, evt.EventID)
 	}
 
 	activeVersion, err := adapter.GetActiveStrategy(ctx)

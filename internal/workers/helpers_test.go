@@ -24,6 +24,7 @@ type stubAdapter struct {
 	lifecycleErr    error
 	correlationEvts []database.Event
 	correlationErr  error
+	execResult      *contracts.ExecutionResultDTO
 }
 
 func (s *stubAdapter) Initialize(_ context.Context, _ database.Config) error { return nil }
@@ -96,7 +97,10 @@ func (s *stubAdapter) InsertPositionState(_ context.Context, _ contracts.Positio
 func (s *stubAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationDTO) error {
 	return nil
 }
-func (s *stubAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
+func (s *stubAdapter) GetExecutionByLifecycle(_ context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error) {
+	if s.execResult != nil && (lifecycleID == "" || s.execResult.TokenLifecycleID == lifecycleID || s.execResult.TokenLifecycleID == "") {
+		return s.execResult, nil
+	}
 	return nil, database.ErrNotFound
 }
 func (s *stubAdapter) GetProbabilityForLifecycle(_ context.Context, _ string) (float64, bool, error) {
@@ -813,6 +817,48 @@ func (s *stubAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (boo
 }
 func (s *stubAdapter) GetLatestPoolAddressForToken(_ context.Context, _, _ string) (string, bool, error) {
 	return "", false, nil
+}
+
+func TestOpenPositionBusEventID_PollSnapshotDerivesFromExecution(t *testing.T) {
+	execEvtID := "fcd1614d7b965a1e"
+	openID := contracts.ContentIDFromString("pos-open:" + execEvtID)
+	pos := contracts.PositionStateDTO{
+		EventID:          "41347650f1b1e453",
+		TokenLifecycleID: "lc-poll-1",
+		CausationID:      execEvtID,
+	}
+	got := openPositionBusEventID(context.Background(), &stubAdapter{}, pos)
+	if got != openID {
+		t.Errorf("openPositionBusEventID: got %q want %q", got, openID)
+	}
+}
+
+func TestOpenPositionBusEventID_FallsBackToExecutionCausation(t *testing.T) {
+	execEvtID := "fcd1614d7b965a1e"
+	openID := contracts.ContentIDFromString("pos-open:" + execEvtID)
+	adapter := &stubAdapter{
+		execResult: &contracts.ExecutionResultDTO{
+			EventID:          "9a83f4a24805e265",
+			CausationID:      execEvtID,
+			TokenLifecycleID: "lc-poll-2",
+		},
+	}
+	pos := contracts.PositionStateDTO{
+		EventID:          "41347650f1b1e453",
+		TokenLifecycleID: "lc-poll-2",
+	}
+	got := openPositionBusEventID(context.Background(), adapter, pos)
+	if got != openID {
+		t.Errorf("openPositionBusEventID: got %q want %q", got, openID)
+	}
+}
+
+func TestOpenPositionBusEventID_AlreadyCanonicalOpenID(t *testing.T) {
+	pos := contracts.PositionStateDTO{EventID: "pos-open:already"}
+	got := openPositionBusEventID(context.Background(), &stubAdapter{}, pos)
+	if got != "pos-open:already" {
+		t.Errorf("got %q want pos-open:already", got)
+	}
 }
 
 // ── Historical Market Profiles stubs (Approach A) ─────────────────────────────
