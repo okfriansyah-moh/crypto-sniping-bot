@@ -2,6 +2,7 @@ package evaluation
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"crypto-sniping-bot/contracts"
@@ -139,7 +140,7 @@ func TestProcess_NonExitedStatus(t *testing.T) {
 	}
 }
 
-func TestProcess_BrierScore(t *testing.T) {
+func TestProcess_BrierScore_UnknownProbabilityDefaultsToZero(t *testing.T) {
 	mod := New(defaultCfg())
 	pos := exitedPosition(10.0) // win: actual=1, predicted=0, error=-1, brier=1
 
@@ -150,7 +151,51 @@ func TestProcess_BrierScore(t *testing.T) {
 
 	// predictionError = 0 - 1 = -1; brier = (-1)^2 = 1
 	if dto.BrierScore != 1.0 {
-		t.Errorf("expected BrierScore=1.0 (Phase 3 no model), got %f", dto.BrierScore)
+		t.Errorf("expected BrierScore=1.0 when probability unknown, got %f", dto.BrierScore)
+	}
+}
+
+func TestProcess_BrierScore_UsesProbabilityUsed(t *testing.T) {
+	mod := New(defaultCfg())
+	pos := exitedPosition(10.0) // win: actual=1
+
+	dto, err := mod.Process(context.Background(), EvaluationInput{
+		Position:            pos,
+		WinProbability:      0.7,
+		WinProbabilityKnown: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// predictionError = 0.7 - 1 = -0.3; brier = 0.09
+	if math.Abs(dto.PredictionErrorMean-(-0.3)) > 1e-9 {
+		t.Errorf("expected PredictionErrorMean=-0.3, got %f", dto.PredictionErrorMean)
+	}
+	if math.Abs(dto.BrierScore-0.09) > 1e-9 {
+		t.Errorf("expected BrierScore=0.09, got %f", dto.BrierScore)
+	}
+}
+
+func TestProcess_LosingTrade_UsesProbabilityUsed(t *testing.T) {
+	mod := New(defaultCfg())
+	pos := exitedPosition(-10.0)
+
+	dto, err := mod.Process(context.Background(), EvaluationInput{
+		Position:            pos,
+		WinProbability:      0.8,
+		WinProbabilityKnown: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// actual=0 (loss), predicted=0.8 → error=0.8
+	if math.Abs(dto.PredictionErrorMean-0.8) > 1e-9 {
+		t.Errorf("expected PredictionErrorMean=0.8, got %f", dto.PredictionErrorMean)
+	}
+	if math.Abs(dto.BrierScore-0.64) > 1e-9 {
+		t.Errorf("expected BrierScore=0.64, got %f", dto.BrierScore)
 	}
 }
 

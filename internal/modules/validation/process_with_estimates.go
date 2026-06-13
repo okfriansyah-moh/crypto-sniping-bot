@@ -24,7 +24,7 @@ import (
 //     and use_model_output=true. NOTE: this used to silently substitute
 //     PriorProbability and tag "prob_join_timeout" as a fallback, which
 //     drove every trade to ev_bps≈-1900 and starved Layers 6–10 in
-//     production. Per docs/architecture.md § 3.5 the prior is acceptable
+//     production. Per docs/reference/architecture.md § 3.5 the prior is acceptable
 //     ONLY for replay/backtest paths (UseModelOutput=false). When the
 //     model is enabled but its estimate has not joined within the
 //     ValidationWorker's bounded join window, the correct response is
@@ -41,7 +41,7 @@ func (m *Module) ProcessWithEstimates(
 	slip *contracts.SlippageEstimateDTO,
 	lat *contracts.LatencyProfileDTO,
 ) (contracts.ValidatedEdgeDTO, error) {
-	return m.ProcessWithEstimatesAt(ctx, in, prob, slip, lat, time.Now().UTC())
+	return m.ProcessWithEstimatesAt(ctx, in, prob, slip, lat, 0, time.Now().UTC())
 }
 
 // ProcessWithEstimatesAt is the deterministic, replay-safe variant of
@@ -49,7 +49,7 @@ func (m *Module) ProcessWithEstimates(
 // every timestamp emitted in the resulting ValidatedEdgeDTO
 // (ValidatedAt, ExpiresAt). Callers replaying the event log MUST pass
 // `evt.OccurredAt` (the bus-recorded creation time) so the function is
-// bit-for-bit reproducible across replays — see docs/architecture.md
+// bit-for-bit reproducible across replays — see docs/reference/architecture.md
 // § 4.2 (replay must be bit-for-bit deterministic).
 func (m *Module) ProcessWithEstimatesAt(
 	_ context.Context,
@@ -57,10 +57,12 @@ func (m *Module) ProcessWithEstimatesAt(
 	prob *contracts.ProbabilityEstimateDTO,
 	slip *contracts.SlippageEstimateDTO,
 	lat *contracts.LatencyProfileDTO,
+	evThresholdBps int32,
 	now time.Time,
 ) (contracts.ValidatedEdgeDTO, error) {
 	nowTime := now.UTC()
 	nowStr := nowTime.Format(time.RFC3339Nano)
+	evThreshold := m.effectiveEVThreshold(evThresholdBps)
 
 	// Fallback reason tags carry diagnostic intent without rejecting.
 	var fallbackReasons []string
@@ -151,8 +153,8 @@ func (m *Module) ProcessWithEstimatesAt(
 			float64(m.cfg.FixedCostsBps) -
 			float64(slipBps)
 
-		if ev < float64(m.cfg.EvThresholdBps) {
-			rejectReason = fmt.Sprintf("ev_below_threshold:ev=%.1f,threshold=%d", ev, m.cfg.EvThresholdBps)
+		if ev < float64(evThreshold) {
+			rejectReason = fmt.Sprintf("ev_below_threshold:ev=%.1f,threshold=%d", ev, evThreshold)
 		}
 
 		if in.OpportunityWindowMs > 0 && latencyP95 > in.OpportunityWindowMs {
@@ -220,7 +222,7 @@ func (m *Module) ProcessWithEstimatesAt(
 		FixedCostsBps:      m.cfg.FixedCostsBps,
 		ProbabilityUsed:    p,
 		SlippageP95BpsUsed: slipBps,
-		EvThresholdApplied: m.cfg.EvThresholdBps,
+		EvThresholdApplied: evThreshold,
 		RejectReason:       rejectReason,
 
 		ExpectedLatencyMs: latencyP95,
@@ -230,6 +232,15 @@ func (m *Module) ProcessWithEstimatesAt(
 		ValidatedAt:     nowStr,
 		FallbackReasons: fallbackReasons,
 	}, nil
+}
+
+// effectiveEVThreshold returns the per-call mode threshold when positive,
+// otherwise the static ValidationConfig default from pipeline.yaml.
+func (m *Module) effectiveEVThreshold(evThresholdBps int32) int32 {
+	if evThresholdBps > 0 {
+		return evThresholdBps
+	}
+	return m.cfg.EvThresholdBps
 }
 
 // clipInt32 rounds and clamps a float64 into the int32 range, treating

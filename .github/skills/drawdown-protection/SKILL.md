@@ -235,8 +235,8 @@ drawdown:
 
 ## References
 
-- `docs/architecture.md` § 7 — Operational Modes (STRICT mode correlates with tight drawdown)
-- `docs/architecture.md` § 0.2.4 — Capital factor in profit invariant
+- `docs/reference/architecture.md` § 7 — Operational Modes (STRICT mode correlates with tight drawdown)
+- `docs/reference/architecture.md` § 0.2.4 — Capital factor in profit invariant
 - `.github/skills/capital-sizing/SKILL.md` — AllocationDTO production, where risk_multiplier applies
 - `.github/skills/operational-modes/SKILL.md` — Mode transitions on drawdown events
 - `.github/skills/telegram-dispatcher/SKILL.md` — `/resume` command pattern

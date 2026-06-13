@@ -1,7 +1,7 @@
 # Data Quality Engine — Phase 9 (Profitability Restoration § 9.1)
 # ─────────────────────────────────────────────────────────────────
 # Real RPC-backed scam detector configuration.
-# Closes GAP-01 from docs/PROFITABILITY_GAPS.md.
+# Closes GAP-01 from docs/analysis/profitability-gaps.md.
 # All values tunable per chain via config/chains.yaml `data_quality` block (additive override).
 # No hardcoded values in module code (per copilot-instructions § 0.5).
 # ─────────────────────────────────────────────────────────────────
@@ -171,7 +171,7 @@ data_quality:
     # min_holder_count > 0. Does NOT apply to brand-new launches.
     # Set false initially until probe reliability is confirmed in production;
     # flip to true once the solana_holder_dist probe has a stable track record.
-    reject_unknown_holder_count: false
+    reject_unknown_holder_count: true
 
     # ai_copy_paste_desc_min_narrative_score: minimum NarrativeScore (0–10)
     # required to save a copy-paste description from rejection. When the AI
@@ -204,12 +204,15 @@ data_quality:
     # reject freshly-graduated tokens. Tune in shadow mode before enabling.
     # min_market_cap_usd: 3000.0
     # max_market_cap_usd: 20000.0
+    min_market_cap_usd: 70000.0
+    # max_market_cap_usd kept commented — graduation tokens at ~$69k would be rejected
 
     # Volume floor (DEXScreener data).
     # Only applied when VolumeUsd1h > 0.
     # PRODUCTION_GATE_ANALYSIS § 10 Change 3 — guard pattern:
     #   if MinVolumeUsd1h > 0 && in.VolumeUsd1h > 0 && in.VolumeUsd1h < MinVolumeUsd1h { reject }
     # min_volume_usd_1h: 100.0
+    min_volume_usd_1h: 100.0
 
   # ── Detector cache (LRU) ──────────────────────────────────────
   # Keyed by (chain, token_address, detector_name). Bounded.
@@ -302,6 +305,18 @@ data_quality:
       # RISKY_PASS when all quality gates pass; otherwise SKIP. Looser holder
       # floor (25 vs 50) and slightly higher risk-score ceiling (0.45 vs 0.40).
       max_creator_prev_token_count: 10
+      # Task 28 (2026-06-01): HOTFIX reverted after Task 26 fallback restored
+      # HolderDistKnown coverage to ≥90%. Final values calibrated from shadow
+      # data: social-links gate re-enabled (requires_social_links: true) and
+      # holder-count floor restored to 25 (canonical VERY_EXPLORATION value per
+      # §7.9). Task 22 relaxation (false/0) was live 2026-05-31→2026-06-01 with
+      # no critical issues; Task 26 fallback probe (getTokenSupply +
+      # getProgramAccounts) shipped 2026-06-01 and is expected to resolve
+      # ≥90% of getTokenLargestAccounts timeouts on fresh pump.fun mints.
+      # Revert to Task 22 relaxation values (false/0) if FN spike is observed
+      # after this change: flip serial_launcher_requires_social_links: false
+      # and serial_launcher_min_holder_count: 0 and restart the bot.
+      # See PRODUCTION_GATE_ANALYSIS §7.18 (gate-review hotfix rationale).
       serial_launcher_requires_social_links: true
       serial_launcher_max_risk_score: 0.45
       serial_launcher_min_holder_count: 25

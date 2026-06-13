@@ -1,7 +1,7 @@
 # Probability Model — Phase 9 (Profitability Restoration § 9.3)
 # ─────────────────────────────────────────────────────────────────
 # Wires the existing ProbabilityModel.Predict() output into the
-# validation EV gate. Closes GAP-04 from docs/PROFITABILITY_GAPS.md.
+# validation EV gate. Closes GAP-04 from docs/analysis/profitability-gaps.md.
 # Replaces fixed prior `P = 0.35` with model output.
 # ─────────────────────────────────────────────────────────────────
 

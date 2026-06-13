@@ -202,7 +202,10 @@ MISSING_VERSION=$(count_jq 'select(.version_id == null or .version_id == "")')
 # Duplicate event_id check — only flag TRUE idempotency violations where the
 # same event_id is consumed more than once by the same worker processing step.
 # Excluded messages carry the INPUT event_id as context (not as their own id):
-#   - stage_completed      : reuses consumed event_id for trace correlation
+#   - stage_completed      : reuses consumed event_id for trace correlation;
+#                            gate_review_collect.sh uses worker_group +
+#                            output_status on stage_completed as canonical
+#                            per-worker health evidence (not legacy .msg names)
 #   - market_probe_failed  : logs input event_id while reporting a probe error
 #   - market_probes_completed : logs input event_id for the probe summary
 #   - solana_ingestion_emitted: the source event — its id is legitimately

@@ -243,7 +243,7 @@ func (m *Module) Process(
 	success := true
 	if receipt == nil {
 		// Receipt not observed within the polling deadline: tx dropped or evicted from mempool.
-		// Status=dropped per docs/dto_contracts.md § 6 enum registry.
+		// Status=dropped per docs/reference/dto_contracts.md § 6 enum registry.
 		status = "dropped"
 		success = false
 	} else if receipt.Status == 0 {

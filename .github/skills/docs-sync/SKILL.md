@@ -9,15 +9,19 @@ description: "Documentation synchronization. Use when verifying that code implem
 
 Detect and report drift between specification documents in `docs/` and actual code implementation. Ensures the codebase matches its documented design at all times.
 
+## Documentation index
+
+Start at [`docs/README.md`](../../docs/README.md) for tier layout (`plans/`, `analysis/`, `archive/`, canonical specs at `docs/` root).
+
 ## Rules
 
 - `docs/` files are **read-only** during normal development — agents must not modify them
 - Code must match the specifications in docs, not the other way around
 - When drift is detected, the code is wrong (docs are the source of truth for design)
-- DTO definitions in code must match `docs/dto_contracts.md`
-- Pipeline stage order in code must match `docs/architecture.md`
-- Orchestrator behavior must match `docs/orchestrator_spec.md`
-- Database adapter interface must match `docs/db_adapter_spec.md`
+- DTO definitions in code must match `docs/reference/dto_contracts.md`
+- Pipeline stage order in code must match `docs/reference/architecture.md`
+- Orchestrator behavior must match `docs/reference/orchestrator_spec.md`
+- Database adapter interface must match `docs/reference/db_adapter_spec.md`
 
 ## Inputs
 
@@ -34,7 +38,7 @@ Detect and report drift between specification documents in `docs/` and actual co
 ### Checking DTO Drift
 
 ```
-Spec (docs/dto_contracts.md):
+Spec (docs/reference/dto_contracts.md):
   EntityResult: entity_id (str), name (str), status (str), score (float)
 
 Code (contracts/entity.py):
@@ -45,7 +49,7 @@ Code (contracts/entity.py):
 ### Checking Pipeline Stage Order
 
 ```
-Spec (docs/architecture.md):
+Spec (docs/reference/architecture.md):
   stage_1 → stage_2 → stage_3
 
 Code (app/orchestrator/pipeline.py):
@@ -56,7 +60,7 @@ Code (app/orchestrator/pipeline.py):
 ### Checking Adapter Interface
 
 ```
-Spec (docs/db_adapter_spec.md):
+Spec (docs/reference/db_adapter_spec.md):
   def create_run(self, run: PipelineRunDTO) -> None
 
 Code (database/adapter.*):
@@ -66,9 +70,9 @@ Code (database/adapter.*):
 
 ## Checklist
 
-- [ ] All DTOs in `contracts/` match `docs/dto_contracts.md`
-- [ ] Pipeline stage order matches `docs/architecture.md`
-- [ ] Orchestrator behavior matches `docs/orchestrator_spec.md`
-- [ ] Database adapter interface matches `docs/db_adapter_spec.md`
+- [ ] All DTOs in `contracts/` match `docs/reference/dto_contracts.md`
+- [ ] Pipeline stage order matches `docs/reference/architecture.md`
+- [ ] Orchestrator behavior matches `docs/reference/orchestrator_spec.md`
+- [ ] Database adapter interface matches `docs/reference/db_adapter_spec.md`
 - [ ] No undocumented stages, DTOs, or interfaces exist in code
 - [ ] No `docs/` files have been modified by implementation agents

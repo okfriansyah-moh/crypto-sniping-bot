@@ -2,7 +2,7 @@ package contracts
 
 // TraceFields is an embedded struct providing the four mandatory correlation fields
 // that every DTO flowing through the event bus must carry.
-// See docs/dto_contracts.md § 1 and docs/implementation_roadmap.md § 0.3.
+// See docs/reference/dto_contracts.md § 1 and docs/reference/implementation_roadmap.md § 0.3.
 //
 // Propagation rules:
 //   - TraceID:       copy from input DTO; generated fresh only in Layer 0 (Phase 1).

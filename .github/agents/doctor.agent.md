@@ -71,7 +71,7 @@ doctor (this agent)
 [OK]    Agents present: 14/14
 [OK]    Language detected: python
 
-[WARN]  docs/architecture.md — MISSING (generate with prompt)
+[WARN]  docs/reference/architecture.md — MISSING (generate with prompt)
 [ERROR] contracts/__init__.py — No DTOs defined
 
 ────────────────────────────────────────────────

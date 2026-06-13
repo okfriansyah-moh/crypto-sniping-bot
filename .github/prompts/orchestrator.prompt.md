@@ -1,17 +1,17 @@
 # Orchestrator Specification Prompt
 
-You are a Staff+ backend architect. Generate a complete `docs/orchestrator_spec.md`.
+You are a Staff+ backend architect. Generate a complete `docs/reference/orchestrator_spec.md`.
 
 ## Instructions
 
-1. Read `docs/architecture.md` — pipeline stages and data model
-2. Read `docs/dto_contracts.md` — DTO flow between stages
-3. Read `docs/db_adapter_spec.md` — database adapter interface
+1. Read `docs/reference/architecture.md` — pipeline stages and data model
+2. Read `docs/reference/dto_contracts.md` — DTO flow between stages
+3. Read `docs/reference/db_adapter_spec.md` — database adapter interface
 4. Read `.github/copilot-instructions.md` — hard constraints
 
 ## Specification Structure
 
-Generate `docs/orchestrator_spec.md` with:
+Generate `docs/reference/orchestrator_spec.md` with:
 
 ### 1. Execution Model
 
@@ -21,7 +21,7 @@ Generate `docs/orchestrator_spec.md` with:
 
 ### 2. Stage Ordering
 
-Define the immutable pipeline sequence from `docs/architecture.md`.
+Define the immutable pipeline sequence from `docs/reference/architecture.md`.
 
 ### 3. Checkpointing
 
@@ -79,4 +79,4 @@ For each stage boundary, define:
 
 ## Output
 
-Write the completed specification to `docs/orchestrator_spec.md`.
+Write the completed specification to `docs/reference/orchestrator_spec.md`.

@@ -287,8 +287,8 @@ overfit_detection:
 
 ## References
 
-- `docs/architecture.md` § 3.5 — Edge Validation (Layer 5)
-- `docs/architecture-context/6_slippage_models.md` — Model parameter guidelines
+- `docs/reference/architecture.md` § 3.5 — Edge Validation (Layer 5)
+- `docs/archive/architecture-context/6_slippage_models.md` — Model parameter guidelines
 - `.github/skills/probability-modeling/SKILL.md` — P(success) model patterns
 - `.github/skills/learning-engine/SKILL.md` — Bounded updates and sample requirements
 - `contracts/probability.go` — `ProbabilityEstimateDTO`

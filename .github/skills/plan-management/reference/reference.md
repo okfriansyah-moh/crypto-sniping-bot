@@ -10,15 +10,15 @@ updated by the `plan-management` skill **must** conform to this format exactly.
 
 | Source                        | Path / URL                                                                             | Purpose                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Architecture spec             | `docs/architecture.md`                                                                 | Single source of truth for all design decisions     |
-| Implementation roadmap        | `docs/implementation_roadmap.md`                                                       | Phase-based breakdown with exact file paths         |
-| DTO contracts                 | `docs/dto_contracts.md`                                                                | Canonical DTO registry with field-level constraints |
-| Database adapter spec         | `docs/db_adapter_spec.md`                                                              | Adapter interface + migration strategy              |
-| Orchestrator spec             | `docs/orchestrator_spec.md`                                                            | Execution model, checkpointing, resume, failure     |
-| Parallel development guide    | `docs/PARALLEL_DEV.md`                                                                 | Multi-agent phase execution and conflict resolution |
-| Production gate analysis      | `docs/PRODUCTION_GATE_ANALYSIS.md`                                                     | Health report, open issues, design plans            |
-| Profitability gaps            | `docs/PROFITABILITY_GAPS.md`                                                           | Known gaps with remediation priorities              |
-| Progress report               | `docs/PROGRESS_REPORT.md`                                                              | Completed phases, agent pipeline results            |
+| Architecture spec             | `docs/reference/architecture.md`                                                                 | Single source of truth for all design decisions     |
+| Implementation roadmap        | `docs/reference/implementation_roadmap.md`                                                       | Phase-based breakdown with exact file paths         |
+| DTO contracts                 | `docs/reference/dto_contracts.md`                                                                | Canonical DTO registry with field-level constraints |
+| Database adapter spec         | `docs/reference/db_adapter_spec.md`                                                              | Adapter interface + migration strategy              |
+| Orchestrator spec             | `docs/reference/orchestrator_spec.md`                                                            | Execution model, checkpointing, resume, failure     |
+| Parallel development guide    | `docs/guides/PARALLEL_DEV.md`                                                                 | Multi-agent phase execution and conflict resolution |
+| Production gate analysis      | `docs/analysis/2026-05-20-production-gate-analysis.md`                                                     | Health report, open issues, design plans            |
+| Profitability gaps            | `docs/analysis/profitability-gaps.md`                                                           | Known gaps with remediation priorities              |
+| Progress report               | `docs/ops/PROGRESS_REPORT.md`                                                              | Completed phases, agent pipeline results            |
 | Spec-Driven Development (SDD) | https://jurnal.atlassian.net/wiki/spaces/DFS/pages/50632556624/Spec-Driven+Development | Mekari engineering process governing task breakdown |
 
 ---
@@ -193,7 +193,7 @@ Task 7 (Tests + build validation + PROGRESS_REPORT.md)
 4. YAML changes before module changes that read new config fields
 5. Lower pipeline layers (L1 before L2, L2 before L3, …) for multi-layer plans
 6. The **last task** is always: `go build ./...` + `go vet ./...` + `go test ./...` +
-   `docs/PROGRESS_REPORT.md` update
+   `docs/ops/PROGRESS_REPORT.md` update
 
 ### Individual Task Section Format
 
@@ -256,7 +256,7 @@ Task 7 (Tests + build validation + PROGRESS_REPORT.md)
 | 4    | YAML Threshold Addition  | `config/data_quality.yaml`                               | Task 3     | Low             |
 | 5    | Module Logic Replacement | `internal/modules/data_quality/data_quality.go`          | Task 4     | High            |
 | 6    | Fallback Profile Update  | `internal/modules/data_quality/decision.go`              | Task 5     | Medium          |
-| 7    | Tests + Validation       | `tests/modules/data_quality/`, `docs/PROGRESS_REPORT.md` | Task 6     | Medium          |
+| 7    | Tests + Validation       | `tests/modules/data_quality/`, `docs/ops/PROGRESS_REPORT.md` | Task 6     | Medium          |
 ```
 
 **Complexity guide:**
@@ -296,14 +296,14 @@ Always include exactly this block (update the source of truth path and layer lis
 ## 10. Section 7 — Deep Knowledge Reference
 
 Always required. Its purpose is to make every task session **self-contained** — the
-implementer should never need to re-read `docs/architecture.md` or `docs/dto_contracts.md`
+implementer should never need to re-read `docs/reference/architecture.md` or `docs/reference/dto_contracts.md`
 mid-session.
 
 ### What must be in Section 7 for every plan
 
 | §7.N | Content to include                                                               |
 | ---- | -------------------------------------------------------------------------------- |
-| 7.1  | Relevant DTO fields (from `contracts/*.go` and `docs/dto_contracts.md`)          |
+| 7.1  | Relevant DTO fields (from `contracts/*.go` and `docs/reference/dto_contracts.md`)          |
 | 7.2  | Config struct fields affected (from `internal/app/config/`)                      |
 | 7.3  | YAML config paths and current values (from `config/*.yaml`)                      |
 | 7.4  | Operational mode behavior (if plan is mode-aware)                                |
@@ -343,12 +343,12 @@ needed by each task session. Include the specific §7.N sub-sections listed unde
 ### 7.4 Operational Mode Behavior
 
 {If plan is mode-aware, show the mode → behavior table.}
-{Reference: docs/architecture.md §7 Operational Modes}
+{Reference: docs/reference/architecture.md §7 Operational Modes}
 
 ### 7.5 Event Bus Pattern
 
 {If plan emits or consumes events, show the emit/consume code pattern.}
-{Reference: docs/architecture.md §2.2–2.3}
+{Reference: docs/reference/architecture.md §2.2–2.3}
 
 ...
 ```
@@ -390,7 +390,7 @@ When adding a task to an existing PLAN.md:
 - [ ] Dependency graph matches the task list (no missing arrows, no phantom tasks)
 - [ ] Task Summary table matches the task list (same count, same names)
 - [ ] The last task covers: build + vet + test + PROGRESS_REPORT.md update
-- [ ] `Source of Truth` header points to the actual spec, not just `docs/architecture.md`
+- [ ] `Source of Truth` header points to the actual spec, not just `docs/reference/architecture.md`
 - [ ] `Status` is set correctly
 - [ ] Migrations precede any code that depends on new schema in the dependency graph
 - [ ] DTO contract tasks precede any module task that uses the new fields
@@ -442,7 +442,7 @@ For quickly identifying which module owns each layer:
 
 | SDD Step                      | PLAN.md Section                                                  |
 | ----------------------------- | ---------------------------------------------------------------- |
-| Define the spec               | Source of Truth header → `docs/specs/` or `docs/architecture.md` |
+| Define the spec               | Source of Truth header → `docs/specs/` or `docs/reference/architecture.md` |
 | Understand the system         | §1 Goal + §2 Architecture Impact                                 |
 | Preserve invariants           | §3 Invariants Preserved                                          |
 | Break into shippable tasks    | §4 Implementation Tasks                                          |

@@ -1,7 +1,7 @@
 # Feature Extraction — Phase 9 (Profitability Restoration § 9.2)
 # ─────────────────────────────────────────────────────────────────
 # Real on-chain feature computation configuration.
-# Closes GAP-03 from docs/PROFITABILITY_GAPS.md.
+# Closes GAP-03 from docs/analysis/profitability-gaps.md.
 # Replaces 5/8 hardcoded `0.5` stubs with real signals.
 # ─────────────────────────────────────────────────────────────────
 

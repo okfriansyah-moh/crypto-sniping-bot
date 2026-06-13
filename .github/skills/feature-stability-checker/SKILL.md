@@ -292,8 +292,8 @@ feature_stability:
 
 ## References
 
-- `docs/architecture.md` § 3.2 — Feature Extraction (Layer 2)
-- `docs/architecture-context/4_feature_extraction.md` — Feature confidence
+- `docs/reference/architecture.md` § 3.2 — Feature Extraction (Layer 2)
+- `docs/archive/architecture-context/4_feature_extraction.md` — Feature confidence
 - `.github/skills/edge-detection/SKILL.md` — EdgeDTO production using features
 - `.github/skills/probability-modeling/SKILL.md` — P(success) model inputs
 - `contracts/feature.go` — `FeatureDTO`, `FeatureConfidence` fields

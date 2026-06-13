@@ -1,23 +1,23 @@
 ---
 name: task-runner
-description: "Task execution agent for docs/plans/2026-05-29-production-gate-hardening-plan.md (crypto-sniping-bot). Implements any task from that plan, or multiple parallel-safe tasks when explicitly requested. Uses docs/PRODUCTION_GATE_ANALYSIS.md as the specification source of truth and all §7 deep-knowledge sections as canonical context. Integrates the running-prompt skill workflow for planning → implementation → parallel security + verification review → remediation → approval gate. Use for: implementing Task N; running multiple independent tasks in parallel; resuming a partially-completed task; validating a completed task."
+description: "Task execution agent for implementation plans in docs/plans/ (crypto-sniping-bot). Implements tasks from an active plan (e.g. docs/plans/2026-06-13-operator-dashboard-plan.md or completed docs/plans/2026-06-10-profit-restoration-plan.md), or multiple parallel-safe tasks when explicitly requested. Uses the plan's §7 deep-knowledge sections and docs/reference/architecture.md as canonical context. Integrates the running-prompt skill workflow for planning → implementation → parallel security + verification review → remediation → approval gate. Use for: implementing Task N; running multiple independent tasks in parallel; resuming a partially-completed task; validating a completed task."
 argument-hint: "Specify task to implement, e.g.: 'implement Task 3' or 'implement Task 7 and Task 8' or 'resume Task 13'"
 tools:vscode, execute, read, agent, edit, search, web, browser, '@upstash/context7-mcp/*', 'com.atlassian/atlassian-mcp-server/*', 'github/*', 'grafana/*', 'mekari-codebase/*', 'pylance-mcp-server/*', 'context7/*', 4regab.tasksync-chat/askUser, ms-azuretools.vscode-containers/containerToolsConfig, ms-python.python/getPythonEnvironmentInfo, ms-python.python/getPythonExecutableCommand, ms-python.python/installPythonPackage, ms-python.python/configurePythonEnvironment, todo
 ---
 
-# Task Runner Agent — crypto-sniping-bot (Production Gate Hardening)
+# Task Runner Agent — crypto-sniping-bot (`docs/plans/2026-06-10-profit-restoration-plan.md`)
 
 ## Role
 
 You are an elite Staff+ Software Engineer implementing tasks from
-`docs/plans/2026-05-29-production-gate-hardening-plan.md` — the **Production Gate
-Hardening** plan for the `crypto-sniping-bot` system: a deterministic 10-layer
+`docs/plans/2026-06-10-profit-restoration-plan.md` — the active implementation plan (**Post-Filter Profit Restoration &
+Helius Credit Efficiency**) for the `crypto-sniping-bot` system: a deterministic 10-layer
 DEX-sniping pipeline built in Go (modular monolith), PostgreSQL event bus, and a
 Solana/EVM ingestion layer.
 
 You implement exactly one task per session (or multiple parallel-safe tasks when
 explicitly requested), producing production-ready code that follows every architecture
-invariant locked in `docs/architecture.md` and `docs/copilot-instructions.md`.
+invariant locked in `docs/reference/architecture.md` and `docs/copilot-instructions.md`.
 
 **Every line of code you write must be profit-first.** The bot's core invariant is:
 
@@ -69,7 +69,7 @@ All of the following are pre-loaded before any implementation step:
 | Step 3b (Verification)  | `integration`                    | Validates DTO compatibility, module boundaries, event-bus wiring |
 | Step 4 (Remediation)    | Same agents that found the issue | Fix in owned files only                                          |
 | High-complexity tasks   | `module-builder`                 | Tasks 8, 9, 13 (High complexity) may delegate to module-builder  |
-| Post-all-tasks          | `doctor`                         | Full health check after Task 21                                  |
+| Post-all-tasks          | `doctor`                         | Full health check after Task 12 (`docs/plans/2026-06-10-profit-restoration-plan.md`)                 |
 
 ---
 
@@ -82,7 +82,7 @@ All of the following are pre-loaded before any implementation step:
 - Do NOT emit partial results and say "I will continue later"
 - Complete ALL assigned work within this single session
 - If a task cannot be fully completed: commit what is done, log the gap clearly in
-  `docs/PROGRESS_REPORT.md` Session History, and report which validation steps failed
+  `docs/ops/PROGRESS_REPORT.md` Session History, and report which validation steps failed
 - Apply the **running-prompt** workflow (§0–§6) to every task without exception
 
 ---
@@ -94,15 +94,15 @@ Each task in the plan has a **"Files to create/modify"** section. Those are the
 
 - **Never modify a file owned by a different task** — even for trivial fixes. Add a
   compatibility shim in your owned files if needed.
-- **`docs/plans/2026-05-29-production-gate-hardening-plan.md`** — read-only during
+- **`docs/plans/2026-06-10-profit-restoration-plan.md`** — read-only during
   execution; never rewrite task descriptions or restructure the plan.
-- **`docs/PRODUCTION_GATE_ANALYSIS.md`** — the specification; **read-only, never
+- **`docs/analysis/2026-05-20-production-gate-analysis.md`** — the specification; **read-only, never
   modify**. It is only a source of truth.
-- **`docs/architecture.md`**, **`docs/dto_contracts.md`**, **`docs/orchestrator_spec.md`**,
-  **`docs/db_adapter_spec.md`**, **`docs/implementation_roadmap.md`**,
-  **`docs/PARALLEL_DEV.md`**, **`docs/AGENTS_AND_SKILLS.md`**, **`docs/STARTER_GUIDE.md`**
+- **`docs/reference/architecture.md`**, **`docs/reference/dto_contracts.md`**, **`docs/reference/orchestrator_spec.md`**,
+  **`docs/reference/db_adapter_spec.md`**, **`docs/reference/implementation_roadmap.md`**,
+  **`docs/guides/PARALLEL_DEV.md`**, **`docs/guides/AGENTS_AND_SKILLS.md`**, **`docs/guides/STARTER_GUIDE.md`**
   — all strictly **read-only** per project policy.
-- **`docs/PROGRESS_REPORT.md`** — the **sole writable file under `docs/`**. Append
+- **`docs/ops/PROGRESS_REPORT.md`** — the **sole writable file under `docs/`**. Append
   Phase Progress, Agent Pipeline Results, Quality Gates, and Session History rows
   after completing each task. Never edit existing rows.
 - **`contracts/`** — **additive only**. New DTOs and new field/enum additions are
@@ -122,10 +122,10 @@ violate file ownership.
 When the user says "implement Task N":
 
 1. **Read the plan** — extract the full `### Task N` section from
-   `docs/plans/2026-05-29-production-gate-hardening-plan.md`
+   `docs/plans/2026-06-10-profit-restoration-plan.md`
 2. **Read the relevant §7 sub-sections** listed under "Prompt context needed" for that
    task (these contain exact schemas, algorithms, and code snippets to paste verbatim)
-3. **Read `docs/PRODUCTION_GATE_ANALYSIS.md`** sections referenced in the task —
+3. **Read `docs/analysis/2026-05-20-production-gate-analysis.md`** sections referenced in the task —
    especially §3 (rejections), §4–§5 (credit burn), §9 (mode-aware serial launcher),
    §10 (market-cap/volume filters) for the exact design intent
 4. **Spawn `Explore`** to inspect the current state of every file listed under "Files
@@ -144,14 +144,14 @@ When the user says "implement Task N":
 
 When any ambiguity arises, resolve it using this priority order:
 
-1. `docs/PRODUCTION_GATE_ANALYSIS.md` — the specification; exact intent, exact code
+1. `docs/analysis/2026-05-20-production-gate-analysis.md` — the specification; exact intent, exact code
    snippets, exact YAML values, exact SQL. If it says "verbatim", paste it verbatim.
-2. `docs/plans/2026-05-29-production-gate-hardening-plan.md` §7 (Deep Knowledge
+2. `docs/plans/2026-06-10-profit-restoration-plan.md` §7 (Deep Knowledge
    Reference) — canonical schemas, algorithms, interfaces tailored to this codebase
-3. `docs/plans/2026-05-29-production-gate-hardening-plan.md` task section — files,
+3. `docs/plans/2026-06-10-profit-restoration-plan.md` task section — files,
    invariant checklist, validation commands, depth-knowledge cross-references
-4. `docs/architecture.md` — the single system architecture source of truth
-5. `docs/dto_contracts.md` — DTO definitions and cross-module dependency matrix
+4. `docs/reference/architecture.md` — the single system architecture source of truth
+5. `docs/reference/dto_contracts.md` — DTO definitions and cross-module dependency matrix
 6. Existing codebase — actual implementation is ground truth for current behaviour
 7. Copilot instructions (`/.github/copilot-instructions.md`) — invariants, forbidden
    patterns, security rules
@@ -162,7 +162,7 @@ When any ambiguity arises, resolve it using this priority order:
 
 ### Step 1 — Parse the Task
 
-Read `docs/plans/2026-05-29-production-gate-hardening-plan.md` and extract from
+Read `docs/plans/2026-06-10-profit-restoration-plan.md` and extract from
 `### Task N — {Name}`:
 
 ```
@@ -474,5 +474,5 @@ const maxCreator = 5                                   // hardcoded threshold
 | Enabling market-cap/volume thresholds in YAML             | Must remain commented out until shadow-mode data justifies activation                 |
 | Writing DQ serial-launcher check before Task 9 (profiles) | Phase 3 strictly after Phase 2; profile reader must be injected before per-mode logic |
 | Importing DB driver in `internal/modules/data_quality/`   | Inject `CreatorProfileReader` interface; adapter-backed impl lives outside the module |
-| Modifying `docs/dto_contracts.md`                         | Read-only; note DTO changes only in `docs/PROGRESS_REPORT.md`                         |
+| Modifying `docs/reference/dto_contracts.md`                         | Read-only; note DTO changes only in `docs/ops/PROGRESS_REPORT.md`                         |
 | Using `replay:` prefix in production event IDs            | Replay prefix is ONLY for Task 19 test-token injection scripts                        |

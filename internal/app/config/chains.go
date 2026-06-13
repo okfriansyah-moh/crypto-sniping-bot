@@ -145,6 +145,17 @@ type SolanaConfig struct {
 	// gRPC stream; on N consecutive errors it falls back to RPC when
 	// FallbackOnError is true. GrpcEndpoint is empty in legacy mode.
 	Transport IngestionTransportConfig `yaml:"transport"`
+
+	// PreFilter holds the L0 pre-cohort filter configuration (Task 25).
+	// When PreFilter.Enabled is true, tokens from creators whose prior
+	// launch count exceeds MaxCreatorPrevTokenCount are dropped at L0
+	// before probe calls are issued, reducing Helius credit burn.
+	PreFilter IngestionPreFilterConfig `yaml:"pre_filter"`
+
+	// SystemMintReject drops market_data_event emissions whose TokenAddress is
+	// a configured system/stable mint (WSOL, USDC, USDT) before the event bus.
+	// Also used by mint-pair resolution to identify quote-side mints (Task 14).
+	SystemMintReject SystemMintRejectConfig `yaml:"system_mint_reject"`
 }
 
 // IngestionTransportConfig governs Solana streaming transport selection.
@@ -156,4 +167,68 @@ type IngestionTransportConfig struct {
 	GrpcEndpoint    string `yaml:"grpc_endpoint"`     // host:port
 	FallbackOnError bool   `yaml:"fallback_on_error"` // hybrid → fall back to rpc
 	FallbackErrorN  int    `yaml:"fallback_error_n"`  // consecutive errors before fallback
+}
+
+// IngestionPreFilterConfig controls the L0 pre-cohort filter (Task 25).
+// When Enabled is true, the ingestion module consults the injected
+// CreatorProfileReader before emitting a MarketDataDTO.  Tokens whose
+// creator has launched more than MaxCreatorPrevTokenCount prior tokens
+// are silently dropped at L0, saving downstream probe and DQ budget.
+//
+// The threshold (default 25) is intentionally above VERY_EXPLORATION's
+// max_creator_prev_token_count=10 so this filter never overrides a DQ
+// mode decision — it only drops the strict super-set that would always
+// SKIP/REJECT under every mode.
+//
+// Disabled by default (Enabled: false) — operator opt-in after Task 24
+// PIPELINE_PROOF confirmation.
+type IngestionPreFilterConfig struct {
+	// Enabled gates the entire pre-filter. False = fail-open (all tokens pass).
+	Enabled bool `yaml:"enabled"`
+	// MaxCreatorPrevTokenCount is the inclusive upper bound on prior launches
+	// before the token is dropped at L0. 0 means filter disabled regardless of Enabled.
+	MaxCreatorPrevTokenCount int32 `yaml:"max_creator_prev_token_count"`
+}
+
+// SystemMintRejectConfig controls L0 rejection of system/stable mint addresses
+// as TokenAddress and excludes them from creator_profile launch counting (Task 14).
+type SystemMintRejectConfig struct {
+	// Enabled gates emit-time rejection. When false, tokens pass through L0 but
+	// EffectiveMints still drives mint-pair resolution for decoders.
+	Enabled bool `yaml:"enabled"`
+	// Mints is the deny-list of addresses that must never be TokenAddress.
+	// When empty, defaults to wrapped SOL only.
+	Mints []string `yaml:"mints"`
+}
+
+// wrappedSOLMintDefault is the canonical WSOL mint used when Mints is unset.
+const wrappedSOLMintDefault = "So11111111111111111111111111111111111111112"
+
+// EffectiveMints returns the stable/system mint list for pair resolution and
+// rejection checks. Defaults to WSOL when Mints is empty.
+func (c SystemMintRejectConfig) EffectiveMints() []string {
+	if len(c.Mints) > 0 {
+		out := make([]string, len(c.Mints))
+		copy(out, c.Mints)
+		return out
+	}
+	return []string{wrappedSOLMintDefault}
+}
+
+// Contains reports whether addr is a configured system/stable mint.
+func (c SystemMintRejectConfig) Contains(addr string) bool {
+	for _, m := range c.EffectiveMints() {
+		if m == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldRejectToken reports whether a TokenAddress must be dropped at L0 emit.
+func (c SystemMintRejectConfig) ShouldRejectToken(addr string) bool {
+	if !c.Enabled || addr == "" {
+		return false
+	}
+	return c.Contains(addr)
 }

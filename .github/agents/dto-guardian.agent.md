@@ -1,6 +1,6 @@
 ---
 name: dto-guardian
-description: "Enforce DTO contracts. Use when creating, modifying, or reviewing DTOs in contracts/. Validates immutable DTO compliance, field types, constraint ranges, additive-only versioning, and cross-module usage per docs/dto_contracts.md."
+description: "Enforce DTO contracts. Use when creating, modifying, or reviewing DTOs in contracts/. Validates immutable DTO compliance, field types, constraint ranges, additive-only versioning, and cross-module usage per docs/reference/dto_contracts.md."
 argument-hint: "Describe the DTO task, e.g.: 'validate all DTOs' or 'review contracts/ for drift'"
 tools: [read, search, read/problems, todo]
 ---
@@ -35,11 +35,11 @@ You are a DTO contract guardian. Your sole job is to ensure all DTOs in `contrac
 - Field names and types must NEVER be changed or removed (additive-only)
 - New fields are allowed (with defaults for backward compatibility)
 - If a field must be renamed: add new field, deprecate old (make optional with default)
-- Compare `contracts/` definitions against `docs/dto_contracts.md` — they must match
+- Compare `contracts/` definitions against `docs/reference/dto_contracts.md` — they must match
 
 ### 3. Constraint Enforcement
 
-Verify all per-DTO constraints defined in `docs/dto_contracts.md`:
+Verify all per-DTO constraints defined in `docs/reference/dto_contracts.md`:
 
 - ID formats (16 hex chars, SHA-256 derived)
 - Value ranges (scores in [0.0–1.0], durations within bounds)
@@ -55,7 +55,7 @@ Verify all per-DTO constraints defined in `docs/dto_contracts.md`:
 
 ## Constraints
 
-- Do NOT modify DTO definitions without checking `docs/dto_contracts.md` first
+- Do NOT modify DTO definitions without checking `docs/reference/dto_contracts.md` first
 - Do NOT remove or rename existing fields
 - Do NOT add logic to DTO classes (no methods, no properties, no validation in `__post_init__`)
 - Do NOT create DTOs outside `contracts/` package
@@ -65,7 +65,7 @@ Verify all per-DTO constraints defined in `docs/dto_contracts.md`:
 
 Before any work, read:
 
-1. `docs/dto_contracts.md` — all DTO definitions with fields, types, constraints
+1. `docs/reference/dto_contracts.md` — all DTO definitions with fields, types, constraints
 2. `.github/copilot-instructions.md` — hard architectural constraints
 
 ## Output

@@ -304,8 +304,8 @@ liquidity:
 
 ## References
 
-- `docs/architecture.md` § 3.1 — Data Quality Engine (Layer 1)
-- `docs/architecture-context/3_data_quality_engine.md` — Detector algorithms
+- `docs/reference/architecture.md` § 3.1 — Data Quality Engine (Layer 1)
+- `docs/archive/architecture-context/3_data_quality_engine.md` — Detector algorithms
 - `.github/skills/anti-manipulation/SKILL.md` — Risk score aggregation (this feeds into it)
 - `.github/skills/data-quality-engine/SKILL.md` — Full DQ module architecture
 - `contracts/data_quality.go` — `DataQualityDTO` field definitions

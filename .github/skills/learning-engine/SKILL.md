@@ -381,10 +381,10 @@ if action != strategy_decay.DecayActionNone {
 
 ## References
 
-- Architecture context: `docs/architecture-context/12_learning_engine.md`
-- Architecture: `docs/architecture.md` § 3.10 (Learning Engine)
-- DTO spec: `docs/dto_contracts.md` § 3.11 (LearningRecord, EvaluationDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 5
+- Architecture context: `docs/archive/architecture-context/12_learning_engine.md`
+- Architecture: `docs/reference/architecture.md` § 3.10 (Learning Engine)
+- DTO spec: `docs/reference/dto_contracts.md` § 3.11 (LearningRecord, EvaluationDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 5
 - Config: `config/learning.yaml`
 - `.github/skills/overfit-detector/SKILL.md` — Overfit audit gate before weight updates
 - `.github/skills/loss-pattern-analyzer/SKILL.md` — Loss classification (7 categories)

@@ -53,10 +53,16 @@ All common operations are wrapped in `make` targets. Run `make <target>`.
 | `make log-latest`   | Print the most recent log-reviewer summary to stdout       |
 | `make log-list`     | List all log-reviewer session summaries                    |
 | `make log-analyze`  | Re-analyse an existing raw log file (`LOG=path`)           |
-| `make gate-collect` | Collect logs + write production-gate-reviewer brief        |
-| `make gate-latest`  | Print the most recent gate-review brief to stdout          |
-| `make gate-list`    | List all gate-review sessions                              |
-| `make gate-analyze` | Re-analyse an existing gate raw log (`LOG=path`)           |
+| `make gate-collect`  | Collect logs + write production-gate-reviewer brief        |
+| `make gate-latest`   | Print the most recent gate-review brief to stdout          |
+| `make gate-list`     | List all gate-review sessions                              |
+| `make gate-analyze`  | Re-analyse an existing gate raw log (`LOG=path`)           |
+| `make gate-validate`  | PIPELINE_PROOF acceptance check on latest evidence JSON    |
+| `make gate-proof`     | Collect gate logs, then run pipeline-proof acceptance      |
+| `make gate-proof-mock` | Offline L0→L10 proof via synthetic fixture (no Helius)   |
+| `make gate-proof-inject` | Live inject + wait for L10 (known-good token, no Helius) |
+| `make phase2-validate`| Phase 2 full §1.1 acceptance (six criteria) on evidence    |
+| `make phase2-proof`   | Collect gate logs, then run Phase 2 full acceptance        |
 
 ### Docker
 
@@ -258,6 +264,13 @@ make gate-collect MINS=10 MODE=PIPELINE_PROOF   # force review mode
 make gate-latest               # print the most recent gate brief to stdout
 make gate-list                 # list all gate review sessions
 make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log   # re-analyse existing log
+make gate-validate             # validate newest gate_evidence_*.json (PIPELINE_PROOF exit)
+make gate-validate EVIDENCE=output/logs/gate_evidence_TIMESTAMP.json
+make gate-proof MINS=30        # collect 30m, then run acceptance check in one step
+make gate-proof-mock           # offline fixture — prove L0→L10 without Helius (recommended first)
+make gate-proof-inject         # inject known-good token, wait for L10, validate (stack must be up)
+make phase2-validate           # full Phase 2 §1.1 gate (six criteria)
+make phase2-proof MINS=30      # collect 30m, then run full Phase 2 acceptance
 ```
 
 **Workflow:**
@@ -267,9 +280,18 @@ make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log   # re-analyse existing
    - `gate_brief_<TIMESTAMP>.txt` — structured gate-review brief (MODE, BLOCKERS, OPERATIONAL EVIDENCE, PRODUCTION DECISION)
    - `gate_evidence_<TIMESTAMP>.json` — machine-readable evidence snapshot
    - `gate_raw_<TIMESTAMP>.log` — full raw log for deep analysis
-3. Open a new Copilot chat and paste:
+3. Run the pipeline-proof acceptance check:
+   ```bash
+   make gate-validate
+   # or directly:
+   scripts/validate_pipeline_proof.sh
+   scripts/validate_pipeline_proof.sh output/logs/gate_evidence_TIMESTAMP.json
+   ```
+   - **PASS** (exit 0): `PRODUCTION_DECISION: SHADOW_READY` — at least one full L0→L10 trace, zero duplicate executions, zero WSOL-as-token emissions.
+   - **FAIL** (exit 1): `PRODUCTION_DECISION: NOT_READY` plus a single-line reason (e.g. `traces_completed=0`).
+4. Open a new Copilot chat and paste:
    > _"Review this using the production-gate-reviewer skill:"_ followed by the brief content.
-4. Copilot confirms or overrides the auto-detected MODE, BLOCKER list, and PRODUCTION DECISION.
+5. Copilot confirms or overrides the auto-detected MODE, BLOCKER list, and PRODUCTION DECISION.
 
 **What the script computes automatically:**
 
@@ -281,8 +303,46 @@ make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log   # re-analyse existing
 | Operational Evidence        | `traces_completed`, `executions`, `positions_closed`, `learning_records`, `avg_latency`, `avg_slippage`                                                  |
 | Production Confidence Model | 5 dimensions scored 0–100: `pipeline_stability`, `execution_reliability`, `determinism_integrity`, `capital_safety`, `operational_consistency`           |
 | Production Decision         | `NOT_READY` → `PIPELINE_PROOF_READY` → `SHADOW_READY` → `MICRO_CAPITAL_READY` → `LIMITED_PRODUCTION_READY`                                               |
+| Throughput metrics        | `wsol_token_address_emitted`, `ingestion_valid_token_ratio`, probe backlog ratio, `dq_pass_or_risky_pass`, `shadow_observer_failed`, per-program heartbeat finals |
+| Throughput verdict        | `THROUGHPUT_VERDICT: CODE_DEFECT` \| `GUARDRAILS_ACTIVE` \| `MARKET_QUIET` \| `HEALTHY` — distinguishes code defects from guardrail-dominated feeds and quiet markets |
+| Pipeline-proof acceptance | `scripts/validate_pipeline_proof.sh` — binary PASS/FAIL for advancing past PIPELINE_PROOF (`make gate-validate` / `make gate-proof`)                    |
 
-> **Difference from `make log-collect`:** `log-collect` uses the `log-reviewer` skill (health scoring, PRS dimensions, stub detection). `gate-collect` uses the `production-gate-reviewer` skill (operational progression, capital safety gate, BLOCKER/SAFE_TO_IGNORE classification, and production decision).
+> **Difference from `make log-collect`:** `log-collect` uses the `log-reviewer` skill (health scoring, PRS dimensions, stub detection). `gate-collect` uses the `production-gate-reviewer` skill (operational progression, capital safety gate, BLOCKER/SAFE_TO_IGNORE classification, and production decision). `gate-validate` is the scripted exit gate for PIPELINE_PROOF — run it after every gate session before starting extended shadow trading.
+
+### Mock pipeline proof (no Helius)
+
+Live Helius pump.fun traffic almost always hits the mandatory L1 `serial_launcher` reject, so `make gate-proof` can sit at `traces_completed=0` forever even when L2–L10 code is fine. Use the mock harness to prove the full pipeline first:
+
+```bash
+make gate-proof-mock
+# or:
+scripts/run_pipeline_proof_mock.sh offline
+```
+
+This analyzes `tests/fixtures/gate_pipeline_proof_pass.log` (synthetic L0→L10 JSON log with `learning_record_emitted` + `trace_id`) and runs `validate_pipeline_proof.sh`. No Docker, database, or RPC required. Expect `PRODUCTION_DECISION: SHADOW_READY`.
+
+To exercise the **real workers** with a known-good injected token (still no Helius):
+
+```bash
+make docker-up                    # stack running
+export DATABASE_URL=postgres://...  # or SNIPER_DB_* vars
+make gate-proof-inject            # default mock token
+# optional custom token:
+scripts/run_pipeline_proof_mock.sh live --token YourTokenAddress...
+```
+
+Injection uses `scripts/inject_test_token.py` — pre-approved quality flags + `market_data_enriched` row so L1 passes and L2–L10 run in shadow mode.
+
+### Battle-tested certification (11 scenarios)
+
+Full offline scenario matrix — production thresholds, mock inputs only, DQ guardrails never relaxed:
+
+```bash
+make battle-test
+# docs: docs/analysis/battle-tested-certification.md
+```
+
+Expect `BATTLE_TEST: 11/11 scenarios passed` and `BATTLE_TEST_CERTIFICATION: READY`. AI agents may cite `docs/analysis/battle-tested-certification.md` as proof the pipeline mechanics and capital-defense paths are regression-tested.
 
 ---
 
@@ -394,7 +454,7 @@ Every stage emits a structured JSON log line. Use these `msg` field values with 
 | L9    | `position_closed`     | `exit_reason` (TP1/TP2/SL/TIME/FORCE), `pnl_bps`, `hold_seconds`        |
 | L10   | `learning_record`     | `outcome`, `loss_bucket`, `strategy_version_id`                         |
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design and invariants.
+See [`docs/reference/architecture.md`](docs/reference/architecture.md) for the full design and invariants.
 
 ### AI Enrichment Flow (Cross-Cutting Layers 0/1/3/10)
 
@@ -667,17 +727,20 @@ crypto-sniping-bot/
 │   ├── priority.yaml           # Event priority weights, evaluation flags
 │   └── phases.yaml             # Phase definitions, complexity scores, skill assignments
 ├── scripts/
-│   └── run_parallel.sh         # Parallel development orchestrator (3-mode)
-├── docs/                       # Architecture specs and implementation roadmap
-│   ├── architecture.md         # Single source of truth — system design
-│   ├── implementation_roadmap.md # Phase-by-phase build guide (execution-grade)
-│   ├── dto_contracts.md        # DTO registry — all fields, types, constraints
-│   ├── db_adapter_spec.md      # Database adapter interface + migration strategy
-│   ├── orchestrator_spec.md    # Orchestrator execution model, checkpointing, resume
-│   ├── PARALLEL_DEV.md         # Parallel development operator guide
-│   ├── AGENTS_AND_SKILLS.md    # Agent and skill registry
-│   ├── PROGRESS_REPORT.md      # Implementation phase progress tracking
-│   └── STARTER_GUIDE.md        # Getting started playbook (beginner-friendly)
+│   ├── gate_review_collect.sh      # Production gate evidence + brief collector
+│   ├── validate_pipeline_proof.sh    # PIPELINE_PROOF acceptance harness (Task 18)
+│   ├── validate_phase2_acceptance.sh # Phase 2 full §1.1 acceptance gate (Task 19)
+│   └── run_parallel.sh             # Parallel development orchestrator (3-mode)
+├── docs/                       # Documentation — see docs/README.md
+│   ├── README.md               # Index (only file at docs root besides REDIRECTS.md)
+│   ├── reference/              # Canonical specs (architecture, DTOs, DB, orchestrator)
+│   ├── guides/                   # STARTER_GUIDE, PARALLEL_DEV, AGENTS_AND_SKILLS
+│   ├── ops/                      # PROGRESS_REPORT
+│   ├── plans/                    # Implementation plans
+│   ├── analysis/                 # Dated investigations
+│   ├── specs/                    # Pre-plan design specs
+│   ├── archive/                  # Superseded chunks
+│   └── mockups/                  # UI mockups
 ├── tests/
 │   ├── unit/                   # Unit tests per module
 │   ├── integration/            # End-to-end pipeline wiring tests
@@ -714,7 +777,7 @@ crypto-sniping-bot/
 
 **Group rules:** Groups A → B → C → D are sequential. Phases within the same group may run in parallel.
 
-See [`docs/implementation_roadmap.md`](docs/implementation_roadmap.md) for exact file paths, function signatures, and exit criteria per phase.
+See [`docs/reference/implementation_roadmap.md`](docs/reference/implementation_roadmap.md) for exact file paths, function signatures, and exit criteria per phase.
 
 ---
 
@@ -740,7 +803,7 @@ Each phase runs through a mandatory agent pipeline:
 phase-builder → dto-guardian → integration → security-auditor → test-builder → refactor (remediation only)
 ```
 
-See [`docs/PARALLEL_DEV.md`](docs/PARALLEL_DEV.md) for the full operator guide, model routing, phase grouping, and parallel safety invariants.
+See [`docs/guides/PARALLEL_DEV.md`](docs/guides/PARALLEL_DEV.md) for the full operator guide, model routing, phase grouping, and parallel safety invariants.
 
 ---
 
@@ -890,19 +953,18 @@ All values below live in `config/pipeline.yaml` unless noted.
 | `ai_enrichment.narrative_probe.copy_paste_rug_reject` | `false`        | Hard-reject (not soft) on copy-paste detection when `true`                          |
 | `ai_enrichment.loss_explainer.enabled`                | `false`        | Enable `LossExplainer` (Layer 10); adds AI category + reason to `LearningRecordDTO` |
 
-See [`docs/architecture.md § 7`](docs/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION` / `VERY_EXPLORATION`).
+See [`docs/reference/architecture.md § 7`](docs/reference/architecture.md) for operational mode configs (`STRICT` / `BALANCED` / `EXPLORATION` / `VERY_EXPLORATION`).
 
 ---
 
 ## Documentation
 
-| Document                                                           | Purpose                                                       |
-| ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| [`docs/architecture.md`](docs/architecture.md)                     | System design, pipeline layers, invariants, operational modes |
-| [`docs/implementation_roadmap.md`](docs/implementation_roadmap.md) | Phase-by-phase build guide with exact code                    |
-| [`docs/dto_contracts.md`](docs/dto_contracts.md)                   | DTO registry — all fields, types, constraints                 |
-| [`docs/db_adapter_spec.md`](docs/db_adapter_spec.md)               | Database adapter interface + migration strategy               |
-| [`docs/orchestrator_spec.md`](docs/orchestrator_spec.md)           | Orchestrator execution model and checkpointing                |
-| [`docs/PARALLEL_DEV.md`](docs/PARALLEL_DEV.md)                     | Parallel development operator guide                           |
-| [`docs/AGENTS_AND_SKILLS.md`](docs/AGENTS_AND_SKILLS.md)           | Agent and skill registry (41 skills, 12 agents)               |
-| [`docs/PROGRESS_REPORT.md`](docs/PROGRESS_REPORT.md)               | Live phase progress tracking                                  |
+**Start at [`docs/README.md`](docs/README.md)** — seven folders, no loose spec files at root. Old bookmarks: [`docs/REDIRECTS.md`](docs/REDIRECTS.md).
+
+| Folder | Purpose |
+| ------ | ------- |
+| [`docs/reference/`](docs/reference/) | Canonical specs (architecture, DTOs, DB, orchestrator, roadmap) |
+| [`docs/guides/`](docs/guides/) | STARTER_GUIDE, PARALLEL_DEV, AGENTS_AND_SKILLS |
+| [`docs/ops/`](docs/ops/) | PROGRESS_REPORT |
+| [`docs/plans/`](docs/plans/) | Executable implementation plans |
+| [`docs/analysis/`](docs/analysis/) | Dated investigations and certifications |

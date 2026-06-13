@@ -11,6 +11,7 @@ import (
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/execution"
+	"crypto-sniping-bot/internal/modules/position"
 )
 
 // ExecutionWorker implements Layer 8: Execution Engine.
@@ -32,6 +33,7 @@ type ExecutionWorker struct {
 	rpcEndpoint    string                   // canonical endpoint label for circuit-breaker tracking
 	walletShards   []execution.WalletConfig // multi-wallet shards; nil means single-wallet mode
 	solanaExec     execution.SolanaExecutor // optional; nil disables Solana execution path
+	priceClient    position.PriceClient     // optional; shadow fill oracle (Task 10)
 }
 
 // NewExecutionWorker returns a new ExecutionWorker.
@@ -87,6 +89,12 @@ func NewExecutionWorker(
 // When set, allocations with Chain=="solana" are routed to this executor.
 func (w *ExecutionWorker) WithSolanaExecutor(exec execution.SolanaExecutor) *ExecutionWorker {
 	w.solanaExec = exec
+	return w
+}
+
+// WithPriceClient wires the live price oracle used for shadow-mode fill simulation.
+func (w *ExecutionWorker) WithPriceClient(client position.PriceClient) *ExecutionWorker {
+	w.priceClient = client
 	return w
 }
 
@@ -194,6 +202,17 @@ func (w *ExecutionWorker) Process(ctx context.Context, evt *database.Event) (*da
 
 	if alloc.Rejected {
 		result = rejectedExecResult(alloc, now)
+	} else if w.cfg != nil && w.cfg.Execution.Mode == "shadow" {
+		// Shadow mode (Task 20 / Task 24): produce a simulated confirmed fill without
+		// on-chain submission. execution.mode is set to "shadow" in config/pipeline.yaml.
+		// simulatedExecResult produces Success=true with a placeholder entry price so
+		// the Position Engine opens a trackable slot for TIME-exit learning.
+		w.logger.Info("execution_worker_shadow_simulated",
+			"execution_id", alloc.ExecutionID,
+			"chain", alloc.Chain,
+			"trace_id", alloc.TraceID,
+		)
+		result = simulatedExecResult(alloc, now, w.shadowFillPrice(ctx, alloc))
 	} else if alloc.Chain == "solana" {
 		// Solana execution path (Phase 7).
 		result = w.processSolanaAlloc(ctx, alloc, now)
@@ -379,11 +398,33 @@ func (w *ExecutionWorker) processSolanaAlloc(ctx context.Context, alloc contract
 	return result
 }
 
-// simulatedExecResult is retained for any future legitimate paper-trading
-// mode that produces a fully-formed synthetic fill (with realistic
-// RealizedEntryPrice). It is NOT used for the execution-disabled fallback —
-// see executionDisabledResult.
-func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.ExecutionResultDTO {
+func (w *ExecutionWorker) shadowFillPrice(ctx context.Context, alloc contracts.AllocationDTO) string {
+	const placeholder = "0.000001"
+	if w.priceClient == nil {
+		return placeholder
+	}
+	price, err := w.priceClient.GetTokenPrice(ctx, alloc.TokenAddress, alloc.Chain)
+	if err != nil || price == "" {
+		w.logger.Debug("execution_shadow_price_unavailable",
+			"execution_id", alloc.ExecutionID,
+			"token", alloc.TokenAddress,
+			"chain", alloc.Chain,
+			"error", err,
+		)
+		return placeholder
+	}
+	return price
+}
+
+// simulatedExecResult produces a fully-formed synthetic confirmed fill for shadow
+// mode (execution.mode: "shadow"). Success=true with a non-empty RealizedEntryPrice
+// so the Position Engine opens a trackable Status="open" slot that the TIME exit
+// can close after MaxHoldSeconds, producing position_state_event → evaluation_event
+// → learning_record_event (L9–L10 pipeline proof).
+func simulatedExecResult(alloc contracts.AllocationDTO, now, entryPrice string) contracts.ExecutionResultDTO {
+	if entryPrice == "" {
+		entryPrice = "0.000001"
+	}
 	eventID := contracts.ContentIDFromString(fmt.Sprintf("exec-sim:%s", alloc.EventID))
 	return contracts.ExecutionResultDTO{
 		EventID:       eventID,
@@ -396,12 +437,13 @@ func simulatedExecResult(alloc contracts.AllocationDTO, now string) contracts.Ex
 		ExecutionID:      alloc.ExecutionID,
 		AllocationID:     alloc.EventID,
 
-		Status:        "confirmed",
-		Success:       true,
-		Simulated:     true,
-		MempoolRoute:  "public",
-		WalletAddress: alloc.WalletAddress,
-		CompletedAt:   now,
+		Status:             "confirmed",
+		Success:            true,
+		Simulated:          true,
+		RealizedEntryPrice: entryPrice,
+		MempoolRoute:       "public",
+		WalletAddress:      alloc.WalletAddress,
+		CompletedAt:        now,
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 // Every write method is idempotent (ON CONFLICT DO NOTHING semantics).
 // Only the orchestrator calls the adapter — modules NEVER import database/.
 //
-// See docs/db_adapter_spec.md § 2 for the full specification.
+// See docs/reference/db_adapter_spec.md § 2 for the full specification.
 type Adapter interface {
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -68,6 +68,12 @@ type Adapter interface {
 
 	// GetMarketData retrieves a MarketDataDTO by event ID.
 	GetMarketData(ctx context.Context, eventID string) (*contracts.MarketDataDTO, error)
+
+	// GetLatestPoolAddressForToken returns the pool_address from the most recent
+	// market_data row for the given chain and token. Used by the on-chain Solana
+	// pool price client to resolve AMM/bonding-curve accounts without adding
+	// pool fields to PositionStateDTO. Returns ("", false, nil) when not found.
+	GetLatestPoolAddressForToken(ctx context.Context, chain, tokenAddress string) (poolAddress string, found bool, err error)
 
 	// GetTokensForRescan returns up to q.Limit MarketDataDTOs whose
 	// (current_time - market_data.ingested_at) falls in [minAge, maxAge],
@@ -140,6 +146,11 @@ type Adapter interface {
 	// GetExecutionByLifecycle returns the ExecutionResultDTO for a lifecycle ID.
 	// Returns ErrNotFound if no execution record exists for the lifecycle.
 	GetExecutionByLifecycle(ctx context.Context, lifecycleID string) (*contracts.ExecutionResultDTO, error)
+
+	// GetProbabilityForLifecycle returns ProbabilityUsed from the validated-edge
+	// chain for a token lifecycle (validated_edges table, then event-bus fallback).
+	// The bool is false when no ACCEPT validated edge exists for the lifecycle.
+	GetProbabilityForLifecycle(ctx context.Context, lifecycleID string) (float64, bool, error)
 
 	// GetShadowTradesByWindow returns pending shadow trades whose rejected_at is
 	// older than (now - windowSeconds) and whose observation_complete is false.
@@ -270,6 +281,11 @@ type Adapter interface {
 
 	// GetPosition fetches a single position by ID.
 	GetPosition(ctx context.Context, positionID string) (*contracts.PositionStateDTO, error)
+
+	// GetShadowGateStats returns aggregate shadow-mode trade PnL over the lookback
+	// window. Counts exited positions whose execution_result.simulated=true.
+	// AggregatePnlBps is the sum of position pnl_pct × 10000 (basis points).
+	GetShadowGateStats(ctx context.Context, windowSeconds int) (*ShadowGateStats, error)
 
 	// GetClosedPositions returns positions that exited within the last
 	// sinceSeconds. The latest snapshot per position_id is returned, ordered
@@ -627,13 +643,19 @@ type Adapter interface {
 // operator's mental model of a funnel: SELECTED ≤ VALIDATED ≤ DQ_PASSED ≤ DETECTED.
 // DETECTED equals the total token count in the window (all tokens were at
 // DETECTED at some point). REJECTED and FAILED are raw (non-cumulative) terminal counts.
+//
+// DQ_SKIPPED is a terminal DQ-side audit state (EXPLORATION-mode silent SKIP).
+// It is NOT included in DQPassed, FeatureReady, EdgeDetected, or Validated because
+// SKIP emits no data_quality_event — downstream workers never saw the token.
+// There is no dedicated DQSkipped counter; skipped tokens remain visible only via
+// lifecycle state queries and Recent entries when they appear in the window.
 type PipelineStats struct {
-	// Funnel counts (cumulative — see comment above).
+	// Funnel counts (cumulative — see comment above; DQ_SKIPPED excluded).
 	Detected       int64 // total tokens in window (all started at DETECTED)
-	DQPassed       int64 // reached at least DQ_PASSED
-	FeatureReady   int64 // reached at least FEATURE_READY
-	EdgeDetected   int64 // reached at least EDGE_DETECTED
-	Validated      int64 // reached at least VALIDATED
+	DQPassed       int64 // reached at least DQ_PASSED (excludes DQ_SKIPPED)
+	FeatureReady   int64 // reached at least FEATURE_READY (excludes DQ_SKIPPED)
+	EdgeDetected   int64 // reached at least EDGE_DETECTED (excludes DQ_SKIPPED)
+	Validated      int64 // reached at least VALIDATED (excludes DQ_SKIPPED)
 	Selected       int64 // reached at least SELECTED (incl. FAILED from SELECTED+)
 	Executed       int64 // reached at least EXECUTED (incl. FAILED from EXECUTED+)
 	PositionOpen   int64 // reached at least POSITION_OPEN (incl. FAILED from POSITION_OPEN+)
@@ -676,15 +698,23 @@ type RescanStats struct {
 // market_data.ingested_at (rescan emission time) rather than
 // token_lifecycle.created_at (first-detection time).
 //
+// Counts are CUMULATIVE — each value represents "rescanned tokens that reached AT
+// LEAST this stage". DETECTED equals distinct rescanned tokens in the window.
+// REJECTED and FAILED are raw (non-cumulative) terminal counts.
+//
+// DQ_SKIPPED is a terminal DQ-side audit state (EXPLORATION-mode silent SKIP).
+// It is NOT included in DQPassed, FeatureReady, EdgeDetected, or Validated because
+// SKIP emits no data_quality_event — downstream workers never saw the token.
+//
 // Returned by GetRescanPipelineStats (concrete method on the postgres engine,
 // not part of the Adapter interface — callers type-assert to rescanPipelineQueryer).
 type RescanPipelineStats struct {
-	// Funnel counts (cumulative — same semantics as PipelineStats).
-	Detected       int64
-	DQPassed       int64
-	FeatureReady   int64
-	EdgeDetected   int64
-	Validated      int64
+	// Funnel counts (cumulative — see comment above; DQ_SKIPPED excluded).
+	Detected       int64 // distinct rescanned tokens in window
+	DQPassed       int64 // reached at least DQ_PASSED (excludes DQ_SKIPPED)
+	FeatureReady   int64 // reached at least FEATURE_READY (excludes DQ_SKIPPED)
+	EdgeDetected   int64 // reached at least EDGE_DETECTED (excludes DQ_SKIPPED)
+	Validated      int64 // reached at least VALIDATED (excludes DQ_SKIPPED)
 	Selected       int64
 	Executed       int64
 	PositionOpen   int64
@@ -753,7 +783,7 @@ type Config struct {
 }
 
 // Event is the event bus row representation.
-// See docs/db_adapter_spec.md § 2.
+// See docs/reference/db_adapter_spec.md § 2.
 type Event struct {
 	EventID       string // SHA256(payload_signature)[:16]
 	EventType     string // e.g., "market_data_event"
@@ -783,7 +813,7 @@ type Event struct {
 }
 
 // TransitionRequest carries the CAS parameters for a state machine transition.
-// See docs/implementation_roadmap.md § 0.7.
+// See docs/reference/implementation_roadmap.md § 0.7.
 type TransitionRequest struct {
 	LifecycleID       string
 	ExpectedFromState string // current_state value at time of read
@@ -852,6 +882,13 @@ type FillSample struct {
 	PredictedBps float64
 	RealizedBps  float64
 	At           time.Time
+}
+
+// ShadowGateStats aggregates shadow-mode execution outcomes over a lookback window.
+type ShadowGateStats struct {
+	TradeCount      int
+	AggregatePnlBps float64
+	AvgPnlBps       float64
 }
 
 // ShadowTrade is an observation row tracking the price trajectory of a rejected
@@ -968,15 +1005,16 @@ type DLQFilter struct {
 // All filters are applied server-side in a single parameterised SQL statement.
 // See database/engines/postgres/rescan.go for the implementation.
 type RescanQuery struct {
-	Chain             string  // optional chain filter; "" = all chains
-	MinAgeSeconds     int     // lower bound of age window (inclusive)
-	MaxAgeSeconds     int     // upper bound of age window (exclusive)
-	MaxHoneypotScore  float64 // latest DQ honeypot_score must be ≤ this
-	MaxRugScore       float64 // latest DQ rug_score must be ≤ this
-	MaxBuyTaxBps      int32   // latest DQ buy_tax_bps must be ≤ this
-	IncludePassed     bool    // include decision IN ('PASS','RISKY_PASS') alongside REJECT
-	SkipOpenPositions bool    // exclude tokens in POSITION_OPEN / EXECUTION_PENDING / etc.
-	Limit             int     // max rows returned; 0 = 100
+	Chain                  string  // optional chain filter; "" = all chains
+	MinAgeSeconds          int     // lower bound of age window (inclusive)
+	MaxAgeSeconds          int     // upper bound of age window (exclusive)
+	MaxHoneypotScore       float64 // latest DQ honeypot_score must be ≤ this
+	MaxRugScore            float64 // latest DQ rug_score must be ≤ this
+	MaxBuyTaxBps           int32   // latest DQ buy_tax_bps must be ≤ this
+	IncludePassed          bool    // include decision IN ('PASS','RISKY_PASS') alongside REJECT
+	SkipOpenPositions      bool    // exclude tokens in POSITION_OPEN / EXECUTION_PENDING / etc.
+	IncludeSkippedForRetry bool    // include SKIP'd tokens with probe-failure cause (holder_dist_known=false)
+	Limit                  int     // max rows returned; 0 = 100
 }
 
 // LatencyEvent is one raw execution latency sample written to latency_events.

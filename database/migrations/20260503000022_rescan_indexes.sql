@@ -1,6 +1,6 @@
 -- Phase 10 — rescan layer support indexes.
 -- Pure additive: CREATE INDEX IF NOT EXISTS only. No table or column changes.
--- See docs/PLAN.md § Task 2.
+-- See docs/plans/2026-06-10-profit-restoration-plan.md § Task 2.
 
 BEGIN;
 

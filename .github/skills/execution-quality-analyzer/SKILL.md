@@ -312,8 +312,8 @@ execution_quality:
 
 ## References
 
-- `docs/architecture.md` § 3.8 — Execution Engine (Layer 8)
-- `docs/architecture-context/10_execution_engine.md` — Wallet sharding, prebuilt calldata
+- `docs/reference/architecture.md` § 3.8 — Execution Engine (Layer 8)
+- `docs/archive/architecture-context/10_execution_engine.md` — Wallet sharding, prebuilt calldata
 - `.github/skills/execution-engine/SKILL.md` — Fee bump, idempotency keys
 - `.github/skills/observability/SKILL.md` — system_event emission
 - `contracts/execution.go` — `ExecutionResultDTO` fields

@@ -278,8 +278,8 @@ strategy_auto_disable:
 
 ## References
 
-- `docs/architecture.md` § 3.10 — Learning Engine (Layer 10)
-- `docs/architecture.md` § 4.2 — A/B Promotion (re-enable gating)
+- `docs/reference/architecture.md` § 3.10 — Learning Engine (Layer 10)
+- `docs/reference/architecture.md` § 4.2 — A/B Promotion (re-enable gating)
 - `.github/skills/strategy-decay-detector/SKILL.md` — Feeding DecaySignals to trigger checks
 - `.github/skills/strategy-versioning/SKILL.md` — VersionID scoping
 - `.github/skills/drawdown-protection/SKILL.md` — Session drawdown trigger feeds from HWM

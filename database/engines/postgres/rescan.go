@@ -2,7 +2,7 @@ package postgres
 
 // rescan.go — Postgres implementation of Adapter.GetTokensForRescan.
 // Pure read-only query with parameterised SQL.
-// See docs/PLAN.md § Task 4 for design rationale.
+// See docs/plans/2026-06-10-profit-restoration-plan.md § Task 4 for design rationale.
 
 import (
 	"database/sql"
@@ -15,28 +15,26 @@ import (
 	"crypto-sniping-bot/database"
 )
 
-// GetTokensForRescan returns up to q.Limit MarketDataDTOs that are eligible
-// for a rescan band. All filters are applied server-side.
+// rescanQuerySQL is the parameterised SQL used by GetTokensForRescan.
+// Extracted as a package-level variable so tests can verify its structure
+// without a real database connection.
 //
-// Results are deterministic: ORDER BY md.token_address ASC, md.ingested_at DESC;
-// one row per token (latest market_data row).
+// Parameters:
 //
-// Empty result is not an error — returns ([]MarketDataDTO{}, nil).
-func (d *DB) GetTokensForRescan(ctx context.Context, q database.RescanQuery) ([]contracts.MarketDataDTO, error) {
-	limit := q.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-
-	// DISTINCT ON (md.token_address) picks the latest row per token via the
-	// inner ORDER BY md.token_address, md.ingested_at DESC.
-	// Outer ORDER BY enforces deterministic result ordering.
-	//
-	// Parameterised throughout (no string interpolation) — OWASP A03 safe.
-	const query = `
+//	$1  MinAgeSeconds           (lower bound, inclusive)
+//	$2  MaxAgeSeconds           (upper bound, exclusive)
+//	$3  chain                   (empty string = all chains)
+//	$4  MaxHoneypotScore
+//	$5  MaxRugScore
+//	$6  MaxBuyTaxBps
+//	$7  IncludePassed           (include PASS/RISKY_PASS alongside REJECT)
+//	$8  SkipOpenPositions       (exclude tokens currently held as open positions)
+//	$9  IncludeSkippedForRetry  (include SKIP'd tokens whose probes timed out)
+//	$10 LIMIT
+var rescanQuerySQL = `
 WITH latest_dq AS (
     SELECT DISTINCT ON (token_address)
-        token_address, decision, honeypot_score, rug_score, buy_tax_bps
+        token_address, decision, honeypot_score, rug_score, buy_tax_bps, flags
     FROM data_quality
     ORDER BY token_address, evaluated_at DESC
 ),
@@ -100,6 +98,9 @@ WHERE
     AND (
         dq.decision = 'REJECT'
         OR ($7 AND dq.decision IN ('PASS', 'RISKY_PASS'))
+        OR ($9 AND dq.decision = 'SKIP'
+                AND dq.flags @> '["serial_launcher_skipped"]'::jsonb
+                AND COALESCE(md.holder_dist_known, FALSE) = FALSE)
     )
     AND (
         NOT $8
@@ -109,11 +110,29 @@ WHERE
         )
     )
 ORDER BY md.token_address ASC, md.ingested_at DESC
-LIMIT $9
+LIMIT $10
 `
 
+// GetTokensForRescan returns up to q.Limit MarketDataDTOs that are eligible
+// for a rescan band. All filters are applied server-side.
+//
+// Results are deterministic: ORDER BY md.token_address ASC, md.ingested_at DESC;
+// one row per token (latest market_data row).
+//
+// Empty result is not an error — returns ([]MarketDataDTO{}, nil).
+func (d *DB) GetTokensForRescan(ctx context.Context, q database.RescanQuery) ([]contracts.MarketDataDTO, error) {
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// DISTINCT ON (md.token_address) picks the latest row per token via the
+	// inner ORDER BY md.token_address, md.ingested_at DESC.
+	// Outer ORDER BY enforces deterministic result ordering.
+	//
+	// Parameterised throughout (no string interpolation) — OWASP A03 safe.
 	chain := q.Chain
-	rows, err := d.pool.QueryContext(ctx, query,
+	rows, err := d.pool.QueryContext(ctx, rescanQuerySQL,
 		q.MinAgeSeconds,
 		q.MaxAgeSeconds,
 		chain,
@@ -122,6 +141,7 @@ LIMIT $9
 		int(q.MaxBuyTaxBps),
 		q.IncludePassed,
 		q.SkipOpenPositions,
+		q.IncludeSkippedForRetry,
 		limit,
 	)
 	if err != nil {

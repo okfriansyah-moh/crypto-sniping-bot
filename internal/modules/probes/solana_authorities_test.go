@@ -25,6 +25,17 @@ func (s *stubSolanaRPC) GetAccountInfo(_ context.Context, pubkey, _ string) (*So
 	return s.accounts[pubkey], nil
 }
 
+func (s *stubSolanaRPC) GetMultipleAccounts(_ context.Context, pubkeys []string, _ string) ([]*SolanaAccountData, error) {
+	if s.accErr != nil {
+		return nil, s.accErr
+	}
+	out := make([]*SolanaAccountData, len(pubkeys))
+	for i, k := range pubkeys {
+		out[i] = s.accounts[k]
+	}
+	return out, nil
+}
+
 func (s *stubSolanaRPC) GetTokenLargestAccounts(_ context.Context, mint, _ string) ([]SolanaTokenHolder, error) {
 	if s.holdErr != nil {
 		return nil, s.holdErr

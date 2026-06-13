@@ -19,8 +19,8 @@ Enforce correct pipeline stage ordering, validate DTO flow between stages, and s
 
 ## Inputs
 
-- `docs/architecture.md` — pipeline stage definitions and ordering
-- `docs/implementation_roadmap.md` — phase grouping and parallelism matrix
+- `docs/reference/architecture.md` — pipeline stage definitions and ordering
+- `docs/reference/implementation_roadmap.md` — phase grouping and parallelism matrix
 
 ## Outputs
 
@@ -30,7 +30,7 @@ Enforce correct pipeline stage ordering, validate DTO flow between stages, and s
 
 ## Stage Sequence Pattern
 
-Define your pipeline stages in `docs/architecture.md`:
+Define your pipeline stages in `docs/reference/architecture.md`:
 
 ```
 Stage 0: stage_name_0
@@ -82,7 +82,7 @@ Phase 2  ──→ [stage_c]                     ← depends on Phase 1
 Phase 3  ──→ [stage_d] [stage_e]           ← PARALLEL if independent
 ```
 
-Define your specific parallelism matrix in `docs/implementation_roadmap.md`.
+Define your specific parallelism matrix in `docs/reference/implementation_roadmap.md`.
 
 ## Examples
 
@@ -96,7 +96,7 @@ Define your specific parallelism matrix in `docs/implementation_roadmap.md`.
 
 ## Checklist
 
-- [ ] Pipeline stages are in the order defined in `docs/architecture.md`
+- [ ] Pipeline stages are in the order defined in `docs/reference/architecture.md`
 - [ ] No stage is skipped or reordered
 - [ ] Every stage boundary has compatible DTO types
 - [ ] Checkpoints are written after every stage completion

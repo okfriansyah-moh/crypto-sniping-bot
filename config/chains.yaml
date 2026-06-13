@@ -237,3 +237,25 @@ solana:
     grpc_endpoint: ""
     fallback_on_error: true
     fallback_error_n: 5
+  # Task 25 — Pre-cohort filter: drop pump.fun graduates whose creator has
+  # launched more than max_creator_prev_token_count prior tokens BEFORE issuing
+  # Helius probe calls or running the DQ engine.  The threshold (25) is
+  # intentionally above VERY_EXPLORATION's max_creator_prev_token_count=10 so
+  # this filter never overrides a DQ mode decision — it only drops the strict
+  # super-set that always SKIP/REJECT under every mode (e.g. creator_count=49).
+  # Enabled (PLAN Task 9): drop serial launchers at L0 before Helius probe calls.
+  # Threshold 25 is above VERY_EXPLORATION DQ ceiling (10) — only drops creators
+  # that SKIP/REJECT under every mode. Fail-open when profile unknown.
+  # PRODUCTION_GATE_ANALYSIS § 3 + §7.20.
+  pre_filter:
+    enabled: true
+    max_creator_prev_token_count: 25
+  # Task 14 — reject system/stable mints as TokenAddress before event-bus emit.
+  # Prevents WSOL/USDC/USDT from entering probes, DQ, and creator_profiles.
+  # Gate run 20260612_174145: 44/48 pumpfun-amm emissions had TokenAddress=WSOL.
+  system_mint_reject:
+    enabled: true
+    mints:
+      - "So11111111111111111111111111111111111111112" # WSOL / native SOL placeholder
+      - "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC
+      - "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" # USDT

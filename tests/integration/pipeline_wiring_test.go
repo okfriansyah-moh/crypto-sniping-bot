@@ -247,6 +247,9 @@ func (m *memAdapter) InsertEvaluation(_ context.Context, _ contracts.EvaluationD
 func (m *memAdapter) GetExecutionByLifecycle(_ context.Context, _ string) (*contracts.ExecutionResultDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (m *memAdapter) GetProbabilityForLifecycle(_ context.Context, _ string) (float64, bool, error) {
+	return 0, false, nil
+}
 func (m *memAdapter) InsertLearningRecord(_ context.Context, _ contracts.LearningRecordDTO) error {
 	return database.ErrNotImplemented
 }
@@ -293,6 +296,9 @@ func (m *memAdapter) GetOpenPositions(_ context.Context) ([]contracts.PositionSt
 }
 func (m *memAdapter) GetPosition(_ context.Context, _ string) (*contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotImplemented
+}
+func (m *memAdapter) GetShadowGateStats(_ context.Context, _ int) (*database.ShadowGateStats, error) {
+	return &database.ShadowGateStats{}, nil
 }
 func (m *memAdapter) GetClosedPositions(_ context.Context, _ int) ([]contracts.PositionStateDTO, error) {
 	return nil, database.ErrNotImplemented
@@ -872,6 +878,9 @@ func (m *memAdapter) GetTokensForRescan(_ context.Context, _ database.RescanQuer
 // CheckTokenNameSeen stub — always returns (false, nil) so tests proceed through probes.
 func (m *memAdapter) CheckTokenNameSeen(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
+}
+func (m *memAdapter) GetLatestPoolAddressForToken(_ context.Context, _, _ string) (string, bool, error) {
+	return "", false, nil
 }
 
 // ── Historical Market Profiles stubs (Approach A) ─────────────────────────────

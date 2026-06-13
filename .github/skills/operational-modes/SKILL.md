@@ -276,8 +276,8 @@ if ev < thresholds.EVThreshold { return "reject" }
 
 ## References
 
-- Architecture: `docs/architecture.md` § 7 (Operational Modes)
-- Architecture context: `docs/architecture-context/1_global_control_loop.md`
-- Architecture context: `docs/architecture-context/13_observability_finalization.md` § 15
-- Roadmap: `docs/implementation_roadmap.md` Phase 3 (Mode Controller)
+- Architecture: `docs/reference/architecture.md` § 7 (Operational Modes)
+- Architecture context: `docs/archive/architecture-context/1_global_control_loop.md`
+- Architecture context: `docs/archive/architecture-context/13_observability_finalization.md` § 15
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 3 (Mode Controller)
 - Config: `config/pipeline.yaml` → `modes`, `mode_transitions`

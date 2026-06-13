@@ -91,7 +91,7 @@ func momentumFeature(eventID string) contracts.FeatureDTO {
 func TestTaxonomy_FreshPool_FiresNewLaunch(t *testing.T) {
 	m := New(taxonomyCfg())
 	out, err := m.ProcessWithContext(
-		context.Background(), newLaunchFeature("nl-1"), BaselineSnapshot{}, fixedNow(),
+		context.Background(), newLaunchFeature("nl-1"), BaselineSnapshot{}, 0, fixedNow(),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -110,7 +110,7 @@ func TestTaxonomy_FreshPool_FiresNewLaunch(t *testing.T) {
 func TestTaxonomy_OldTokenHighMomentum_FiresMomentum(t *testing.T) {
 	m := New(taxonomyCfg())
 	out, err := m.ProcessWithContext(
-		context.Background(), momentumFeature("mo-1"), BaselineSnapshot{}, fixedNow(),
+		context.Background(), momentumFeature("mo-1"), BaselineSnapshot{}, 0, fixedNow(),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,7 +129,7 @@ func TestTaxonomy_OldTokenLowMomentum_FiresNone(t *testing.T) {
 	in := momentumFeature("none-1")
 	in.PriceMomentum = 0.1
 	in.VolumeMomentum = 0.1
-	out, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, fixedNow())
+	out, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0, fixedNow())
 	if out.EdgeType != contracts.EdgeTypeNone {
 		t.Errorf("expected NONE, got %q", out.EdgeType)
 	}
@@ -164,7 +164,7 @@ func TestTaxonomy_BothEligible_HighestStrengthWins(t *testing.T) {
 		ContractSafety:     0.1,
 		TokenAgeSecondsRaw: 60,
 	}
-	out, _ := m.ProcessWithContext(context.Background(), weakNewLaunch, BaselineSnapshot{}, fixedNow())
+	out, _ := m.ProcessWithContext(context.Background(), weakNewLaunch, BaselineSnapshot{}, 0, fixedNow())
 	if out.EdgeType != contracts.EdgeTypeNewLaunch {
 		t.Fatalf("expected NEW_LAUNCH for fresh weak input, got %q", out.EdgeType)
 	}
@@ -204,7 +204,7 @@ func TestVariance_DistinctInputsProduceDistinctEdges(t *testing.T) {
 				TxVelocityScore:    float64((i*43)%100+1) / 100.0,
 			},
 		}
-		out, err := m.ProcessWithContext(context.Background(), f, BaselineSnapshot{}, now)
+		out, err := m.ProcessWithContext(context.Background(), f, BaselineSnapshot{}, 0, now)
 		if err != nil {
 			t.Fatalf("unexpected error at i=%d: %v", i, err)
 		}
@@ -237,9 +237,9 @@ func TestDeterminism_HundredCallsIdentical(t *testing.T) {
 	in := newLaunchFeature("det-1")
 	now := fixedNow()
 
-	first, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, now)
+	first, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0, now)
 	for i := 0; i < 99; i++ {
-		out, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, now)
+		out, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0, now)
 		if out != first {
 			t.Fatalf("non-deterministic output at iter %d:\nfirst=%+v\ngot  =%+v", i, first, out)
 		}
@@ -301,14 +301,14 @@ func TestAdaptiveThreshold_AppliedInProcess(t *testing.T) {
 	in := momentumFeature("adapt-1")
 	in.PriceMomentum = 0.5 // below adaptive threshold (~0.9), above cold-start (0.4)
 
-	out, _ := m.ProcessWithContext(context.Background(), in, snap, now)
+	out, _ := m.ProcessWithContext(context.Background(), in, snap, 0, now)
 	if out.EdgeType != contracts.EdgeTypeNone {
 		t.Errorf("expected NONE under hot adaptive threshold, got %q (threshold=%f)",
 			out.EdgeType, out.ThresholdApplied)
 	}
 
 	// Sanity: with cold-start (empty baseline) the same input passes.
-	cold, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, now)
+	cold, _ := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0, now)
 	if cold.EdgeType != contracts.EdgeTypeMomentum {
 		t.Errorf("cold-start: expected MOMENTUM_EDGE, got %q", cold.EdgeType)
 	}
@@ -323,12 +323,12 @@ func TestConfidence_VariesWithInputCompleteness(t *testing.T) {
 	a := newLaunchFeature("conf-a")
 	a.Confidence.LiquidityScore = 0.9
 	a.Confidence.ContractSafety = 0.9
-	outA, _ := m.ProcessWithContext(context.Background(), a, BaselineSnapshot{}, now)
+	outA, _ := m.ProcessWithContext(context.Background(), a, BaselineSnapshot{}, 0, now)
 
 	b := newLaunchFeature("conf-b")
 	b.Confidence.LiquidityScore = 0.3 // weak input → confidence drops
 	b.Confidence.ContractSafety = 0.9
-	outB, _ := m.ProcessWithContext(context.Background(), b, BaselineSnapshot{}, now)
+	outB, _ := m.ProcessWithContext(context.Background(), b, BaselineSnapshot{}, 0, now)
 
 	if outA.EdgeConfidence == outB.EdgeConfidence {
 		t.Errorf("confidence must vary with input confidence: A=%f B=%f",
@@ -348,7 +348,7 @@ func TestEdgeModelVersionID_PopulatedFromConfig(t *testing.T) {
 	m := New(cfg)
 
 	out, _ := m.ProcessWithContext(
-		context.Background(), newLaunchFeature("ver-1"), BaselineSnapshot{}, fixedNow(),
+		context.Background(), newLaunchFeature("ver-1"), BaselineSnapshot{}, 0, fixedNow(),
 	)
 	if out.EdgeModelVersionID != "edge-vX" {
 		t.Errorf("EdgeModelVersionID not populated: got %q", out.EdgeModelVersionID)
@@ -360,8 +360,8 @@ func TestEdgeModelVersionID_DifferentVersionDifferentEventID(t *testing.T) {
 	b := New(&config.EdgeConfig{ModelVersion: "edge-v2"})
 	in := newLaunchFeature("ver-eid")
 
-	outA, _ := a.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, fixedNow())
-	outB, _ := b.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, fixedNow())
+	outA, _ := a.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0, fixedNow())
+	outB, _ := b.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0, fixedNow())
 
 	if outA.EventID == outB.EventID {
 		t.Errorf("different versions must yield distinct event_ids (replay-safety)")

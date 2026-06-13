@@ -114,8 +114,9 @@ func NormalizePumpFunAMMCreatePool(
 	if event == nil {
 		return nil, nil // not a CreatePool
 	}
-	if event.BaseMint == "" {
-		return nil, fmt.Errorf("pumpfun_amm: create_pool: empty base mint")
+	tokenMint, baseAddr, ok := ResolveTradableMint(event.BaseMint, event.QuoteMint)
+	if !ok {
+		return nil, nil // system-mint pair or empty mint — skip emit (dto_nil_skip)
 	}
 
 	return &contracts.MarketDataDTO{
@@ -132,8 +133,8 @@ func NormalizePumpFunAMMCreatePool(
 		LogIndex:          uint32(instr.Index),
 		EventTopic:        "PumpFunAMMCreatePool",
 		PoolAddress:       event.Pool,
-		TokenAddress:      event.BaseMint,
-		BaseAddress:       event.QuoteMint,
+		TokenAddress:      tokenMint,
+		BaseAddress:       baseAddr,
 		Token0Address:     event.BaseMint,
 		Token1Address:     event.QuoteMint,
 		Amount0Raw:        "0",

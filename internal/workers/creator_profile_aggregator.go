@@ -73,7 +73,7 @@ func RunCreatorProfileAggregator(
 
 	switch evt.EventType {
 	case "market_data_event":
-		return handleMarketDataEvent(ctx, adapter, evt, goldenGemThreshold, logger)
+		return handleMarketDataEvent(ctx, adapter, evt, cfg, logger)
 	case "learning_record_event":
 		return handleLearningRecordEvent(ctx, adapter, evt, goldenGemThreshold, logger)
 	default:
@@ -91,7 +91,7 @@ func handleMarketDataEvent(
 	ctx context.Context,
 	adapter database.Adapter,
 	evt *database.Event,
-	_ float64, // goldenGemThreshold unused for market_data_event
+	cfg *config.Config,
 	logger *slog.Logger,
 ) error {
 	var md contracts.MarketDataDTO
@@ -108,6 +108,9 @@ func handleMarketDataEvent(
 		return adapter.MarkEventProcessed(ctx, evt.EventID)
 	}
 	if isFactoryProgram(md.CreatorAddress) {
+		return adapter.MarkEventProcessed(ctx, evt.EventID)
+	}
+	if cfg != nil && cfg.Solana.SystemMintReject.ShouldRejectToken(md.TokenAddress) {
 		return adapter.MarkEventProcessed(ctx, evt.EventID)
 	}
 

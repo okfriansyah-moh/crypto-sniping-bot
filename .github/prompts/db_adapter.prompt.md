@@ -1,16 +1,16 @@
 # Database Adapter Specification Prompt
 
-You are a Staff+ backend architect. Generate a complete `docs/db_adapter_spec.md`.
+You are a Staff+ backend architect. Generate a complete `docs/reference/db_adapter_spec.md`.
 
 ## Instructions
 
-1. Read `docs/architecture.md` — data model, tables, state machines
-2. Read `docs/dto_contracts.md` — DTO definitions the adapter must accept/return
+1. Read `docs/reference/architecture.md` — data model, tables, state machines
+2. Read `docs/reference/dto_contracts.md` — DTO definitions the adapter must accept/return
 3. Read `.github/copilot-instructions.md` — database rules
 
 ## Document Structure
 
-Generate `docs/db_adapter_spec.md` with:
+Generate `docs/reference/db_adapter_spec.md` with:
 
 ### 1. Design Principles
 
@@ -79,4 +79,4 @@ class DatabaseAdapter:
 
 ## Output
 
-Write the completed specification to `docs/db_adapter_spec.md`.
+Write the completed specification to `docs/reference/db_adapter_spec.md`.

@@ -64,11 +64,11 @@ Level 4 — Full Doc (~5000–10000 tokens)
 
 ```python
 # ❌ WASTEFUL
-read_file("docs/implementation_roadmap.md", 1, 2000)
+read_file("docs/reference/implementation_roadmap.md", 1, 2000)
 
 # ✅ EFFICIENT
-grep_search("## Phase 3", includePattern="docs/implementation_roadmap.md")
-read_file("docs/implementation_roadmap.md", start_line, end_line)
+grep_search("## Phase 3", includePattern="docs/reference/implementation_roadmap.md")
+read_file("docs/reference/implementation_roadmap.md", start_line, end_line)
 ```
 
 ### Strategy 4: Subagent Isolation

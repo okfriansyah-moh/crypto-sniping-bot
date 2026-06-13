@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
@@ -437,6 +438,55 @@ ON CONFLICT (event_id) DO NOTHING`
 		return fmt.Errorf("insert learning record: %w", err)
 	}
 	return nil
+}
+
+// GetProbabilityForLifecycle returns ProbabilityUsed from the validated-edge
+// chain for a token lifecycle. Prefers validated_edges; falls back to the
+// validated_edge_event payload in the events table (docs/plans/2026-06-10-profit-restoration-plan.md Task 6).
+func (d *DB) GetProbabilityForLifecycle(ctx context.Context, lifecycleID string) (float64, bool, error) {
+	if lifecycleID == "" {
+		return 0, false, nil
+	}
+
+	const qValidated = `
+SELECT probability_used
+FROM validated_edges
+WHERE token_lifecycle_id = $1 AND decision = 'ACCEPT'
+ORDER BY validated_at DESC
+LIMIT 1`
+
+	var prob float64
+	err := d.pool.QueryRowContext(ctx, qValidated, lifecycleID).Scan(&prob)
+	if err == nil {
+		return prob, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, fmt.Errorf("get probability for lifecycle (validated_edges): %w", err)
+	}
+
+	const qEvent = `
+SELECT payload->>'probability_used'
+FROM events
+WHERE event_type = 'validated_edge_event'
+  AND payload->>'token_lifecycle_id' = $1
+  AND payload->>'decision' = 'ACCEPT'
+ORDER BY created_at DESC
+LIMIT 1`
+
+	var probStr sql.NullString
+	err = d.pool.QueryRowContext(ctx, qEvent, lifecycleID).Scan(&probStr)
+	if errors.Is(err, sql.ErrNoRows) || !probStr.Valid || probStr.String == "" {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("get probability for lifecycle (events): %w", err)
+	}
+
+	parsed, parseErr := strconv.ParseFloat(probStr.String, 64)
+	if parseErr != nil {
+		return 0, false, fmt.Errorf("get probability for lifecycle: parse %q: %w", probStr.String, parseErr)
+	}
+	return parsed, true, nil
 }
 
 // GetExecutionByLifecycle returns the ExecutionResultDTO for a lifecycle ID.

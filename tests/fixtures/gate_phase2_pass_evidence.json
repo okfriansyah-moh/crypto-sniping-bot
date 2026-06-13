@@ -1,0 +1,15 @@
+{
+  "timestamp": "fixture_phase2_pass",
+  "detected_mode": "PIPELINE_PROOF",
+  "operational_evidence": {
+    "traces_completed": 1,
+    "duplicate_execution": 0
+  },
+  "throughput_metrics": {
+    "wsol_token_address_emitted": 0,
+    "ingestion_valid_token_ratio": "0.9500",
+    "market_probes_backlog_ratio": "0.0200",
+    "dq_pass_or_risky_pass": 3,
+    "shadow_observer_failed": 0
+  }
+}

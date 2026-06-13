@@ -72,8 +72,8 @@ edge:
   # local V-shape bottom.  Boots in shadow_mode=true — flip to false
   # after validating score distribution against live trades.
   bottom_detection:
-    enabled: false
-    shadow_mode: true
+    enabled: true
+    shadow_mode: false
     max_slots: 20
     min_score: 0.60 # gate threshold when NOT in shadow mode (0 = disabled)
 
@@ -97,22 +97,21 @@ validation:
   # If those upstream events have not committed by join_timeout_ms,
   # validation REJECTs with reject_reason=probability_unavailable rather
   # than silently using the prior to compute EV (that path produced the
-  # mass -1900 bps reject regression — see docs/architecture.md § 3.5).
+  # mass -1900 bps reject regression — see docs/reference/architecture.md § 3.5).
   # join_poll_interval_ms is the DB poll cadence within the wait.
   join_timeout_ms: 250
   join_poll_interval_ms: 20
 
 selection:
-  # Raised from 1 → 10 after F-1 (phantom position) fix verified
-  # in log-reviewer 2026-05-02. With execution disabled at boot,
-  # allocations now produce rejected (not phantom-confirmed) results,
-  # so slots cannot leak. Cap chosen for moderate concurrency on
-  # Solana pump.fun feed; tune with operator P&L data.
+  # Legacy fallback when mode thresholds are unavailable. Active Top-K cap is
+  # priority.modes.*.max_positions (see config/priority.yaml, PLAN Task 4).
   max_open_positions: 10
-  # Phase 11 (Reference-Repo R2 — SELECT) — per-creator dedup gate.
-  # Caps concurrent open positions originating from the same creator
-  # wallet across the candidate pool. 0 disables the gate.
-  max_positions_per_creator: 0
+  # Micro-batch window (ms) — coalesce validated edges per chain before Top-K.
+  batch_window_ms: 3000
+  # 0 = use per-mode max_positions from priority.yaml.
+  top_k: 0
+  # Per-creator dedup gate — caps concurrent open positions per dev wallet.
+  max_positions_per_creator: 2
 
 capital:
   wallet_address: "" # EIP-55 wallet address (set via env or config)
@@ -134,8 +133,8 @@ position:
   # Tightens the trailing floor as unrealized profit grows.
   # All tiers boot in shadow_mode: true — flip to false after shadow validation.
   dynamic_trailing:
-    enabled: false
-    shadow_mode: true
+    enabled: true
+    shadow_mode: false
     # Tiers evaluated descending — first match wins.
     # trigger_bps: minimum unrealized gain (e.g. 10000 = 100% = 2x).
     # trail_bps:   trailing floor width (e.g. 2000 = 20% below peak).
@@ -234,17 +233,29 @@ models:
     latency_anchor_ms: 800
     max_multiplier: 2.0
 
+# Live price oracle for Layer 9 position monitoring and Layer 8 shadow fills.
+# on_chain: Solana tokens priced from bonding-curve / AMM vault reserves (cached RPC).
+# dexscreener: DEXScreener public API for all chains (legacy default).
+price_oracle:
+  mode: on_chain
+  cache_ttl_seconds: 5
+  stale_max_multiplier: 3
+
 execution:
   # Shadow mode enabled 2026-05-29 (Task 20 — P2-A).
   # Generates buy/sell signals and records execution_results rows with mode='shadow'
-  # using a simulated fill price from the live DEXScreener price at decision time.
+  # using a simulated fill price from the live on-chain pool oracle (PLAN Task 10).
   # No on-chain transactions are submitted; no wallet keys are loaded.
   # Gating before advancing to live: ≥ 30 completed shadow trades AND positive
   # aggregate realized_pnl_bps over the most recent 14-day window
   # (per PRODUCTION_GATE_ANALYSIS § 8 Change 6, step 13).
   # To re-enable live trading, change mode back to "live".
   mode: "shadow" # "live" | "shadow" — PRODUCTION_GATE_ANALYSIS § 7 P2-A
-  # mode: "live"  # uncomment after ≥14 days shadow + ≥30 trades + positive PnL
+  # mode: "live"  # operator manual flip ONLY after shadow_gate passes (no auto-promotion)
+  shadow_gate:
+    min_trades: 30
+    min_window_days: 14
+    min_aggregate_pnl_bps: 0 # 0 = require strictly positive aggregate PnL in window
   private_route_threshold_usd: 0 # 0 disables private routing in Phase 4
   private_endpoints: []
 
@@ -350,6 +361,12 @@ probes:
   # Reduce to 350 if downgrading to Helius free tier (1M credits/month).
   # Set to 0 to disable (unlimited — not recommended).
   max_probes_per_hour: 1200
+  # batch_accounts: one getMultipleAccounts for mint + bonding curve on new
+  # tokens (saves ~1 Helius credit per pump.fun probe vs two getAccountInfo).
+  batch_accounts: true
+  # rescan_skip_pumpfun_lp_phase2: skip solana_pumpfun_lp on 12h–48h rescan
+  # bands; reserves change slowly and ingest-time LP data is sufficient.
+  rescan_skip_pumpfun_lp_phase2: true
   honeypot_sim:
     enabled: false
     simulation_contract: "" # EIP-55 address of deployed sim contract
@@ -374,6 +391,13 @@ probes:
     timeout_ms: 1000 # increased from 300ms — Helius RPC needs headroom under load
     commitment: confirmed
     top_k: 5
+    # Fallback: when getTokenLargestAccounts times out (common in the first 60s
+    # for fresh pump.fun mints), retry via getTokenSupply + getProgramAccounts.
+    # Costs +11 Helius credits per fallback invocation (1 + 10). Disable here
+    # if credit burn must be minimised at the cost of more HolderDistKnown=false.
+    fallback_enabled: true
+    fallback_timeout_ms: 2500
+    fallback_max_program_accounts: 200
   # Uniswap-V2 getReserves probe — replaces ingestion-time per-swap flow
   # values with live pool depth. Default disabled until an EVM RPC client
   # is wired in cmd/server.go.
@@ -407,12 +431,13 @@ probes:
 
 # Phase 10 — time-banded rescan worker (Layer 0.5).
 # Enabled by default for Phase 10+ pipelines.
-# See docs/PLAN.md for full design rationale.
+# See docs/plans/2026-06-10-profit-restoration-plan.md for full design rationale.
 rescan:
   enabled: true
   interval_seconds: 60
   max_per_band_per_tick: 30
   skip_open_positions: true
+  include_skipped_for_retry: true # Task 29: retry SKIP'd tokens now that Task 26 fallback makes HolderDistKnown=true ≥90%
   eligibility:
     max_honeypot_score: 0.5
     max_rug_score: 0.65
@@ -526,7 +551,7 @@ ai_enrichment:
     max_description_chars: 300
     min_narrative_score: 3.0
   loss_explainer:
-    enabled: false
+    enabled: true
     min_records_per_batch: 5
 
 # ── Creator Profile Aggregator (Task 8) ───────────────────────────────────────

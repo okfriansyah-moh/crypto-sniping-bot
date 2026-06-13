@@ -40,7 +40,7 @@ After resolution, **no conflict markers** may remain in any file:
 ## Inputs
 
 - Two or more branches with conflicting changes
-- File ownership matrix from `docs/implementation_roadmap.md`
+- File ownership matrix from `docs/reference/implementation_roadmap.md`
 
 ## Outputs
 

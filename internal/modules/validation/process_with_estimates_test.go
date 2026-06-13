@@ -319,11 +319,11 @@ func TestProcessWithEstimatesAt_DeterministicTimestamps(t *testing.T) {
 	in := edgeForEstimates()
 	now := time.Date(2026, 1, 2, 3, 4, 5, 600_000_000, time.UTC)
 
-	out1, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, now)
+	out1, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, 0, now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out2, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, now)
+	out2, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, 0, now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -337,5 +337,68 @@ func TestProcessWithEstimatesAt_DeterministicTimestamps(t *testing.T) {
 	wantValidatedAt := now.Format(time.RFC3339Nano)
 	if out1.ValidatedAt != wantValidatedAt {
 		t.Errorf("ValidatedAt did not honour injected now: want %q got %q", wantValidatedAt, out1.ValidatedAt)
+	}
+}
+
+// borderlineEstimateCfg yields EV ≈ 30 bps with default priors (p=0.5).
+func borderlineEstimateCfg() *config.ValidationConfig {
+	return &config.ValidationConfig{
+		PriorProbability: 0.5,
+		PriorGainBps:     200,
+		PriorLossBps:     100,
+		PriorSlippageBps: 10,
+		EvThresholdBps:   100,
+		FixedCostsBps:    10,
+		BuildSubmitP95Ms: 500,
+		TTLSeconds:       5,
+	}
+}
+
+// TestProcessWithEstimatesAt_ModeThreshold_ExplorationAcceptsBorderlineEV verifies
+// a per-call exploration threshold (30 bps) accepts an edge rejected at 100 bps.
+func TestProcessWithEstimatesAt_ModeThreshold_ExplorationAcceptsBorderlineEV(t *testing.T) {
+	m := New(borderlineEstimateCfg())
+	in := edgeForEstimates()
+
+	outStrict, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, 100, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("strict threshold call: %v", err)
+	}
+	if outStrict.Decision != "REJECT" {
+		t.Fatalf("expected REJECT at threshold=100, got %q", outStrict.Decision)
+	}
+	if outStrict.EvThresholdApplied != 100 {
+		t.Fatalf("EvThresholdApplied: want 100, got %d", outStrict.EvThresholdApplied)
+	}
+
+	outExploration, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, 30, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("exploration threshold call: %v", err)
+	}
+	if outExploration.Decision != "ACCEPT" {
+		t.Fatalf("expected ACCEPT at threshold=30, got %q (%s)", outExploration.Decision, outExploration.RejectReason)
+	}
+	if outExploration.EvThresholdApplied != 30 {
+		t.Fatalf("EvThresholdApplied: want 30, got %d", outExploration.EvThresholdApplied)
+	}
+}
+
+// TestProcessWithEstimatesAt_ModeThresholdZero_FallsBackToConfig ensures zero
+// uses ValidationConfig.EvThresholdBps (legacy/test path).
+func TestProcessWithEstimatesAt_ModeThresholdZero_FallsBackToConfig(t *testing.T) {
+	cfg := borderlineEstimateCfg()
+	cfg.EvThresholdBps = 25
+	m := New(cfg)
+	in := edgeForEstimates()
+
+	out, err := m.ProcessWithEstimatesAt(context.Background(), in, nil, nil, nil, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.EvThresholdApplied != 25 {
+		t.Fatalf("EvThresholdApplied: want 25 from config fallback, got %d", out.EvThresholdApplied)
+	}
+	if out.Decision != "ACCEPT" {
+		t.Fatalf("expected ACCEPT with threshold 25, got %q", out.Decision)
 	}
 }

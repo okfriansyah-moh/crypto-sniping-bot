@@ -246,6 +246,33 @@ func allocationSizeFromCorrelation(
 	return 0
 }
 
+// creatorFromCorrelation walks the event log for edge_event and returns CreatorAddress.
+func creatorFromCorrelation(
+	ctx context.Context,
+	adapter database.Adapter,
+	correlationID string,
+	logger *slog.Logger,
+) string {
+	evts, err := adapter.GetEventsByCorrelation(ctx, correlationID)
+	if err != nil {
+		logger.Warn("creator_from_correlation_failed",
+			"correlation_id", correlationID,
+			"error", err,
+		)
+		return ""
+	}
+	for _, evt := range evts {
+		if evt.EventType != "edge_event" {
+			continue
+		}
+		var dto contracts.EdgeDTO
+		if jsonErr := json.Unmarshal(evt.Payload, &dto); jsonErr == nil {
+			return dto.CreatorAddress
+		}
+	}
+	return ""
+}
+
 // chainFromCorrelation walks the event log to find the chain for a correlation.
 // Returns "" if the market_data_event cannot be found or decoded.
 func chainFromCorrelation(
@@ -272,4 +299,27 @@ func chainFromCorrelation(
 		}
 	}
 	return ""
+}
+
+// openPositionBusEventID returns the event_id of the canonical open
+// position_state_event row in the events table. Poll snapshots use
+// pos-snap:* ids persisted only to the positions table; those must not
+// be used as causation_id for bus events (FK → events.event_id).
+func openPositionBusEventID(
+	ctx context.Context,
+	adapter database.Adapter,
+	pos contracts.PositionStateDTO,
+) string {
+	// Position rows keep causation_id = execution_result_event id across snapshots.
+	if pos.CausationID != "" && !strings.HasPrefix(pos.CausationID, "pos-snap:") {
+		return contracts.ContentIDFromString(fmt.Sprintf("pos-open:%s", pos.CausationID))
+	}
+	if strings.HasPrefix(pos.EventID, "pos-open:") {
+		return pos.EventID
+	}
+	if exec, err := adapter.GetExecutionByLifecycle(ctx, pos.TokenLifecycleID); err == nil && exec != nil && exec.CausationID != "" {
+		// execution_results.event_id may be the allocation_event; causation_id chains to execution_result_event.
+		return contracts.ContentIDFromString(fmt.Sprintf("pos-open:%s", exec.CausationID))
+	}
+	return pos.EventID
 }

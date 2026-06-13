@@ -1,6 +1,6 @@
 -- Phase 1 ingestion tables: market_data projection, ingestion watermark, RPC endpoint health.
 -- All SQL is portable: ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP, parameterized queries.
--- See docs/db_adapter_spec.md and docs/implementation_roadmap.md § Phase 1.
+-- See docs/reference/db_adapter_spec.md and docs/reference/implementation_roadmap.md § Phase 1.
 
 BEGIN;
 

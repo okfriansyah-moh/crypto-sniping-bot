@@ -18,7 +18,7 @@ import (
 // All SQL uses portable syntax: ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP,
 // parameterized queries ($1, $2, ...).
 //
-// See docs/db_adapter_spec.md for the full specification.
+// See docs/reference/db_adapter_spec.md for the full specification.
 type DB struct {
 	pool   *sql.DB
 	logger *slog.Logger

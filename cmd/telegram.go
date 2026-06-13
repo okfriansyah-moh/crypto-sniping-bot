@@ -30,6 +30,7 @@ import (
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/database"
 	"crypto-sniping-bot/internal/app/config"
+	"crypto-sniping-bot/internal/modules/health"
 	"crypto-sniping-bot/internal/telegram"
 )
 
@@ -61,11 +62,11 @@ func buildTelegramComponents(
 	client := telegram.NewClient(token, chatID)
 
 	handler := telegram.NewHandler(telegram.HandlerOptions{
-		StatusFn:         buildStatusFn(db, startTime),
+		StatusFn:         buildStatusFn(db, cfg, startTime),
 		PnlFn:            buildPnlFn(db),
 		PositionsFn:      buildPositionsFn(db),
 		PositionFn:       buildPositionFn(db),
-		HealthFn:         buildHealthFn(db),
+		HealthFn:         buildHealthFn(db, cfg),
 		ForceCloseFn:     buildForceCloseFn(db, logger),
 		EnableTradingFn:  buildEnableTradingFn(db, logger),
 		KillFn:           buildKillFn(db, logger),
@@ -108,7 +109,8 @@ func parseTelegramAllowedUsers() []string {
 
 // ── Command function builders ─────────────────────────────────────────────────
 
-func buildStatusFn(db database.Adapter, startTime time.Time) func(ctx context.Context) (string, error) {
+func buildStatusFn(db database.Adapter, cfg *config.Config, startTime time.Time) func(ctx context.Context) (string, error) {
+	shadowGate := newShadowGateEvaluator(db, cfg)
 	return func(ctx context.Context) (string, error) {
 		state, err := db.GetSystemState(ctx)
 		if err != nil {
@@ -130,7 +132,7 @@ func buildStatusFn(db database.Adapter, startTime time.Time) func(ctx context.Co
 			versionLabel = sv.StrategyVersionID
 		}
 
-		return fmt.Sprintf(
+		base := fmt.Sprintf(
 			"<b>Status</b>\n"+
 				"Mode: <code>%s</code>\n"+
 				"Drawdown (24h): <code>%.2f%%</code>\n"+
@@ -148,8 +150,21 @@ func buildStatusFn(db database.Adapter, startTime time.Time) func(ctx context.Co
 			humanDuration(time.Since(startTime)),
 			state.UpdatedAt,
 			haltInfo,
-		), nil
+		)
+		if shadowGate != nil {
+			if gate, gErr := shadowGate.Evaluate(ctx); gErr == nil {
+				base += telegram.FormatShadowGateStatus(gate)
+			}
+		}
+		return base, nil
 	}
+}
+
+func newShadowGateEvaluator(db database.Adapter, cfg *config.Config) *health.ShadowGateEvaluator {
+	if cfg == nil || db == nil {
+		return nil
+	}
+	return health.NewShadowGateEvaluator(db, cfg.Execution.Mode, cfg.Execution.ShadowGate)
 }
 
 // stuckThreshold defines how long an open position can run before /pnl and
@@ -298,7 +313,8 @@ func buildPositionFn(db database.Adapter) func(ctx context.Context, idOrAddr str
 	}
 }
 
-func buildHealthFn(db database.Adapter) func(ctx context.Context) (string, error) {
+func buildHealthFn(db database.Adapter, cfg *config.Config) func(ctx context.Context) (string, error) {
+	shadowGate := newShadowGateEvaluator(db, cfg)
 	return func(ctx context.Context) (string, error) {
 		halted, haltReason, hErr := db.IsSystemHalted(ctx)
 
@@ -325,6 +341,11 @@ func buildHealthFn(db database.Adapter) func(ctx context.Context) (string, error
 				stats.Detected, stats.Validated, stats.Executed)
 			if stats.Detected == 0 {
 				sb.WriteString("⚠️ No detections in last hour — check ingestion workers.\n")
+			}
+		}
+		if shadowGate != nil {
+			if gate, gErr := shadowGate.Evaluate(ctx); gErr == nil {
+				sb.WriteString(telegram.FormatShadowGateStatus(gate))
 			}
 		}
 		return sb.String(), nil

@@ -5,7 +5,6 @@ package selection
 
 import (
 	"context"
-	"fmt"
 
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/internal/app/config"
@@ -24,52 +23,62 @@ func New(cfg *config.SelectionConfig) *Module {
 	return &Module{cfg: cfg}
 }
 
-// Process evaluates a ValidatedEdgeDTO and emits SelectionOutputDTO.
-// Phase 2: single-position concurrency gate — max 1 concurrent position.
+// Process evaluates a single ValidatedEdgeDTO (legacy/tests). Prefer ProcessBatch
+// from the selection worker for Top-K ranking across concurrent candidates.
 func (m *Module) Process(
-	_ context.Context,
+	ctx context.Context,
 	in contracts.ValidatedEdgeDTO,
 	openCount int,
 ) (contracts.SelectionOutputDTO, error) {
-	// SelectedAt is derived from the upstream ValidatedAt for deterministic replay.
-	// Same ValidatedEdgeDTO always produces identical SelectionOutputDTO content.
-	selectedAt := in.ValidatedAt
-
-	selected := false
-	rejectReason := ""
-
-	if in.Decision != "ACCEPT" {
-		rejectReason = "edge_not_validated:" + in.RejectReason
-	} else if openCount >= m.cfg.MaxOpenPositions {
-		rejectReason = fmt.Sprintf("max_open_positions_reached:%d", openCount)
-	} else {
-		selected = true
+	thresholds := config.ModeThresholds{
+		MaxPositions:     m.effectiveMaxPositions(config.ModeThresholds{}),
+		ExploreBudgetPct: 0,
 	}
-
-	// CombinedScore: probability × EV signal; used for ranking in Phase 3+.
-	combinedScore := 0.0
-	if selected {
-		combinedScore = in.ProbabilityUsed * float64(in.ExpectedValueBps) / 1000.0
+	outs, err := m.ProcessBatch(ctx, []BatchItem{{Edge: in}}, openCount, thresholds, nil)
+	if err != nil || len(outs) == 0 {
+		return contracts.SelectionOutputDTO{}, err
 	}
+	return outs[0], nil
+}
 
-	eventID := contracts.ContentIDFromString(fmt.Sprintf("sel:%s:%v", in.EventID, selected))
+// ProcessBatch ranks ACCEPT edges via greedy Top-K (docs/plans/2026-06-10-profit-restoration-plan.md §7.3 Task 4).
+func (m *Module) ProcessBatch(
+	_ context.Context,
+	items []BatchItem,
+	openCount int,
+	thresholds config.ModeThresholds,
+	openByCreator map[string]int32,
+) ([]contracts.SelectionOutputDTO, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	maxPositions := m.effectiveMaxPositions(thresholds)
+	if thresholds.MaxPositions <= 0 {
+		thresholds.MaxPositions = maxPositions
+	}
+	topK := m.effectiveTopK(thresholds)
+	return PickTopK(items, openCount, thresholds, topK, int32(m.cfg.MaxPositionsPerCreator), openByCreator), nil
+}
 
-	return contracts.SelectionOutputDTO{
-		EventID:       eventID,
-		TraceID:       in.TraceID,
-		CorrelationID: in.CorrelationID,
-		CausationID:   in.EventID,
-		VersionID:     in.VersionID,
+func (m *Module) effectiveTopK(thresholds config.ModeThresholds) int {
+	if m.cfg.TopK > 0 {
+		return m.cfg.TopK
+	}
+	if thresholds.MaxPositions > 0 {
+		return thresholds.MaxPositions
+	}
+	if m.cfg.MaxOpenPositions > 0 {
+		return m.cfg.MaxOpenPositions
+	}
+	return 1
+}
 
-		TokenLifecycleID: in.TokenLifecycleID,
-		TokenAddress:     in.TokenAddress,
-
-		Selected:        selected,
-		Rank:            1,
-		CombinedScore:   combinedScore,
-		DiversityBucket: "default",
-		IsExploration:   false,
-		RejectReason:    rejectReason,
-		SelectedAt:      selectedAt,
-	}, nil
+func (m *Module) effectiveMaxPositions(thresholds config.ModeThresholds) int {
+	if thresholds.MaxPositions > 0 {
+		return thresholds.MaxPositions
+	}
+	if m.cfg.MaxOpenPositions > 0 {
+		return m.cfg.MaxOpenPositions
+	}
+	return 1
 }

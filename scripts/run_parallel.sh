@@ -23,7 +23,7 @@
 #
 # Configuration:
 #   Phase metadata is loaded from config/phases.yaml (or override via env).
-#   See docs/PARALLEL_DEV.md for full documentation.
+#   See docs/guides/PARALLEL_DEV.md for full documentation.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -423,12 +423,12 @@ PYEOF
 
 update_progress_report() {
     # update_progress_report PHASE_LABEL STATUS [KEY VALUE ...]
-    # Updates docs/PROGRESS_REPORT.md in place. Called by the shell orchestrator only.
+    # Updates docs/ops/PROGRESS_REPORT.md in place. Called by the shell orchestrator only.
     # Does NOT git commit — leaves the file as a working-tree change.
     # Keys: notes "text", session_mode "mode-2"
     local _pr_phase_label="$1" _pr_status="$2"
     shift 2
-    local _report_path="${PROJECT_ROOT}/docs/PROGRESS_REPORT.md"
+    local _report_path="${PROJECT_ROOT}/docs/ops/PROGRESS_REPORT.md"
     [[ -f "${_report_path}" ]] || return 0
     python3 - "${_report_path}" "${_pr_phase_label}" "${_pr_status}" "$@" <<'PYEOF'
 import sys, re
@@ -703,7 +703,7 @@ dto_guardian_execute() {
     cd "${work_dir}"
     local dg_log="${LOG_DIR}/${phase_label}-dto-guardian-${attempt}.log"
     copilot \
-        -p "Validate all DTOs in contracts/ against docs/dto_contracts.md. STRICT checks: no missing fields, no extra fields, no type mismatches, all DTOs are immutable. Use skills: dto. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Report violations and fix them. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
+        -p "Validate all DTOs in contracts/ against docs/reference/dto_contracts.md. STRICT checks: no missing fields, no extra fields, no type mismatches, all DTOs are immutable. Use skills: dto. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Report violations and fix them. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
         --agent=dto-guardian \
         --model="${model}" \
         --no-ask-user \
@@ -1057,7 +1057,7 @@ validate_protected_files() {
     fi
 
     # database/ — additive only outside Phase 0.
-    # Per docs/implementation_roadmap.md, every phase legitimately adds migrations
+    # Per docs/reference/implementation_roadmap.md, every phase legitimately adds migrations
     # (Phase 1 → 000002_ingestion_tables, Phase 2 → 000003_trading_tables, etc.) and
     # extends the adapter / engine code with new methods and tables. The hard
     # invariant is migration IMMUTABILITY: previously-committed migration files
@@ -1297,8 +1297,8 @@ generate_phase_task() {
    - `rtk` — Token-efficient CLI proxy (60-90% savings)
 2. Read `.github/copilot-instructions.md` for hard architectural constraints.
 3. **DO NOT read full documentation** unless skills are insufficient. If you do read docs, explain WHY skills were not enough.
-4. Only consult `docs/implementation_roadmap.md` for specific phase details NOT covered by skills.
-5. **If a phase has a `PLAN.md` spec file listed below, that file is the PRIMARY source of truth for that phase — it supersedes `docs/implementation_roadmap.md` for all implementation details. Read it BEFORE writing any code.**
+4. Only consult `docs/reference/implementation_roadmap.md` for specific phase details NOT covered by skills.
+5. **If a phase has a `PLAN.md` spec file listed below, that file is the PRIMARY source of truth for that phase — it supersedes `docs/reference/implementation_roadmap.md` for all implementation details. Read it BEFORE writing any code.**
 5. Implement each phase below sequentially, committing after each one.
 6. Run tests after each phase.
 
@@ -1342,7 +1342,7 @@ HEADER
 > **Read \`${plan_doc}\` BEFORE writing any code for this phase.**
 >
 > This phase has a dedicated implementation spec that supersedes
-> \`docs/implementation_roadmap.md\` for ALL implementation details:
+> \`docs/reference/implementation_roadmap.md\` for ALL implementation details:
 > file layout, DTO flow, SQL, task dependency order, exit criteria,
 > and architectural compliance checklist.
 >
@@ -1350,7 +1350,7 @@ HEADER
 > 1. Open \`${plan_doc}\` and read it completely.
 > 2. Implement the tasks in the dependency order specified in § 7 of that doc.
 > 3. Verify each task's exit criteria before moving to the next task.
-> 4. Use \`docs/implementation_roadmap.md\` only for context not covered by the spec.
+> 4. Use \`docs/reference/implementation_roadmap.md\` only for context not covered by the spec.
 
 ---
 "
@@ -1368,8 +1368,8 @@ ${plan_doc_block}## Phase ${phase} — ${name}
 - Phase-specific patterns → see required skills above
 - DO NOT read full docs unless skills are insufficient — explain why if you do
 
-**Primary spec (if set above):** \`${plan_doc:-docs/implementation_roadmap.md}\` → Phase ${phase} section.
-**Fallback if no spec:** consult \`docs/implementation_roadmap.md\` → Phase ${phase} section.
+**Primary spec (if set above):** \`${plan_doc:-docs/reference/implementation_roadmap.md}\` → Phase ${phase} section.
+**Fallback if no spec:** consult \`docs/reference/implementation_roadmap.md\` → Phase ${phase} section.
 
 **Constraints:**
 - All DTOs must be immutable types in \`contracts/\`
@@ -2094,7 +2094,7 @@ run_docs_sync() {
     log_agent_start "merge-reviewer" "docs-sync" "1" "1"
     cd "${work_dir}"
     copilot \
-        -p "Documentation sync check: verify that the implementation matches the specifications in docs/. Check for drift between docs/architecture.md, docs/dto_contracts.md, docs/orchestrator_spec.md and actual code in app/. Use skill: docs-sync. MANDATORY: docs/ is read-only — never modify documentation. If code drifts from specs, fix the code to match. Report findings and commit any code fixes. ${_WORKSPACE_CONSTRAINT}" \
+        -p "Documentation sync check: verify that the implementation matches the specifications in docs/. Check for drift between docs/reference/architecture.md, docs/reference/dto_contracts.md, docs/reference/orchestrator_spec.md and actual code in app/. Use skill: docs-sync. MANDATORY: docs/ is read-only — never modify documentation. If code drifts from specs, fix the code to match. Report findings and commit any code fixes. ${_WORKSPACE_CONSTRAINT}" \
         --agent=merge-reviewer \
         --model="${model}" \
         --no-ask-user \
@@ -2422,7 +2422,7 @@ Examples:
   $(basename "$0") merge                                # Merge and validate
   $(basename "$0") cleanup                              # Clean everything up
 
-See docs/PARALLEL_DEV.md for full documentation.
+See docs/guides/PARALLEL_DEV.md for full documentation.
 EOF
 }
 

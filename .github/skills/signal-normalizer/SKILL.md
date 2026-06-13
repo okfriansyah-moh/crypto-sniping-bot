@@ -284,8 +284,8 @@ signal_normalizer:
 
 ## References
 
-- `docs/architecture.md` § 3.3 — Signal & Edge Discovery (Layer 3)
-- `docs/architecture-context/5_sniper_mode.md` — Signal gating for sniper
+- `docs/reference/architecture.md` § 3.3 — Signal & Edge Discovery (Layer 3)
+- `docs/archive/architecture-context/5_sniper_mode.md` — Signal gating for sniper
 - `.github/skills/edge-detection/SKILL.md` — EdgeDTO score production
 - `.github/skills/probability-modeling/SKILL.md` — P(success) model inputs
 - `.github/skills/feature-stability-checker/SKILL.md` — Stable features feed into normalizer

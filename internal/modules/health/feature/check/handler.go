@@ -17,7 +17,7 @@ func NewHandler(service *Service) *Handler {
 
 // Handle processes the health check request.
 func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
-	result := h.service.Execute()
+	result := h.service.Execute(r.Context())
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

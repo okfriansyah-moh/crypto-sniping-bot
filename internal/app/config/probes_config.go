@@ -28,6 +28,18 @@ type ProbesConfig struct {
 	// Helius free tier — observed rate without filtering is ~65k credits/hr.
 	MaxProbesPerHour int `yaml:"max_probes_per_hour"`
 
+	// BatchAccounts enables a single getMultipleAccounts call for the
+	// solana_authorities (mint) + solana_pumpfun_lp (bonding curve) probes
+	// on new-token ingest events. Saves ~1 Helius credit per pump.fun token
+	// versus two separate getAccountInfo calls. Rescan events are excluded.
+	BatchAccounts bool `yaml:"batch_accounts"`
+
+	// RescanSkipPumpfunLpPhase2 skips solana_pumpfun_lp on Phase 2 rescan
+	// bands (12h–48h) where bonding-curve reserves change slowly relative
+	// to the DQ signals already captured at ingest. Phase 1 bands (15m–8h)
+	// still re-probe liquidity.
+	RescanSkipPumpfunLpPhase2 bool `yaml:"rescan_skip_pumpfun_lp_phase2"`
+
 	// HoneypotSim configures the honeypot_sim probe. See
 	// internal/modules/probes/honeypot_sim.go.
 	HoneypotSim HoneypotSimYAML `yaml:"honeypot_sim"`
@@ -88,6 +100,13 @@ type SolanaHolderDistYAML struct {
 	TimeoutMs  int    `yaml:"timeout_ms"`
 	Commitment string `yaml:"commitment"`
 	TopK       int    `yaml:"top_k"`
+	// FallbackEnabled activates the getTokenSupply + getProgramAccounts fallback
+	// when getTokenLargestAccounts times out. Costs +11 Helius credits per use.
+	FallbackEnabled bool `yaml:"fallback_enabled"`
+	// FallbackTimeoutMs is the timeout per fallback RPC call (default 2500 ms).
+	FallbackTimeoutMs int32 `yaml:"fallback_timeout_ms"`
+	// FallbackMaxProgramAccounts caps accounts processed during fallback (default 200).
+	FallbackMaxProgramAccounts int32 `yaml:"fallback_max_program_accounts"`
 }
 
 // EVMPairReservesYAML configures the Uniswap-V2 pair getReserves probe.

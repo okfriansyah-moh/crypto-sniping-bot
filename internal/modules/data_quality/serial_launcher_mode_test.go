@@ -449,3 +449,214 @@ func TestSerialLauncherMode_RiskyPassFlagInFlags(t *testing.T) {
 		t.Errorf("RISKY_PASS: want serial_launcher_monitored in Flags, got %v", out.Flags)
 	}
 }
+
+// ── VERY_EXPLORATION Task 22 hotfix: relaxed quality gates ───────────────────
+
+// runtimeWithRelaxedVeryExplorationProfiles returns a runtime config where the
+// VERY_EXPLORATION profile has Task 22 hotfix values applied:
+//   - SerialLauncherRequiresSocialLinks: false (gate inert)
+//   - SerialLauncherMinHolderCount: 0 (gate inert)
+//
+// EXPLORATION, STRICT, and BALANCED are unchanged.
+func runtimeWithRelaxedVeryExplorationProfiles() *config.DataQualityRuntimeConfig {
+	rt := runtimeWithSerialLauncherProfiles()
+	rt.ModeProfiles["very_exploration"] = config.DataQualityModeProfile{
+		RejectAbove:                       0.75,
+		RiskyPassAbove:                    0.45,
+		UnknownFactor:                     0.0,
+		MinTokenAgeSeconds:                -1,
+		MaxCreatorPrevTokenCount:          10,
+		SerialLauncherRequiresSocialLinks: false, // Task 22 hotfix: gate inert
+		SerialLauncherMaxRiskScore:        0.45,
+		SerialLauncherMinHolderCount:      0, // Task 22 hotfix: gate inert
+	}
+	return rt
+}
+
+// TestSerialLauncherMode_VeryExploration_NoSocialLinks_RiskyPassAfterTask22Hotfix
+// verifies that after the Task 22 hotfix (serial_launcher_requires_social_links:
+// false in VERY_EXPLORATION), a serial-launcher token with no confirmed social
+// links receives RISKY_PASS + serial_launcher_monitored instead of SKIP.
+// This is the core regression test for the hotfix — absence of social links
+// must NOT gate the token in VERY_EXPLORATION mode.
+func TestSerialLauncherMode_VeryExploration_NoSocialLinks_RiskyPassAfterTask22Hotfix(t *testing.T) {
+	rt := runtimeWithRelaxedVeryExplorationProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(10)
+	in.SocialLinksKnown = true
+	in.HasSocialLinks = false // no social links — gate disabled in VERY_EXPLORATION post-hotfix
+
+	out, err := m.ProcessForMode(context.Background(), in, "VERY_EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionRiskyPass {
+		t.Errorf("VERY_EXPLORATION hotfix no-social-links: want RISKY_PASS (gate disabled), got %q (flags=%v, reasons=%v)",
+			out.Decision, out.Flags, out.RejectReasons)
+	}
+	if !containsString(out.Flags, contracts.FlagSerialLauncherMonitored) {
+		t.Errorf("VERY_EXPLORATION hotfix no-social-links: want serial_launcher_monitored, got %v", out.Flags)
+	}
+	if len(out.RejectReasons) != 0 {
+		t.Errorf("VERY_EXPLORATION hotfix no-social-links: want empty RejectReasons, got %v", out.RejectReasons)
+	}
+}
+
+// TestSerialLauncherMode_VeryExploration_ZeroHolders_RiskyPassAfterTask22Hotfix
+// verifies that after the Task 22 hotfix (serial_launcher_min_holder_count: 0
+// in VERY_EXPLORATION), a serial-launcher token with zero or few holders
+// receives RISKY_PASS instead of SKIP. Simulates solana_holder_dist probe
+// timeout where HolderDistKnown=true but HolderCount=0 (worst case).
+func TestSerialLauncherMode_VeryExploration_ZeroHolders_RiskyPassAfterTask22Hotfix(t *testing.T) {
+	rt := runtimeWithRelaxedVeryExplorationProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(10)
+	in.HolderDistKnown = true
+	in.HolderCount = 0 // holder-count gate disabled in VERY_EXPLORATION post-hotfix
+
+	out, err := m.ProcessForMode(context.Background(), in, "VERY_EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionRiskyPass {
+		t.Errorf("VERY_EXPLORATION hotfix zero-holders: want RISKY_PASS (gate disabled), got %q (flags=%v, reasons=%v)",
+			out.Decision, out.Flags, out.RejectReasons)
+	}
+	if !containsString(out.Flags, contracts.FlagSerialLauncherMonitored) {
+		t.Errorf("VERY_EXPLORATION hotfix zero-holders: want serial_launcher_monitored, got %v", out.Flags)
+	}
+}
+
+// TestSerialLauncherMode_VeryExploration_NoSocialLinksAndZeroHolders_RiskyPassAfterTask22Hotfix
+// verifies the combined case: both gates disabled simultaneously in VERY_EXPLORATION.
+// A token with no social links AND zero holders must still produce RISKY_PASS.
+func TestSerialLauncherMode_VeryExploration_NoSocialLinksAndZeroHolders_RiskyPassAfterTask22Hotfix(t *testing.T) {
+	rt := runtimeWithRelaxedVeryExplorationProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(10)
+	in.SocialLinksKnown = true
+	in.HasSocialLinks = false // no social links
+	in.HolderDistKnown = true
+	in.HolderCount = 0 // zero holders
+
+	out, err := m.ProcessForMode(context.Background(), in, "VERY_EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionRiskyPass {
+		t.Errorf("VERY_EXPLORATION hotfix both-gates-disabled: want RISKY_PASS, got %q (flags=%v, reasons=%v)",
+			out.Decision, out.Flags, out.RejectReasons)
+	}
+}
+
+// TestSerialLauncherMode_ExplorationGatesUnchangedByTask22Hotfix verifies that
+// the Task 22 hotfix does NOT relax EXPLORATION mode — social-links gate and
+// holder-count gate remain active in EXPLORATION (only VERY_EXPLORATION relaxed).
+func TestSerialLauncherMode_ExplorationGatesUnchangedByTask22Hotfix(t *testing.T) {
+	// Use the relaxed VERY_EXPLORATION config — EXPLORATION profile is identical.
+	rt := runtimeWithRelaxedVeryExplorationProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(5)
+	in.SocialLinksKnown = true
+	in.HasSocialLinks = false // no social links → must still SKIP in EXPLORATION
+
+	out, err := m.ProcessForMode(context.Background(), in, "EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionSkip {
+		t.Errorf("EXPLORATION must still SKIP for no-social-links after Task 22 hotfix, got %q", out.Decision)
+	}
+	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+		t.Errorf("EXPLORATION: want serial_launcher_skipped flag after hotfix, got %v", out.Flags)
+	}
+}
+
+// runtimeWithTask28TightenedProfiles returns a runtime config where the
+// VERY_EXPLORATION serial-launcher gates have been re-tightened per Task 28:
+// requires_social_links=true and min_holder_count=25.
+func runtimeWithTask28TightenedProfiles() *config.DataQualityRuntimeConfig {
+	rt := runtimeWithRelaxedVeryExplorationProfiles()
+	vp := rt.ModeProfiles["very_exploration"]
+	vp.SerialLauncherRequiresSocialLinks = true
+	vp.SerialLauncherMinHolderCount = 25
+	rt.ModeProfiles["very_exploration"] = vp
+	return rt
+}
+
+// TestSerialLauncherMode_VeryExploration_NoSocialLinks_SkipAfterTask28 verifies
+// that after Task 28 re-tightens the VERY_EXPLORATION gates, a serial-launcher
+// token with no confirmed social links receives SKIP (not RISKY_PASS).
+func TestSerialLauncherMode_VeryExploration_NoSocialLinks_SkipAfterTask28(t *testing.T) {
+	rt := runtimeWithTask28TightenedProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(10)
+	in.SocialLinksKnown = true
+	in.HasSocialLinks = false // no social links — gate re-enabled in Task 28
+
+	out, err := m.ProcessForMode(context.Background(), in, "VERY_EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionSkip {
+		t.Errorf("VERY_EXPLORATION Task28 no-social-links: want SKIP (gate re-enabled), got %q (flags=%v, reasons=%v)",
+			out.Decision, out.Flags, out.RejectReasons)
+	}
+	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+		t.Errorf("VERY_EXPLORATION Task28 no-social-links: want serial_launcher_skipped flag, got %v", out.Flags)
+	}
+}
+
+// TestSerialLauncherMode_VeryExploration_LowHolderCount_SkipAfterTask28 verifies
+// that after Task 28 re-tightens the holder-count floor to 25, a serial-launcher
+// token with holder_count < 25 receives SKIP in VERY_EXPLORATION mode.
+func TestSerialLauncherMode_VeryExploration_LowHolderCount_SkipAfterTask28(t *testing.T) {
+	rt := runtimeWithTask28TightenedProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(10)
+	in.SocialLinksKnown = true
+	in.HasSocialLinks = true
+	in.HolderDistKnown = true
+	in.HolderCount = 10 // below re-tightened floor of 25
+
+	out, err := m.ProcessForMode(context.Background(), in, "VERY_EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionSkip {
+		t.Errorf("VERY_EXPLORATION Task28 low-holder-count: want SKIP (floor=25, count=10), got %q (flags=%v, reasons=%v)",
+			out.Decision, out.Flags, out.RejectReasons)
+	}
+}
+
+// TestSerialLauncherMode_VeryExploration_SufficientHolders_RiskyPassAfterTask28
+// verifies that a serial-launcher token with ≥ 25 holders AND social links
+// still receives RISKY_PASS in VERY_EXPLORATION after Task 28 re-tighten.
+func TestSerialLauncherMode_VeryExploration_SufficientHolders_RiskyPassAfterTask28(t *testing.T) {
+	rt := runtimeWithTask28TightenedProfiles()
+	m := New(DefaultConfig(nil), nil).WithRuntimeConfig(rt)
+
+	in := cleanSerialLauncherToken(10)
+	in.SocialLinksKnown = true
+	in.HasSocialLinks = true
+	in.HolderDistKnown = true
+	in.HolderCount = 30 // meets re-tightened floor of 25
+
+	out, err := m.ProcessForMode(context.Background(), in, "VERY_EXPLORATION")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision != contracts.DecisionRiskyPass {
+		t.Errorf("VERY_EXPLORATION Task28 sufficient-holders: want RISKY_PASS, got %q (flags=%v, reasons=%v)",
+			out.Decision, out.Flags, out.RejectReasons)
+	}
+	if !containsString(out.Flags, contracts.FlagSerialLauncherMonitored) {
+		t.Errorf("VERY_EXPLORATION Task28 sufficient-holders: want serial_launcher_monitored flag, got %v", out.Flags)
+	}
+}

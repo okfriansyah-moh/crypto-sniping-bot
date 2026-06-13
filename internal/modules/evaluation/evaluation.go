@@ -49,6 +49,11 @@ type EvaluationInput struct {
 	Position     contracts.PositionStateDTO
 	Execution    *contracts.ExecutionResultDTO // nil if not found
 	ShadowTrades []ShadowTradeInput            // FN candidates in the evaluation window
+
+	// WinProbability is ProbabilityUsed from the validated-edge chain (L5).
+	// WinProbabilityKnown is false when the adapter could not resolve a value.
+	WinProbability      float64
+	WinProbabilityKnown bool
 }
 
 // Process computes the EvaluationDTO from an exited PositionStateDTO.
@@ -68,9 +73,11 @@ func (m *Module) Process(_ context.Context, in EvaluationInput) (contracts.Evalu
 	windowStart := now.Add(-time.Duration(m.cfg.WindowSeconds) * time.Second).Format(time.RFC3339Nano)
 
 	// ── Per-position error signals ─────────────────────────────────────────
-	// PredictionError: WinProbability − actual_outcome
-	// Phase 3 uses 0 as WinProbability since probability models come in Phase 4.
+	// PredictionError: WinProbability − actual_outcome (ProbabilityUsed from L5).
 	winProbability := 0.0
+	if in.WinProbabilityKnown {
+		winProbability = in.WinProbability
+	}
 	actualOutcome := 0.0
 	if pos.PnlPct > 0 {
 		actualOutcome = 1.0

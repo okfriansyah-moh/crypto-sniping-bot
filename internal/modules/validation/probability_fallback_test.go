@@ -81,7 +81,7 @@ func TestProcessWithEstimates_NilProb_RejectsProbabilityUnavailable(t *testing.T
 	// MUST surface as an explicit REJECT with reject_reason="probability_unavailable".
 	// The historical "silently substitute PriorProbability and tag prob_join_timeout"
 	// path produced deterministic mass-rejects at large negative ev_bps and
-	// starved Layers 6–10 — see docs/architecture.md § 3.5.
+	// starved Layers 6–10 — see docs/reference/architecture.md § 3.5.
 	mod := New(validationCfg()).WithProbabilityRuntime(phase9ProbCfg())
 	got, _ := mod.ProcessWithEstimates(context.Background(), goodEdge(), nil, nil, nil)
 

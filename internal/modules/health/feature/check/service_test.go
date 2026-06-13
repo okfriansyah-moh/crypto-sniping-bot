@@ -1,7 +1,11 @@
 package check_test
 
-import "testing"
-import "crypto-sniping-bot/internal/modules/health/feature/check"
+import (
+	"context"
+	"testing"
+
+	"crypto-sniping-bot/internal/modules/health/feature/check"
+)
 
 // ── Service.Execute ───────────────────────────────────────────────────────────
 
@@ -10,7 +14,7 @@ func TestService_Execute_StatusIsOK(t *testing.T) {
 	svc := check.NewService()
 
 	// Act
-	resp := svc.Execute()
+	resp := svc.Execute(context.Background())
 
 	// Assert
 	if resp.Status != "ok" {
@@ -23,7 +27,7 @@ func TestService_Execute_VersionIsNonEmpty(t *testing.T) {
 	svc := check.NewService()
 
 	// Act
-	resp := svc.Execute()
+	resp := svc.Execute(context.Background())
 
 	// Assert
 	if resp.Version == "" {
@@ -37,8 +41,8 @@ func TestService_Execute_Deterministic(t *testing.T) {
 	svc := check.NewService()
 
 	// Act
-	r1 := svc.Execute()
-	r2 := svc.Execute()
+	r1 := svc.Execute(context.Background())
+	r2 := svc.Execute(context.Background())
 
 	// Assert
 	if r1.Status != r2.Status || r1.Version != r2.Version {

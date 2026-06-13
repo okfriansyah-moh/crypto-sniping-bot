@@ -146,7 +146,9 @@ func TestDataQualityYAML_ExplorationModeSerialLauncherValues(t *testing.T) {
 
 // TestDataQualityYAML_VeryExplorationModeSerialLauncherValues asserts that the
 // VERY_EXPLORATION mode profile carries the canonical serial-launcher override
-// values — a looser holder floor (25) and higher risk ceiling (0.45) vs EXPLORATION.
+// values — social-links gate enabled, holder floor 25, risk ceiling 0.45.
+// Task 28 (2026-06-01): HOTFIX reverted; Task 26 fallback probe restored
+// HolderDistKnown coverage to ≥90%, so gates are re-tightened to canonical values.
 func TestDataQualityYAML_VeryExplorationModeSerialLauncherValues(t *testing.T) {
 	cfg := loadDataQualityYAML(t)
 
@@ -159,15 +161,17 @@ func TestDataQualityYAML_VeryExplorationModeSerialLauncherValues(t *testing.T) {
 		t.Errorf("VERY_EXPLORATION MaxCreatorPrevTokenCount: want 10, got %d",
 			veryExploration.MaxCreatorPrevTokenCount)
 	}
+	// Task 28: social-links gate re-enabled after Task 26 restored HolderDistKnown ≥90%.
 	if !veryExploration.SerialLauncherRequiresSocialLinks {
-		t.Error("VERY_EXPLORATION SerialLauncherRequiresSocialLinks: want true (quality gate)")
+		t.Error("VERY_EXPLORATION SerialLauncherRequiresSocialLinks: want true (Task 28 re-tighten)")
 	}
 	if veryExploration.SerialLauncherMaxRiskScore != 0.45 {
 		t.Errorf("VERY_EXPLORATION SerialLauncherMaxRiskScore: want 0.45, got %v",
 			veryExploration.SerialLauncherMaxRiskScore)
 	}
+	// Task 28: holder-count floor restored to canonical 25 (was 0 during Task 22 hotfix).
 	if veryExploration.SerialLauncherMinHolderCount != 25 {
-		t.Errorf("VERY_EXPLORATION SerialLauncherMinHolderCount: want 25, got %d",
+		t.Errorf("VERY_EXPLORATION SerialLauncherMinHolderCount: want 25 (Task 28 re-tighten), got %d",
 			veryExploration.SerialLauncherMinHolderCount)
 	}
 }

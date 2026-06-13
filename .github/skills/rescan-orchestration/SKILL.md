@@ -23,7 +23,7 @@ The rescan worker sits at **Layer 0.5** — between Layer 0 (raw ingestion)
 and Layer 1 (DQ). It is a **pure DB reader plus event emitter**: no RPC,
 no keys, no on-chain calls, no module-to-module imports.
 
-Source plan: `docs/PLAN.md` (Phase 10 — `rescan-layer`).
+Source plan: `docs/plans/2026-06-10-profit-restoration-plan.md` (Phase 10 — `rescan-layer`).
 
 ---
 

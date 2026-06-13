@@ -9,7 +9,7 @@ import (
 // EventEnvelope is the canonical payload wrapper for every event on the bus.
 // It wraps the inner DTO payload with routing and traceability fields.
 // Payload is a JSON string (canonical JSON of the inner DTO).
-// See docs/implementation_roadmap.md § 0.4 and docs/dto_contracts.md § 1.
+// See docs/reference/implementation_roadmap.md § 0.4 and docs/reference/dto_contracts.md § 1.
 type EventEnvelope struct {
 	EventID   string `json:"event_id"`
 	EventType string `json:"event_type"`

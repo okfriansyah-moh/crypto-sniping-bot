@@ -88,7 +88,7 @@ func RecordDecision(ctx context.Context, status, reason string) {
 // Recovers from handler panics (configured via panic_recovery).
 // Stops cleanly when ctx is cancelled.
 //
-// See docs/db_adapter_spec.md § 9 and architecture.md § 4.10 (failure handling).
+// See docs/reference/db_adapter_spec.md § 9 and architecture.md § 4.10 (failure handling).
 func RunWorker(
 	ctx context.Context,
 	adapter database.Adapter,

@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: "Enforce orchestrator execution model. Use when building, modifying, or reviewing the pipeline orchestrator. Validates stage ordering, checkpoint logic, resume behavior, pre-flight checks, and state transitions per docs/orchestrator_spec.md."
+description: "Enforce orchestrator execution model. Use when building, modifying, or reviewing the pipeline orchestrator. Validates stage ordering, checkpoint logic, resume behavior, pre-flight checks, and state transitions per docs/reference/orchestrator_spec.md."
 argument-hint: "Describe the orchestrator change, e.g.: 'add checkpoint after stage_a' or 'review resume logic'"
 tools: [read, edit, search, execute/runInTerminal, read/problems, todo]
 ---
@@ -28,7 +28,7 @@ You are a pipeline orchestrator specialist. Your job is to build and validate th
 
 ## Responsibilities
 
-1. **Stage ordering** — The pipeline stage sequence from `docs/architecture.md` is immutable.
+1. **Stage ordering** — The pipeline stage sequence from `docs/reference/architecture.md` is immutable.
    Never reorder. Never skip. Never parallelize stages at runtime.
 
 2. **Checkpointing** — After every stage completion:
@@ -83,8 +83,8 @@ You are a pipeline orchestrator specialist. Your job is to build and validate th
 
 Before any work, read:
 
-1. `docs/orchestrator_spec.md` — the execution model specification
-2. `docs/db_adapter_spec.md` — database adapter interface and SQL compatibility rules
+1. `docs/reference/orchestrator_spec.md` — the execution model specification
+2. `docs/reference/db_adapter_spec.md` — database adapter interface and SQL compatibility rules
 3. `.github/copilot-instructions.md` — hard architectural constraints
 
 ## Output

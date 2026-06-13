@@ -188,7 +188,7 @@ dto := contracts.MarketDataDTO{
 
 ## References
 
-- Architecture: `docs/architecture.md` § 3.0 (Detection & Ingestion)
-- DTO spec: `docs/dto_contracts.md` § 3.1 (MarketDataDTO)
-- Roadmap: `docs/implementation_roadmap.md` Phase 1
+- Architecture: `docs/reference/architecture.md` § 3.0 (Detection & Ingestion)
+- DTO spec: `docs/reference/dto_contracts.md` § 3.1 (MarketDataDTO)
+- Roadmap: `docs/reference/implementation_roadmap.md` Phase 1
 - Config: `config/pipeline.yaml` → `ingestion` section

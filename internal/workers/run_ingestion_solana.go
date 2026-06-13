@@ -75,6 +75,12 @@ func RunIngestionSolana(
 	if solUsdSource != nil {
 		mod.WithSolUsdSource(solUsdSource)
 	}
+	if solanaCfg.PreFilter.Enabled && solanaCfg.PreFilter.MaxCreatorPrevTokenCount > 0 {
+		mod.WithCreatorProfileReader(newAdapterCreatorProfileReader(adapter))
+		logger.Info("solana_ingestion_pre_filter_enabled",
+			"max_creator_prev_token_count", solanaCfg.PreFilter.MaxCreatorPrevTokenCount,
+		)
+	}
 
 	if err := mod.Start(ctx); err != nil && err != ctx.Err() {
 		return fmt.Errorf("run_ingestion_solana: module error: %w", err)

@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"crypto-sniping-bot/internal/modules/health"
 )
 
 // CommandType identifies a Telegram operator command.
@@ -467,11 +469,38 @@ func (h *Handler) Handle(ctx context.Context, req *CommandRequest) (*CommandResu
 	return nil, fmt.Errorf("commands: unhandled command type: %q", req.Type)
 }
 
+// FormatShadowGateStatus renders the shadow live-flip gate block for /status and /health.
+func FormatShadowGateStatus(result health.ShadowGateResult) string {
+	icon := "❌"
+	if result.Pass {
+		icon = "✅"
+	}
+	var sb strings.Builder
+	sb.WriteString("\n<b>Shadow live-flip gate</b> ")
+	sb.WriteString(icon)
+	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "Execution mode: <code>%s</code>\n", result.ExecutionMode)
+	fmt.Fprintf(&sb, "Window: <code>%d</code> days · trades <code>%d</code>/<code>%d</code>\n",
+		result.MinWindowDays, result.TradeCount, result.MinTrades)
+	fmt.Fprintf(&sb, "Aggregate PnL: <code>%+.2f</code> bps (min <code>%+.0f</code>)\n",
+		result.AggregatePnlBps, result.MinAggregatePnlBps)
+	fmt.Fprintf(&sb, "Avg PnL: <code>%+.2f</code> bps\n", result.AvgPnlBps)
+	if result.Pass {
+		sb.WriteString("Gate: <code>PASS</code> — operator may set <code>execution.mode: live</code> in pipeline.yaml\n")
+	} else {
+		sb.WriteString("Gate: <code>FAIL</code> — remain in shadow; no auto-promotion\n")
+	}
+	sb.WriteString("<i>")
+	sb.WriteString(result.LiveFlipHint)
+	sb.WriteString("</i>")
+	return sb.String()
+}
+
 // helpText returns a static listing of all available operator commands.
 func helpText() string {
 	return "<b>Available Commands</b>\n\n" +
 		"<b>📊 Read-only</b>\n" +
-		"/status — System mode, drawdown, positions, exposure, strategy\n" +
+		"/status — System mode, drawdown, positions, exposure, strategy, shadow live-flip gate\n" +
 		"/pnl — Realized + unrealized PnL, win rate, stuck position count\n" +
 		"/positions — All open positions: full address, age, entry/current/PnL%\n" +
 		"/position &lt;prefix&gt; — Detail view for one position by id or token prefix\n" +

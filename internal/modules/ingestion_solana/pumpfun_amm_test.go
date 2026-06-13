@@ -91,3 +91,69 @@ func TestPumpFunAMM_NormalizePumpFunAMMCreatePool_ValidEvent_ReturnsDTO(t *testi
 		t.Errorf("CreatorAddress = %q, want creatorAddr", dto.CreatorAddress)
 	}
 }
+
+func TestPumpFunAMM_NormalizePumpFunAMMCreatePool_BaseWSOL_QuotePump(t *testing.T) {
+	t.Parallel()
+	const wsol = "So11111111111111111111111111111111111111112"
+	const pump = "K93mdxqMgivPNTFEXnoUmN8WH5tNzrSJfaguevQpump"
+	accounts := []string{"poolAddr", "globalCfg", "creatorAddr", wsol, pump}
+	instr := makePumpFunAMMCreatePoolInstr(accounts)
+	tx := &ingestion_solana.TransactionResult{
+		Signature: "6T87isHQTc6YZNCpHcm29xuDME9BtoK1psuyH4K4oxceF8c4FmpZGouvrevBiTmSJVrRexbNoyiRATV4zXcFByJ",
+		Slot:      425967515,
+		BlockTime: 1700000000,
+	}
+
+	dto, err := ingestion_solana.NormalizePumpFunAMMCreatePool(tx, instr, "v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dto == nil {
+		t.Fatal("expected non-nil DTO")
+	}
+	if dto.TokenAddress != pump {
+		t.Errorf("TokenAddress = %q, want %q", dto.TokenAddress, pump)
+	}
+	if dto.BaseAddress != wsol {
+		t.Errorf("BaseAddress = %q, want %q", dto.BaseAddress, wsol)
+	}
+}
+
+func TestPumpFunAMM_NormalizePumpFunAMMCreatePool_BasePump_QuoteWSOL(t *testing.T) {
+	t.Parallel()
+	const wsol = "So11111111111111111111111111111111111111112"
+	const pump = "8ajYWoSHNetxFMJ9Yrog2mkTqgp4bugFyHAonnT4pump"
+	accounts := []string{"poolAddr", "globalCfg", "creatorAddr", pump, wsol}
+	instr := makePumpFunAMMCreatePoolInstr(accounts)
+	tx := &ingestion_solana.TransactionResult{Signature: "sig", Slot: 1, BlockTime: 1700000000}
+
+	dto, err := ingestion_solana.NormalizePumpFunAMMCreatePool(tx, instr, "v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dto == nil {
+		t.Fatal("expected non-nil DTO")
+	}
+	if dto.TokenAddress != pump {
+		t.Errorf("TokenAddress = %q, want %q", dto.TokenAddress, pump)
+	}
+	if dto.BaseAddress != wsol {
+		t.Errorf("BaseAddress = %q, want %q", dto.BaseAddress, wsol)
+	}
+}
+
+func TestPumpFunAMM_NormalizePumpFunAMMCreatePool_BothWSOL_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	const wsol = "So11111111111111111111111111111111111111112"
+	accounts := []string{"poolAddr", "globalCfg", "creatorAddr", wsol, wsol}
+	instr := makePumpFunAMMCreatePoolInstr(accounts)
+	tx := &ingestion_solana.TransactionResult{Signature: "sig", Slot: 1, BlockTime: 1700000000}
+
+	dto, err := ingestion_solana.NormalizePumpFunAMMCreatePool(tx, instr, "v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dto != nil {
+		t.Fatalf("expected nil DTO for WSOL/WSOL pair, got TokenAddress=%q", dto.TokenAddress)
+	}
+}

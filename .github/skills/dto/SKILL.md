@@ -34,7 +34,7 @@ Enforce immutable DTO contracts across the entire codebase. Ensures all cross-mo
 ## Inputs
 
 - `contracts/` directory — immutable DTO definitions
-- `docs/dto_contracts.md` — DTO registry with fields, types, constraints
+- `docs/reference/dto_contracts.md` — DTO registry with fields, types, constraints
 
 ## Outputs
 
@@ -43,14 +43,14 @@ Enforce immutable DTO contracts across the entire codebase. Ensures all cross-mo
 
 ## DTO Registry Pattern
 
-Each project defines its DTOs in `docs/dto_contracts.md`. The registry follows this structure:
+Each project defines its DTOs in `docs/reference/dto_contracts.md`. The registry follows this structure:
 
 | DTO             | File                     | Producer | Consumers          | Key Constraints           |
 | --------------- | ------------------------ | -------- | ------------------ | ------------------------- |
 | `EntityResult`  | `contracts/entity.py`    | module_a | module_b, module_c | `entity_id`: 16 hex chars |
 | `ProcessedData` | `contracts/processed.py` | module_b | module_d           | all scores in [0.0–1.0]   |
 
-Populate this table from your project's `docs/dto_contracts.md`.
+Populate this table from your project's `docs/reference/dto_contracts.md`.
 
 ## Anti-Patterns
 

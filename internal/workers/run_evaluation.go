@@ -91,11 +91,27 @@ func (w *EvaluationWorker) Process(ctx context.Context, evt *database.Event) (*d
 		shadowInputs[i] = evaluation.ShadowTradeInput{PeakGainPct: st.ObservedReturnPct}
 	}
 
+	winProbability := 0.0
+	winProbabilityKnown := false
+	if posDTO.TokenLifecycleID != "" {
+		if prob, known, probErr := w.adapter.GetProbabilityForLifecycle(ctx, posDTO.TokenLifecycleID); probErr != nil {
+			w.logger.Warn("evaluation_worker_get_probability_failed",
+				"lifecycle_id", posDTO.TokenLifecycleID,
+				"error", probErr,
+			)
+		} else if known {
+			winProbability = prob
+			winProbabilityKnown = true
+		}
+	}
+
 	// Compute evaluation (pure function).
 	evalDTO, err := w.mod.Process(ctx, evaluation.EvaluationInput{
-		Position:     posDTO,
-		Execution:    execDTO,
-		ShadowTrades: shadowInputs,
+		Position:            posDTO,
+		Execution:           execDTO,
+		ShadowTrades:        shadowInputs,
+		WinProbability:      winProbability,
+		WinProbabilityKnown: winProbabilityKnown,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("evaluation_worker: module: %w", err)
@@ -134,6 +150,8 @@ func (w *EvaluationWorker) Process(ctx context.Context, evt *database.Event) (*d
 		"fn_count", evalDTO.FalseNegativeCount,
 		"expectancy", evalDTO.Expectancy,
 		"brier_score", evalDTO.BrierScore,
+		"probability_used", winProbability,
+		"probability_known", winProbabilityKnown,
 		"trace_id", evalDTO.TraceID,
 	)
 

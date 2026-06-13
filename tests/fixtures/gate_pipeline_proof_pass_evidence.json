@@ -1,0 +1,11 @@
+{
+  "timestamp": "fixture_pass",
+  "detected_mode": "PIPELINE_PROOF",
+  "operational_evidence": {
+    "traces_completed": 1,
+    "duplicate_execution": 0
+  },
+  "throughput_metrics": {
+    "wsol_token_address_emitted": 0
+  }
+}

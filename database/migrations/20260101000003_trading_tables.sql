@@ -2,7 +2,7 @@
 -- nonce manager, positions. Referenced by 20260101000006_production_gaps.sql
 -- which adds additive columns to execution_results, allocations, learning_records.
 -- All SQL uses portable syntax: ON CONFLICT DO NOTHING, CURRENT_TIMESTAMP.
--- See docs/db_adapter_spec.md § 6.3, § 6.5, § 6.6.
+-- See docs/reference/db_adapter_spec.md § 6.3, § 6.5, § 6.6.
 
 BEGIN;
 

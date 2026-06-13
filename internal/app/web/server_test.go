@@ -15,7 +15,7 @@ func newTestServer(t *testing.T) *web.Server {
 	t.Helper()
 	cfg := &config.Config{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	return web.NewServer(cfg, logger)
+	return web.NewServer(cfg, logger, nil)
 }
 
 func TestNewServer_ReturnsNonNil(t *testing.T) {

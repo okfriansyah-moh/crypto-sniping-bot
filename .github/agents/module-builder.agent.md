@@ -72,8 +72,8 @@ You are a module implementation specialist. Your job is to build individual pipe
 
 Before building a module, read:
 
-1. `docs/architecture.md` — module's role in the pipeline
-2. `docs/dto_contracts.md` — input/output DTO definitions
+1. `docs/reference/architecture.md` — module's role in the pipeline
+2. `docs/reference/dto_contracts.md` — input/output DTO definitions
 3. `.github/copilot-instructions.md` — hard architectural constraints
 
 ## Output

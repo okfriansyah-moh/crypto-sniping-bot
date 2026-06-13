@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -155,8 +156,10 @@ func pollOnce(
 			)
 
 			if err := doMandatoryTransition(ctx, adapter, updated.TokenLifecycleID, "POSITION_OPEN", "POSITION_CLOSED", updated.ExitReason, "position_poll"); err != nil {
-				posLog.Warn("position_poll_transition_failed", "error", err)
-				continue
+				if !errors.Is(err, database.ErrLifecycleAlreadyAdvanced) {
+					posLog.Warn("position_poll_transition_failed", "error", err)
+					continue
+				}
 			}
 
 			payload, marshalErr := json.Marshal(updated)
@@ -164,7 +167,7 @@ func pollOnce(
 				posLog.Warn("position_poll_marshal_failed", "error", marshalErr)
 				continue
 			}
-			cid := pos.EventID
+			cid := openPositionBusEventID(ctx, adapter, pos)
 			exitEvt := database.Event{
 				EventID:       updated.EventID,
 				EventType:     "position_state_event",

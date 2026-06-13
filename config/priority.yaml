@@ -40,7 +40,17 @@ execution:
 
 priority:
   # Operational mode thresholds (STRICT | BALANCED | EXPLORATION | VERY_EXPLORATION)
-  # See docs/architecture.md § 7.
+  # See docs/reference/architecture.md § 7 and docs/plans/2026-06-10-profit-restoration-plan.md §7.1.
+  #
+  # Runtime lookup: Config.ResolveModeThresholds(mode) in internal/app/config/priority.go
+  # Wired by workers in PLAN Tasks 2–4:
+  #   L5 validation → ev_threshold_bps
+  #   L3 edge       → edge_strength_min
+  #   L6 selection  → max_positions + explore_budget_pct
+  #
+  # max_positions is the per-mode concurrent-position ceiling for Top-K selection
+  # (PLAN Task 4). selection.max_open_positions in pipeline.yaml is the legacy
+  # Phase-2 single-slot gate until Task 4 lands.
   modes:
     strict:
       explore_budget_pct: 1.0

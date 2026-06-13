@@ -3,7 +3,10 @@ package ingestion_solana_test
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -11,6 +14,7 @@ import (
 	"crypto-sniping-bot/contracts"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/ingestion_solana"
+	"crypto-sniping-bot/internal/rpc"
 )
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -569,4 +573,70 @@ func TestNormalizePumpFunCreateFromLogs_Deterministic(t *testing.T) {
 	if dto1.LiquidityUsd != dto2.LiquidityUsd {
 		t.Errorf("non-deterministic LiquidityUsd: %f != %f", dto1.LiquidityUsd, dto2.LiquidityUsd)
 	}
+}
+
+// TestTransactionSubscribeFixture_ParsesAndNormalizes verifies a captured
+// transactionNotification WS payload decodes to a Raydium Initialize2 DTO
+// without requiring a follow-up getTransaction call.
+func TestTransactionSubscribeFixture_ParsesAndNormalizes(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "rpc", "testdata", "transaction_subscribe_initialize2.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	var envelope struct {
+		Params struct {
+			Result struct {
+				Signature   string          `json:"signature"`
+				Slot        uint64          `json:"slot"`
+				Transaction json.RawMessage `json:"transaction"`
+			} `json:"result"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	r := envelope.Params.Result
+	tx, err := rpc.ParseTransactionSubscribePayload(r.Signature, r.Slot, r.Transaction)
+	if err != nil {
+		t.Fatalf("ParseTransactionSubscribePayload: %v", err)
+	}
+
+	notif := ingestion_solana.LogsNotification{
+		Signature:   r.Signature,
+		Slot:        r.Slot,
+		Transaction: tx,
+	}
+	if notif.Transaction == nil {
+		t.Fatal("expected embedded transaction on notification")
+	}
+
+	var matched bool
+	for _, instr := range tx.Instructions {
+		if instr.ProgramID != "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8" {
+			continue
+		}
+		res := ingestion_solana.NormalizeRaydiumV4Instruction(tx, instr, "v1")
+		if res.Err != nil {
+			t.Fatalf("normalize error: %v", res.Err)
+		}
+		if res.DTO == nil {
+			continue
+		}
+		matched = true
+		if res.DTO.EventTopic != "PoolCreated" {
+			t.Errorf("EventTopic: got %q want PoolCreated", res.DTO.EventTopic)
+		}
+		if res.DTO.TxHash != r.Signature {
+			t.Errorf("TxHash: got %q want %q", res.DTO.TxHash, r.Signature)
+		}
+	}
+	if !matched {
+		t.Fatal("fixture did not produce a PoolCreated DTO")
+	}
+
+	_ = notif // documents WS notification shape used by transactionSubscribe path
 }

@@ -7,7 +7,7 @@
 --
 -- Source skill: position-management (peak-price tracking, trailing
 -- after TP1) + monitoring-loop-engine (8-priority exit incl. trailing).
--- Source architecture: docs/architecture.md §4279 (Trailing Protection
+-- Source architecture: docs/reference/architecture.md §4279 (Trailing Protection
 -- after TP1).
 
 ALTER TABLE positions

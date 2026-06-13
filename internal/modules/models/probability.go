@@ -2,7 +2,7 @@
 // All three models are pure functions of their inputs (deterministic).
 // No DB access, no shared mutable state outside the in-memory rolling latency buffer.
 //
-// See docs/implementation_roadmap.md § Phase 4 and docs/architecture.md § 3.4.
+// See docs/reference/implementation_roadmap.md § Phase 4 and docs/reference/architecture.md § 3.4.
 package models
 
 import (

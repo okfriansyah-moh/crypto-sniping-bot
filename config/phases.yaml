@@ -3,7 +3,7 @@
 # Define your implementation phases here. This file is read by run_parallel.sh
 # to determine phase names, complexity scores, grouping, and required skills.
 #
-# After generating docs/architecture.md and docs/implementation_roadmap.md,
+# After generating docs/reference/architecture.md and docs/reference/implementation_roadmap.md,
 # update this file to match your pipeline stages.
 #
 # Fields:
@@ -31,7 +31,7 @@
 #               observability, operational-modes, telegram-dispatcher, traceability,
 #               price-feed-integration, profit-first, rescan-orchestration
 #
-# Group rules (see docs/PARALLEL_DEV.md § 5):
+# Group rules (see docs/guides/PARALLEL_DEV.md § 5):
 #   Group A — SEQUENTIAL ONLY:  Phases 0-2 (infra, ingestion, first-trade)
 #   Group B — SAFE PARALLEL:    Phases 3-5 (evaluation, models, learning)
 #   Group C — CONTROL LAYER:    Phase 6 (observability, scaling) — after all B
@@ -97,4 +97,4 @@ phases:
     complexity: 5
     group: "G"
     skills: "rescan-orchestration, event-bus, idempotency, determinism, traceability, failure, config-validation, database-portability, migration-management, modularity, dto, code-quality, coding-standards, test-generation, test-driven-development, observability, operational-modes, monitoring-loop-engine, profit-first"
-    plan_doc: "docs/PLAN.md"
+    plan_doc: "docs/plans/2026-06-10-profit-restoration-plan.md"

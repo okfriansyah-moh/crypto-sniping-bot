@@ -165,11 +165,13 @@ func NormalizeRaydiumPoolInit(tx *TransactionResult, instr InstructionData, vers
 		return nil, fmt.Errorf("raydium_pool_init: insufficient accounts: %d", len(instr.Accounts))
 	}
 	ammPool := instr.Accounts[4]
-	coinMint := instr.Accounts[8] // token being listed
-	pcMint := instr.Accounts[9]   // quote token (SOL/USDC)
+	coinMint := instr.Accounts[8] // token0
+	pcMint := instr.Accounts[9]   // token1 / quote
 
-	// Determine base vs token ordering: base is the known stablecoin/SOL side.
-	tokenAddr, baseAddr := coinMint, pcMint
+	tokenAddr, baseAddr, ok := ResolveTradableMint(coinMint, pcMint)
+	if !ok {
+		return nil, nil // system-mint pair only — skip emit
+	}
 
 	dto := &contracts.MarketDataDTO{
 		EventID:           solanaEventID(tx.Signature, instr.Index),

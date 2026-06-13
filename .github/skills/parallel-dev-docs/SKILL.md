@@ -12,7 +12,7 @@ description: >
 
 # Parallel Dev — Documentation Standard
 
-Every `docs/PARALLEL_DEV.md` MUST contain exactly the ten sections below, in order.
+Every `docs/guides/PARALLEL_DEV.md` MUST contain exactly the ten sections below, in order.
 Missing sections make the document incomplete for operator use. Missing compliance
 points make it incompatible with `run_parallel.sh`.
 
@@ -381,9 +381,9 @@ Must reference the token savings table and list the five optimization rules.
 ```markdown
 | Full Doc                    | Tokens | Equivalent Skill              | Tokens | Savings |
 | --------------------------- | ------ | ----------------------------- | ------ | ------- |
-| `docs/architecture.md`      | ~5000  | pipeline + modularity skills  | ~600   | 88%     |
-| `docs/dto_contracts.md`     | ~6000  | dto skill                     | ~400   | 93%     |
-| `docs/orchestrator_spec.md` | ~4000  | pipeline + idempotency skills | ~500   | 88%     |
+| `docs/reference/architecture.md`      | ~5000  | pipeline + modularity skills  | ~600   | 88%     |
+| `docs/reference/dto_contracts.md`     | ~6000  | dto skill                     | ~400   | 93%     |
+| `docs/reference/orchestrator_spec.md` | ~4000  | pipeline + idempotency skills | ~500   | 88%     |
 ````
 
 **Required optimization rules:**
@@ -670,7 +670,7 @@ This is the "big picture" section.
 
 ## Complete PARALLEL_DEV.md Template
 
-Copy this block as the starting point for any new project's `docs/PARALLEL_DEV.md`.
+Copy this block as the starting point for any new project's `docs/guides/PARALLEL_DEV.md`.
 Substitute `{…}` placeholders from the [Language Reference Table](#language-reference-table)
 and the project's `config/phases.yaml`.
 
@@ -772,9 +772,9 @@ Unsafe: Phase 0 ‖ anything; DTO changes ‖ consuming module changes
 
 | Full Doc                    | Tokens | Equivalent Skill              | Savings |
 | --------------------------- | ------ | ----------------------------- | ------- |
-| `docs/architecture.md`      | ~5000  | pipeline + modularity skills  | 88%     |
-| `docs/dto_contracts.md`     | ~6000  | dto skill                     | 93%     |
-| `docs/orchestrator_spec.md` | ~4000  | pipeline + idempotency skills | 88%     |
+| `docs/reference/architecture.md`      | ~5000  | pipeline + modularity skills  | 88%     |
+| `docs/reference/dto_contracts.md`     | ~6000  | dto skill                     | 93%     |
+| `docs/reference/orchestrator_spec.md` | ~4000  | pipeline + idempotency skills | 88%     |
 
 Rules: reuse context; skills first; prefer grouped execution; no full-doc reads; progressive loading.
 
@@ -857,7 +857,7 @@ Files: `.parallel-dev/phase-status.json`, `.parallel-dev/state.json`
 
 ## phases.yaml Alignment Checklist
 
-Before writing or reviewing `docs/PARALLEL_DEV.md`, verify `config/phases.yaml`:
+Before writing or reviewing `docs/guides/PARALLEL_DEV.md`, verify `config/phases.yaml`:
 
 ```yaml
 phases:

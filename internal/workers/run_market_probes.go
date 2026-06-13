@@ -66,6 +66,18 @@ type MarketProbesWorker struct {
 	probedThisHour   int64      // atomic counter; reset each hour window
 	hourMu           sync.Mutex // guards hourWindowStart reset
 	hourWindowStart  time.Time  // start of the current one-hour window
+
+	// Batch account fetch (Task 8): one getMultipleAccounts for authorities +
+	// pumpfun_lp on new-token events.
+	batchAccounts             bool
+	rescanSkipPumpfunLpPhase2 bool
+	batchRPC                  probes.SolanaProbeRPCClient
+	batchSolUsd               probes.SolUsdSource
+	batchAuthoritiesEnabled   bool
+	batchPumpfunLpEnabled     bool
+	batchAuthoritiesTimeoutMs int
+	batchPumpfunLpTimeoutMs   int
+	batchCommitment           string
 }
 
 // NewMarketProbesWorker constructs a worker. Pass nil/empty `probeList`
@@ -119,6 +131,38 @@ func (w *MarketProbesWorker) WithNameDedup(knownTokens []string) *MarketProbesWo
 func (w *MarketProbesWorker) WithProbeRateLimit(maxPerHour int) *MarketProbesWorker {
 	w.maxProbesPerHour = maxPerHour
 	w.hourWindowStart = time.Now()
+	return w
+}
+
+// BatchAccountsConfig wires optional getMultipleAccounts batching for the
+// solana_authorities + solana_pumpfun_lp probes on new-token ingest events.
+type BatchAccountsConfig struct {
+	RescanSkipPumpfunLpPhase2 bool
+	AuthoritiesEnabled        bool
+	PumpfunLpEnabled          bool
+	AuthoritiesTimeoutMs      int
+	PumpfunLpTimeoutMs        int
+	Commitment                string
+}
+
+// WithBatchAccounts enables a single getMultipleAccounts call for mint +
+// bonding-curve accounts before the per-probe loop. rpc must implement
+// GetMultipleAccounts (the *rpc.SolanaClient adapter in cmd/server.go does).
+func (w *MarketProbesWorker) WithBatchAccounts(
+	enabled bool,
+	rpc probes.SolanaProbeRPCClient,
+	solUsd probes.SolUsdSource,
+	cfg BatchAccountsConfig,
+) *MarketProbesWorker {
+	w.batchAccounts = enabled
+	w.batchRPC = rpc
+	w.batchSolUsd = solUsd
+	w.rescanSkipPumpfunLpPhase2 = cfg.RescanSkipPumpfunLpPhase2
+	w.batchAuthoritiesEnabled = cfg.AuthoritiesEnabled
+	w.batchPumpfunLpEnabled = cfg.PumpfunLpEnabled
+	w.batchAuthoritiesTimeoutMs = cfg.AuthoritiesTimeoutMs
+	w.batchPumpfunLpTimeoutMs = cfg.PumpfunLpTimeoutMs
+	w.batchCommitment = cfg.Commitment
 	return w
 }
 
@@ -289,8 +333,10 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	//     re-fetch to catch post-launch whale accumulation that materially changes
 	//     the DQ risk profile over longer timeframes.
 	//
-	//   solana_pumpfun_lp: Bonding curve reserves change with every trade —
-	//     keep this probe running so the pipeline sees updated liquidity.
+	//   solana_pumpfun_lp: Phase 1 bands (15m–8h) re-fetch bonding-curve
+	//     reserves. Phase 2 bands (12h–48h) skip when
+	//     rescan_skip_pumpfun_lp_phase2 is enabled — reserves change slowly
+	//     and ingest-time LP data is sufficient for DQ at those ages.
 	//
 	// All other probes (metadata, creator_reputation) are HTTP-only (no Helius
 	// credits) so they are not skipped for rescan events.
@@ -311,15 +357,68 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		if !isLateRescan {
 			rescanSkipProbes["solana_holder_dist"] = true
 		}
+		if w.rescanSkipPumpfunLpPhase2 && isLateRescan {
+			rescanSkipProbes["solana_pumpfun_lp"] = true
+		}
+	}
+
+	batchSkipProbes := map[string]bool{}
+	if w.batchAccounts && !isRescan && w.batchRPC != nil {
+		req := probes.BatchAccountRequestFor(
+			enriched,
+			w.batchAuthoritiesEnabled,
+			w.batchPumpfunLpEnabled,
+			w.batchCommitment,
+		)
+		if req.NeedsFetch() {
+			timeout := probes.BatchFetchTimeout(w.batchAuthoritiesTimeoutMs, w.batchPumpfunLpTimeoutMs)
+			bctx, cancel := context.WithTimeout(ctx, timeout)
+			res, err := probes.FetchBatchAccounts(bctx, w.batchRPC, req)
+			cancel()
+			if err != nil {
+				w.logger.Warn("market_probe_batch_fetch_failed",
+					"event_id", evt.EventID,
+					"token", enriched.TokenAddress,
+					"error", err,
+				)
+			} else {
+				enriched = probes.ApplyBatchAccounts(
+					ctx, enriched, res,
+					w.batchSolUsd,
+					w.batchAuthoritiesEnabled,
+					w.batchPumpfunLpEnabled,
+				)
+				if w.batchAuthoritiesEnabled && req.Mint != "" {
+					if res.Mint != nil && enriched.SolanaAuthoritiesKnown {
+						batchSkipProbes["solana_authorities"] = true
+					}
+				}
+				if w.batchPumpfunLpEnabled && req.Pool != "" {
+					if res.Pool != nil {
+						batchSkipProbes["solana_pumpfun_lp"] = true
+					}
+				}
+				w.logger.Debug("market_probe_batch_fetch",
+					"event_id", evt.EventID,
+					"token", enriched.TokenAddress,
+					"authorities_known", enriched.SolanaAuthoritiesKnown,
+					"lp_stats_known", enriched.LpStatsKnown,
+					"skip_authorities", batchSkipProbes["solana_authorities"],
+					"skip_pumpfun_lp", batchSkipProbes["solana_pumpfun_lp"],
+				)
+			}
+		}
 	}
 
 	for _, p := range w.probes {
-		if rescanSkipProbes[p.Name()] {
-			w.logger.Debug("market_probe_rescan_skip",
+		if rescanSkipProbes[p.Name()] || batchSkipProbes[p.Name()] {
+			w.logger.Debug("market_probe_skip",
 				"probe", p.Name(),
 				"transport", enriched.Transport,
 				"token", enriched.TokenAddress,
 				"event_id", evt.EventID,
+				"rescan_skip", rescanSkipProbes[p.Name()],
+				"batch_skip", batchSkipProbes[p.Name()],
 			)
 			continue
 		}

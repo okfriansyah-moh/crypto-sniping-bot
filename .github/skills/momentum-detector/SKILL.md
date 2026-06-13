@@ -289,8 +289,8 @@ momentum:
 
 ## References
 
-- `docs/architecture.md` § 3.3 — Signal & Edge Discovery (Layer 3)
-- `docs/architecture-context/5_sniper_mode.md` — NEW_LAUNCH_EDGE definition
+- `docs/reference/architecture.md` § 3.3 — Signal & Edge Discovery (Layer 3)
+- `docs/archive/architecture-context/5_sniper_mode.md` — NEW_LAUNCH_EDGE definition
 - `.github/skills/edge-detection/SKILL.md` — Gate sequence for EdgeDTO production
 - `.github/skills/liquidity-event-detector/SKILL.md` — Volume spike and cascade flags
 - `contracts/edge.go` — `EdgeDTO` fields

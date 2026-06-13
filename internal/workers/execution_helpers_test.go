@@ -27,7 +27,7 @@ func TestSimulatedExecResult_IsConfirmedAndSimulated(t *testing.T) {
 	alloc := testAlloc("evt-1", "trace-1", "corr-1", "v1", "0xWALLET", "")
 
 	// Act
-	result := simulatedExecResult(alloc, "2026-01-01T00:00:00Z")
+	result := simulatedExecResult(alloc, "2026-01-01T00:00:00Z", "0.000001")
 
 	// Assert
 	if result.Status != "confirmed" {
@@ -46,7 +46,7 @@ func TestSimulatedExecResult_TraceFieldsPropagated(t *testing.T) {
 	alloc := testAlloc("evt-sim", "trace-sim", "corr-sim", "ver-sim", "0xW", "")
 
 	// Act
-	result := simulatedExecResult(alloc, "2026-01-01T00:00:00Z")
+	result := simulatedExecResult(alloc, "2026-01-01T00:00:00Z", "0.000001")
 
 	// Assert
 	if result.TraceID != "trace-sim" {
@@ -68,8 +68,8 @@ func TestSimulatedExecResult_EventIDIsDeterministic(t *testing.T) {
 	alloc := testAlloc("evt-x", "t", "c", "v", "0xW", "")
 
 	// Act: call twice, EventID must be identical.
-	r1 := simulatedExecResult(alloc, "2026-01-01T00:00:00Z")
-	r2 := simulatedExecResult(alloc, "2026-01-02T00:00:00Z") // different timestamp — EventID must not change
+	r1 := simulatedExecResult(alloc, "2026-01-01T00:00:00Z", "0.000001")
+	r2 := simulatedExecResult(alloc, "2026-01-02T00:00:00Z", "0.000001") // different timestamp — EventID must not change
 
 	// Assert
 	if r1.EventID != r2.EventID {
@@ -82,7 +82,7 @@ func TestSimulatedExecResult_MempoolRoute_IsPublic(t *testing.T) {
 	alloc := testAlloc("evt-2", "t2", "c2", "v2", "0xW2", "")
 
 	// Act
-	result := simulatedExecResult(alloc, "now")
+	result := simulatedExecResult(alloc, "now", "0.000001")
 
 	// Assert
 	if result.MempoolRoute != "public" {

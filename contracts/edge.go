@@ -74,7 +74,7 @@ type EdgeDTO struct {
 	SlotWindowSize int32 `json:"slot_window_size,omitempty"`
 }
 
-// Edge type taxonomy (per docs/architecture.md § 3.3 and the
+// Edge type taxonomy (per docs/reference/architecture.md § 3.3 and the
 // edge-detection skill). Modules MUST NOT invent edges outside this set.
 const (
 	EdgeTypeNewLaunch = "NEW_LAUNCH_EDGE"
