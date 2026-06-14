@@ -6,7 +6,7 @@
 #   ./scripts/collect_logs.sh [DURATION_MINUTES] [SERVICE]
 #
 #   DURATION_MINUTES  How long to collect logs. Default: 60
-#   SERVICE           Docker Compose service name. Default: bot
+#   SERVICE           Docker Compose service name. Default: sniper-bot
 #
 # Output (all under output/logs/):
 #   raw_<TIMESTAMP>.log       — full newline-delimited JSON log
@@ -40,7 +40,7 @@ if [[ "${1:-}" == "--analyze" ]]; then
   SERVICE="N/A"
 else
   DURATION_MINUTES="${1:-60}"
-  SERVICE="${2:-bot}"
+  SERVICE="${2:-sniper-bot}"
   TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   RAW_LOG="$OUTPUT_DIR/raw_${TIMESTAMP}.log"
 fi

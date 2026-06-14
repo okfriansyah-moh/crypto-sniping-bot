@@ -72,7 +72,7 @@ func ComputeDrawdown(hwm, equity float64) float64 {
 ### Tiered Response
 
 ```go
-// All thresholds live in config/pipeline.yaml — never hardcode here.
+// All thresholds live in shared/config/pipeline.yaml — never hardcode here.
 type DrawdownTier struct {
     Threshold      float64 // e.g., 0.05
     RiskMultiplier float64 // e.g., 0.5
@@ -92,7 +92,7 @@ func GetDrawdownTier(drawdown float64, tiers []DrawdownTier) DrawdownTier {
     return active
 }
 
-// Default tiers (config/pipeline.yaml):
+// Default tiers (shared/config/pipeline.yaml):
 //   tier1: threshold=0.05, risk_multiplier=0.5, new_positions=true,  kill=false
 //   tier2: threshold=0.08, risk_multiplier=0.25, new_positions=false, kill=false
 //   tier3: threshold=0.10, risk_multiplier=0.0, new_positions=false,  kill=true
@@ -197,7 +197,7 @@ func (o *Orchestrator) runDrawdownGuard(ctx context.Context) error {
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 drawdown:
@@ -227,7 +227,7 @@ drawdown:
 - [ ] Kill switch persists across restarts (stored in DB)
 - [ ] Kill switch reset requires operator Telegram `/resume` + confirmation
 - [ ] Daily loss includes realized + unrealized PnL
-- [ ] All thresholds in `config/pipeline.yaml`, zero hardcoded values
+- [ ] All thresholds in `shared/config/pipeline.yaml`, zero hardcoded values
 - [ ] Orchestrator checks drawdown guard before processing any allocation event
 - [ ] Drawdown tier risk multiplier applied to capital allocation weight
 
@@ -240,4 +240,4 @@ drawdown:
 - `.github/skills/capital-sizing/SKILL.md` — AllocationDTO production, where risk_multiplier applies
 - `.github/skills/operational-modes/SKILL.md` — Mode transitions on drawdown events
 - `.github/skills/telegram-dispatcher/SKILL.md` — `/resume` command pattern
-- `config/pipeline.yaml` — All drawdown thresholds live here
+- `shared/config/pipeline.yaml` — All drawdown thresholds live here

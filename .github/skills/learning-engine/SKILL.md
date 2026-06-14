@@ -385,7 +385,7 @@ if action != strategy_decay.DecayActionNone {
 - Architecture: `docs/reference/architecture.md` § 3.10 (Learning Engine)
 - DTO spec: `docs/reference/dto_contracts.md` § 3.11 (LearningRecord, EvaluationDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 5
-- Config: `config/learning.yaml`
+- Config: `shared/config/learning.yaml`
 - `.github/skills/overfit-detector/SKILL.md` — Overfit audit gate before weight updates
 - `.github/skills/loss-pattern-analyzer/SKILL.md` — Loss classification (7 categories)
 - `.github/skills/strategy-decay-detector/SKILL.md` — 5-metric decay detection

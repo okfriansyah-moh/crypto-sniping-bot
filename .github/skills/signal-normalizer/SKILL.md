@@ -256,7 +256,7 @@ func ComputeCompositeScore(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 signal_normalizer:
@@ -289,4 +289,4 @@ signal_normalizer:
 - `.github/skills/edge-detection/SKILL.md` — EdgeDTO score production
 - `.github/skills/probability-modeling/SKILL.md` — P(success) model inputs
 - `.github/skills/feature-stability-checker/SKILL.md` — Stable features feed into normalizer
-- `contracts/edge.go` — `EdgeDTO.Score` field
+- `shared/contracts/edge.go` — `EdgeDTO.Score` field

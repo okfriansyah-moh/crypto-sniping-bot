@@ -6,7 +6,7 @@
 #   ./scripts/gate_review_collect.sh [DURATION_MINUTES] [SERVICE] [MODE]
 #
 #   DURATION_MINUTES  How long to collect logs.  Default: 60
-#   SERVICE           Docker Compose service name. Default: bot
+#   SERVICE           Docker Compose service name. Default: sniper-bot
 #   MODE              Force review mode: PIPELINE_PROOF | SHADOW_TRADING |
 #                     MICRO_CAPITAL | LIVE_MONITORING
 #                     Default: auto-detected from evidence counts.
@@ -51,7 +51,7 @@ if [[ "${1:-}" == "--analyze" ]]; then
   FORCED_MODE="${3:-}"
 else
   DURATION_MINUTES="${1:-60}"
-  SERVICE="${2:-bot}"
+  SERVICE="${2:-sniper-bot}"
   FORCED_MODE="${3:-}"
   TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   RAW_LOG="$OUTPUT_DIR/gate_raw_${TIMESTAMP}.log"

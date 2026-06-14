@@ -1,7 +1,7 @@
 # RPC Provider Analysis — Helius vs QuickNode
 
 > **Historical snapshot** · 2026-05-14 · Operational reference — verify against current
-> [`config/chains.yaml`](../../config/chains.yaml) before applying.
+> [`shared/config/chains.yaml`](../../shared/config/chains.yaml) before applying.
 
 ## Profit-First Infrastructure Decision Guide
 
@@ -20,18 +20,18 @@ Before comparing providers, understand what is **hard-blocked** by the current f
 
 | Constraint                     | Where in Code                      | Root Cause                                                              | Profit Factor Killed                                                  |
 | ------------------------------ | ---------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| QuickNode WS commented out     | `config/chains.yaml` line 94–96    | Free tier = 1 logsSubscribe slot; 3 programs = 3 slots → `-32003` error | **Edge** — no real-time pool detection, only HTTP polling             |
-| 3 programs disabled            | `config/chains.yaml` lines 133–138 | Need 6 WS slots for all programs                                        | **Edge** — Raydium CLMM + Orca Whirlpool + Meteora DLMM = zero events |
-| `get_transaction_rps: 2`       | `config/chains.yaml` line 145      | Free daily quota — at 2 RPS = ~172k lookups/day                         | **DataQuality** — honeypot/tax simulation calls starved               |
-| `transport.mode: "rpc"`        | `config/chains.yaml` line 203      | gRPC disabled — no Yellowstone endpoint funded                          | **Execution** — ~200ms WS+RPC vs sub-100ms gRPC path unused           |
-| `rate_limit_backoff_ms: 60000` | `config/chains.yaml` line 148      | After a `-32003` quota error, suppresses all tx fetches for 60s         | **DataQuality** — entire signal pipeline stalls after burst           |
+| QuickNode WS commented out     | `shared/config/chains.yaml` line 94–96    | Free tier = 1 logsSubscribe slot; 3 programs = 3 slots → `-32003` error | **Edge** — no real-time pool detection, only HTTP polling             |
+| 3 programs disabled            | `shared/config/chains.yaml` lines 133–138 | Need 6 WS slots for all programs                                        | **Edge** — Raydium CLMM + Orca Whirlpool + Meteora DLMM = zero events |
+| `get_transaction_rps: 2`       | `shared/config/chains.yaml` line 145      | Free daily quota — at 2 RPS = ~172k lookups/day                         | **DataQuality** — honeypot/tax simulation calls starved               |
+| `transport.mode: "rpc"`        | `shared/config/chains.yaml` line 203      | gRPC disabled — no Yellowstone endpoint funded                          | **Execution** — ~200ms WS+RPC vs sub-100ms gRPC path unused           |
+| `rate_limit_backoff_ms: 60000` | `shared/config/chains.yaml` line 148      | After a `-32003` quota error, suppresses all tx fetches for 60s         | **DataQuality** — entire signal pipeline stalls after burst           |
 
 ### 1.2 EVM Ingestion Layer (ETH + BSC)
 
 | Constraint                                | Config                                                | Profit Factor Impact                                                                           |
 | ----------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| ETH RPC on public/free fallback endpoints | `config/chains.yaml` — `${ETH_RPC_1}`, `${ETH_RPC_2}` | **Edge** — public RPCs rate-limit `eth_getLogs` (needed for TxVelocity, WalletEntropy signals) |
-| BSC WS on free endpoint                   | `config/chains.yaml` — `${BSC_WS_1}`                  | **Edge** — free WS drops under load; misses PairCreated events                                 |
+| ETH RPC on public/free fallback endpoints | `shared/config/chains.yaml` — `${ETH_RPC_1}`, `${ETH_RPC_2}` | **Edge** — public RPCs rate-limit `eth_getLogs` (needed for TxVelocity, WalletEntropy signals) |
+| BSC WS on free endpoint                   | `shared/config/chains.yaml` — `${BSC_WS_1}`                  | **Edge** — free WS drops under load; misses PairCreated events                                 |
 | Honeypot `eth_call` simulation            | `docs/analysis/profitability-gaps.md` GAP-01                   | **DataQuality** — can only run if RPC allows simulations at scale                              |
 | `eth_getLogs` for feature extraction      | `docs/analysis/profitability-gaps.md` GAP-03                   | **Features** — TxVelocity, WalletEntropy, VolumeMomentum all need frequent getLogs calls       |
 
@@ -42,7 +42,7 @@ Before comparing providers, understand what is **hard-blocked** by the current f
 | Jito bundle submission   | `shadow_mode: true` — no real bundles | Mainnet Jito is free via public endpoints; only the RPC provider matters for tx forwarding |
 | ZeroSlot private mempool | `${SOLANA_ZEROSLOT_HTTP}` unset       | ZeroSlot has its own pricing ($50–200/mo) — separate from Helius/QuickNode                 |
 
-### 1.4 Capital Configuration (from `config/capital.yaml`)
+### 1.4 Capital Configuration (from `shared/config/capital.yaml`)
 
 ```
 base_size_usd: 5.0     # micro-capital mode
@@ -271,7 +271,7 @@ Total:                                       $110.00
 
 ## 5. All 6 Solana Programs — Unlock Analysis
 
-Current `config/chains.yaml` state — 3 active, 3 commented out:
+Current `shared/config/chains.yaml` state — 3 active, 3 commented out:
 
 ```
 ACTIVE:   raydium-v4        (675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8)
@@ -346,7 +346,7 @@ Running all chains simultaneously with high-quality feature extraction requires 
 
 ## 7. gRPC Upgrade Path (Yellowstone/LaserStream)
 
-The codebase already supports gRPC via `transport.mode: "grpc"` in `config/chains.yaml`. This path yields sub-100ms stream latency vs ~200ms for WS+RPC, directly improving the **Execution** profit factor.
+The codebase already supports gRPC via `transport.mode: "grpc"` in `shared/config/chains.yaml`. This path yields sub-100ms stream latency vs ~200ms for WS+RPC, directly improving the **Execution** profit factor.
 
 | Provider  | Plan           | gRPC Availability       | Monthly Cost |
 | --------- | -------------- | ----------------------- | ------------ |
@@ -361,7 +361,7 @@ The codebase already supports gRPC via `transport.mode: "grpc"` in `config/chain
 
 ## 8. Exact Config Changes Per Scenario
 
-### 8.1 Scenario A Config Changes (Helius Developer → apply to `config/chains.yaml`)
+### 8.1 Scenario A Config Changes (Helius Developer → apply to `shared/config/chains.yaml`)
 
 **Step 1 — Uncomment QuickNode WS** (requires paid WS plan — OR use Helius WS directly):
 
@@ -398,7 +398,7 @@ rate_limit_backoff_ms: 5000 # was: 60000 — reduce dead-zone after quota error
 ws_subscribe_stagger_ms: 8000 # was: 10000 — slightly faster ramp for 6 programs
 ```
 
-### 8.2 Vultr $6 Memory Tuning (Solana-only mode — `config/pipeline.yaml`)
+### 8.2 Vultr $6 Memory Tuning (Solana-only mode — `shared/config/pipeline.yaml`)
 
 ```yaml
 # Reduce from defaults to fit 1GB RAM:
@@ -411,11 +411,11 @@ worker:
 # max_connections = 25
 ```
 
-Also in `config/pipeline.yaml`:
+Also in `shared/config/pipeline.yaml`:
 
 ```yaml
 # Reduce processing worker pool for 1GB VPS:
-# (currently config/chains.yaml)
+# (currently shared/config/chains.yaml)
 processing_workers: 4 # was: 8
 ```
 
@@ -424,7 +424,7 @@ processing_workers: 4 # was: 8
 Jito block engine endpoints are free and public. Your codebase has Jito wired with `shadow_mode: true`. Once on a paid RPC plan, enable real Jito submissions:
 
 ```yaml
-# In config/execution.yaml Jito section — set via env vars:
+# In shared/config/execution.yaml Jito section — set via env vars:
 # JITO_BUNDLE_URL=https://mainnet.block-engine.jito.wtf/api/v1/bundles
 # JITO_TIP_ACCOUNT=96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
 # shadow_mode: false  ← flip after 1 week of shadow mode validation

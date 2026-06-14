@@ -236,7 +236,7 @@ func EmitSystemicLossAlert(ctx context.Context, adapter database.Adapter,
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 loss_pattern:
@@ -265,4 +265,4 @@ loss_pattern:
 - `docs/archive/architecture-context/12_learning_engine.md` — FP/FN computation
 - `.github/skills/learning-engine/SKILL.md` — Bounded updates, shadow trades
 - `.github/skills/observability/SKILL.md` — system_event constants
-- `contracts/learning_record.go` — `LearningRecordDTO` fields
+- `shared/contracts/learning_record.go` — `LearningRecordDTO` fields

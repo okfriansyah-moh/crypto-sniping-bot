@@ -33,7 +33,7 @@ func loadDataQualityYAML(t *testing.T) config.DataQualityRuntimeConfig {
 	t.Helper()
 
 	// From internal/app/config/ go up three levels to reach the project root.
-	path := filepath.Join("..", "..", "..", "config", "data_quality.yaml")
+	path := filepath.Join("..", "..", "..", "shared", "config", "data_quality.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("loadDataQualityYAML: ReadFile %q: %v", path, err)

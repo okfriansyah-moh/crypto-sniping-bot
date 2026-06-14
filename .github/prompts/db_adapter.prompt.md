@@ -14,10 +14,10 @@ Generate `docs/reference/db_adapter_spec.md` with:
 
 ### 1. Design Principles
 
-- Single entry point: `database/adapter.*`
+- Single entry point: `shared/database/adapter.*`
 - Accepts and returns immutable DTOs — no raw rows, no dicts
 - All SQL uses portable syntax compatible with all supported engines
-- Engine-agnostic interface — switching engines requires changes only in `database/`
+- Engine-agnostic interface — switching engines requires changes only in `shared/database/`
 
 ### 2. Adapter Interface
 
@@ -49,13 +49,13 @@ class DatabaseAdapter:
 
 ### 4. Engine Implementations
 
-- Each supported engine gets its own module under `database/engines/`
+- Each supported engine gets its own module under `shared/database/engines/`
 - Engine selection is driven by configuration: `database.engine: <engine_name>`
 - Engine implementations handle connection management and engine-specific settings
 
 ### 5. Migration Strategy
 
-- Migration files in `database/migrations/`
+- Migration files in `shared/database/migrations/`
 - Naming: `YYYYMMDD000NNN_description.sql`
 - Append-only — never modify existing migrations
 - Auto-run on adapter initialization
@@ -68,7 +68,7 @@ class DatabaseAdapter:
 
 ### 7. Connection Management
 
-- Connection strategy is engine-specific (configured in `database/engines/`)
+- Connection strategy is engine-specific (configured in `shared/database/engines/`)
 - Engine-specific optimizations (WAL mode, connection pooling, etc.) belong in the engine module
 
 ### 8. Idempotency Enforcement

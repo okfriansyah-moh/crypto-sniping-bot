@@ -7,13 +7,13 @@ description: "Database engine portability. Use when writing SQL, implementing th
 
 ## Purpose
 
-Ensure all database operations are engine-agnostic. The database adapter is the sole abstraction boundary — switching engines requires changes only in `database/`. No module may reference any specific database engine.
+Ensure all database operations are engine-agnostic. The database adapter is the sole abstraction boundary — switching engines requires changes only in `shared/database/`. No module may reference any specific database engine.
 
 ## Rules
 
 ### Architecture
 
-- **All database access goes through `database/adapter.*`** — the single entry point
+- **All database access goes through `shared/database/adapter.*`** — the single entry point
 - Modules under `app/modules/` **MUST NOT** import any database driver
 - Modules **MUST NOT** contain SQL strings or execute queries
 - The adapter accepts and returns immutable DTOs — no raw rows, no dicts
@@ -45,7 +45,7 @@ from database import anything
 Engine selection is driven by configuration, not code:
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 database:
   engine: sqlite # or: postgres
   path: "data/pipeline.db" # SQLite
@@ -55,8 +55,8 @@ database:
 
 ## Inputs
 
-- SQL in `database/` directory
-- Database-related code in `database/adapter.*` and `database/engines/`
+- SQL in `shared/database/` directory
+- Database-related code in `shared/database/adapter.*` and `shared/database/engines/`
 - Module code that might incorrectly access the database
 
 ## Outputs

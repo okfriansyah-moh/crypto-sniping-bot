@@ -37,7 +37,7 @@ All of the following are pre-loaded before any implementation step:
 | Skill                   | When to load                                                  |
 | ----------------------- | ------------------------------------------------------------- |
 | `running-prompt`        | **Always** — governs the execution workflow for this agent    |
-| `dto`                   | Tasks 6, 8, 9, 13, 17 — any task touching `contracts/`        |
+| `dto`                   | Tasks 6, 8, 9, 13, 17 — any task touching `shared/contracts/`        |
 | `data-quality-engine`   | Tasks 9, 13, 14, 18 — any task touching L1 DQ logic           |
 | `dex-scanning`          | Tasks 2, 3, 7, 17 — any task touching L0 ingestion or probes  |
 | `event-bus`             | Tasks 8, 10 — any task touching workers or event emission     |
@@ -105,11 +105,11 @@ Each task in the plan has a **"Files to create/modify"** section. Those are the
 - **`docs/ops/PROGRESS_REPORT.md`** — the **sole writable file under `docs/`**. Append
   Phase Progress, Agent Pipeline Results, Quality Gates, and Session History rows
   after completing each task. Never edit existing rows.
-- **`contracts/`** — **additive only**. New DTOs and new field/enum additions are
+- **`shared/contracts/`** — **additive only**. New DTOs and new field/enum additions are
   allowed; existing fields/types are never modified or removed.
-- **`database/migrations/`** — **append-only**. New migration files only; never touch
+- **`shared/database/migrations/`** — **append-only**. New migration files only; never touch
   existing migration files.
-- **`config/`** — **append-only**. New keys allowed; existing keys never removed.
+- **`shared/config/`** — **append-only**. New keys allowed; existing keys never removed.
 
 If a compile/build error requires touching a file outside your task's ownership,
 **STOP**. Fix the issue in your own files or add a compatibility shim. Never silently
@@ -243,7 +243,7 @@ For each file in ownership order (respecting the plan's dependency graph):
    types, and functions as specified.
 3. Every new function, struct, and const must have a one-line comment (no docstrings for
    unchanged code — only new code gets comments).
-4. Every threshold, address, or magic number must come from `config/` YAML or a
+4. Every threshold, address, or magic number must come from `shared/config/` YAML or a
    named constant in the same file — never inline literals in logic.
 5. Paste §7 / PRODUCTION_GATE_ANALYSIS code snippets **verbatim** when the task says
    "verbatim" or "exact". Do not paraphrase or condense them.
@@ -282,7 +282,7 @@ Read `.github/skills/security-audit/SKILL.md`. Review all new/changed code for:
 - No hardcoded API keys, addresses, or secrets
 - Telegram API calls only via event bus (no direct calls from modules)
 - HTTPS-only external URLs
-- SQL only via `database/adapter.*` — no driver imports in modules
+- SQL only via `shared/database/adapter.*` — no driver imports in modules
 
 **QG-5 — Fix security**
 
@@ -396,13 +396,13 @@ These rules are enforced by `copilot-instructions.md` and are **never relaxed** 
 any task in this plan:
 
 1. **Module isolation** — `internal/modules/X/` never imports `internal/modules/Y/`;
-   all cross-module data flows through `contracts/` DTOs
+   all cross-module data flows through `shared/contracts/` DTOs
 2. **Orchestrator authority** — only `internal/orchestrator/` calls modules, writes
    checkpoints, and routes DTOs; modules are pure functions
-3. **No SQL in modules** — all DB access via `database/adapter.*`; no raw driver
-4. **DTO additive-only** — `contracts/` fields/types are never modified; only added
+3. **No SQL in modules** — all DB access via `shared/database/adapter.*`; no raw driver
+4. **DTO additive-only** — `shared/contracts/` fields/types are never modified; only added
 5. **Config-driven** — every threshold, program ID, and tunable value lives in
-   `config/*.yaml`; zero hardcoded literals in logic
+   `shared/config/*.yaml`; zero hardcoded literals in logic
 6. **Determinism** — same input + same config = identical output; no `math/rand`,
    no wall-clock in decisions, no non-deterministic sorting
 7. **Idempotency** — `ON CONFLICT DO NOTHING`; content-addressable `EventIDs`; no

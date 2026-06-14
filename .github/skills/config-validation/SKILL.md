@@ -7,20 +7,20 @@ description: "Configuration validation and management. Use when creating, modify
 
 ## Purpose
 
-Enforce configuration-driven design. All tunable parameters, paths, thresholds, and magic numbers live in YAML config files under `config/`. No hardcoded values in module code.
+Enforce configuration-driven design. All tunable parameters, paths, thresholds, and magic numbers live in YAML config files under `shared/config/`. No hardcoded values in module code.
 
 ## Rules
 
-- All tunable parameters must be in `config/*.yaml`
+- All tunable parameters must be in `shared/config/*.yaml`
 - No hardcoded paths, thresholds, or magic numbers in Python code
 - Config is loaded once at startup and passed to modules via `config: dict`
 - Modules receive config from the orchestrator — they never read YAML directly
-- `config/` is **append-only** — new keys allowed, existing keys never removed
+- `shared/config/` is **append-only** — new keys allowed, existing keys never removed
 - Config keys use `snake_case` naming
 
 ## Inputs
 
-- YAML configuration files under `config/`
+- YAML configuration files under `shared/config/`
 - Module code that consumes configuration
 - `docs/reference/architecture.md` — expected configuration structure
 
@@ -34,7 +34,7 @@ Enforce configuration-driven design. All tunable parameters, paths, thresholds, 
 ### Correct Config Structure
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 pipeline:
   stages:
     - name: stage_a
@@ -65,7 +65,7 @@ def process(input_dto: InputDTO, config: dict) -> OutputDTO:
 
 # ❌ FORBIDDEN — module reads config file directly
 import yaml
-with open("config/pipeline.yaml") as f:
+with open("shared/config/pipeline.yaml") as f:
     config = yaml.safe_load(f)
 ```
 
@@ -73,7 +73,7 @@ with open("config/pipeline.yaml") as f:
 
 - [ ] No hardcoded paths in Python code
 - [ ] No hardcoded thresholds or magic numbers
-- [ ] All tunable parameters live in `config/*.yaml`
+- [ ] All tunable parameters live in `shared/config/*.yaml`
 - [ ] Config keys use `snake_case`
 - [ ] Modules receive config from orchestrator, never read YAML directly
 - [ ] No existing config keys removed (append-only policy)

@@ -26,7 +26,7 @@ Start at [`docs/README.md`](../../docs/README.md) for tier layout (`plans/`, `an
 ## Inputs
 
 - Documentation in `docs/`
-- Source code in `app/`, `contracts/`, `database/`
+- Source code in `app/`, `shared/contracts/`, `shared/database/`
 
 ## Outputs
 
@@ -70,7 +70,7 @@ Code (database/adapter.*):
 
 ## Checklist
 
-- [ ] All DTOs in `contracts/` match `docs/reference/dto_contracts.md`
+- [ ] All DTOs in `shared/contracts/` match `docs/reference/dto_contracts.md`
 - [ ] Pipeline stage order matches `docs/reference/architecture.md`
 - [ ] Orchestrator behavior matches `docs/reference/orchestrator_spec.md`
 - [ ] Database adapter interface matches `docs/reference/db_adapter_spec.md`

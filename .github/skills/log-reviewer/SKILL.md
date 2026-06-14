@@ -259,7 +259,7 @@ This rule is enforced verbatim per the operator instruction:
   attached snippet.
 - **Mode hint** (optional) — current `STRICT | BALANCED | EXPLORATION`
   (per `operational-modes`). Affects severity gating only.
-- **Known stubs allowlist** (optional, from `config/`) — fields the operator
+- **Known stubs allowlist** (optional, from `shared/config/`) — fields the operator
   has explicitly marked as not-yet-implemented; downgrades STUBBED → DEGRADED
   for those fields only.
 
@@ -445,7 +445,7 @@ These rules define the hard boundary between "acceptable operational state" and
 | Missing `version_id` on any event                                                                                                        | BAD      | HIGH     | Strategy attribution broken. Fix before adding capital.                                                                                                                                                                                                                             |
 | Same `(token_address, band)` re-emitted by rescan within one window                                                                      | BAD      | CRITICAL | Rescan idempotency broken. Fix `rescan-orchestration` + `idempotency`.                                                                                                                                                                                                              |
 | `rescan_emit_failed` rate > 5% of candidates in any band                                                                                 | DEGRADED | HIGH     | Rescan→pipeline handoff failing. Fix `event-bus` + `rescan-orchestration`.                                                                                                                                                                                                          |
-| Rescan enabled (`cfg.rescan.enabled=true`) AND `rescan_worker_started` seen BUT zero `transport="rescan_*"` events over a ≥10 min window | STUCK    | HIGH     | Rescan worker alive but producing no output. Inspect eligibility thresholds (`min_age_seconds`, `max_age_seconds`, band windows) in `config/pipeline.yaml`; check `rescan_tick_error` rate; verify `dex_pool_detected` / `solana_ingestion_emitted` are populating the token table. |
+| Rescan enabled (`cfg.rescan.enabled=true`) AND `rescan_worker_started` seen BUT zero `transport="rescan_*"` events over a ≥10 min window | STUCK    | HIGH     | Rescan worker alive but producing no output. Inspect eligibility thresholds (`min_age_seconds`, `max_age_seconds`, band windows) in `shared/config/pipeline.yaml`; check `rescan_tick_error` rate; verify `dex_pool_detected` / `solana_ingestion_emitted` are populating the token table. |
 
 ---
 

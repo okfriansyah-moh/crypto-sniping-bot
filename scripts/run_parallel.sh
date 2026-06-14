@@ -132,11 +132,11 @@ CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, confi
 _WORKSPACE_CONSTRAINT="WORKSPACE CONSTRAINT: NEVER write any files, scripts, summaries, or reports to /tmp, /var, /private, or any path outside this project directory. Write ALL output files inside the project — use .parallel-dev/ for temporary artifacts and output/ for generated files. PROTECTED PATHS POLICY (HARD ENFORCED — VIOLATION ROLLS BACK THE ENTIRE PHASE): contracts/ is ADDITIVE-ONLY outside Phase 0 — you MAY add new .go files for new DTOs, but you MUST NEVER modify, reformat, rename, or delete any existing file under contracts/ (allocation.go, contracts.go, data_quality.go, edge.go, evaluation.go, event_envelope.go, execution.go, expired_event.go, feature.go, latency.go, learning_record.go, market_data.go, position.go, probability.go, selection.go, slippage.go, system_state.go, trace.go, validated_edge.go and their _test.go siblings). database/migrations/ files already committed are IMMUTABLE — never edit or delete them; only add NEW migration files with a strictly later YYYYMMDD000NNN_ prefix. docs/ is READ-ONLY for every agent except the orchestrator (PROGRESS_REPORT.md). If a test or compile error seems to require touching a contracts/ file, STOP and instead adjust the consumer code or add a NEW additive contract — never edit the existing one."
 
 # Protected paths — agents MUST NOT modify unless explicitly instructed
-PROTECTED_PATHS=("contracts/" "database/" "docs/")
+PROTECTED_PATHS=("shared/contracts/" "shared/database/" "docs/")
 # Protected file enforcement: existing files under contracts/ are immutable in non-phase-0 runs.
 # These globs are used by restore_protected_paths to auto-revert unauthorized modifications.
-PROTECTED_CONTRACTS_GLOB="contracts/"
-PROTECTED_MIGRATIONS_GLOB="database/migrations/"
+PROTECTED_CONTRACTS_GLOB="shared/contracts/"
+PROTECTED_MIGRATIONS_GLOB="shared/database/migrations/"
 PROTECTED_DOCS_GLOB="docs/"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -719,7 +719,7 @@ dto_guardian_validate() {
     if ! validate_protected_files "${work_dir}" "${phase_label}"; then return 1; fi
     local failures=0
     if [[ -d "contracts" ]]; then
-        if grep -rn "@dataclass$" contracts/ 2>/dev/null | grep -v "frozen=True" | head -5 | grep -q .; then
+        if grep -rn "@dataclass$" shared/contracts/ 2>/dev/null | grep -v "frozen=True" | head -5 | grep -q .; then
             log_error "[dto-validate] Non-frozen dataclass in contracts/"
             ((failures++))
         fi
@@ -727,7 +727,7 @@ dto_guardian_validate() {
             log_error "[dto-validate] Module returning raw dict instead of frozen DTO"
             ((failures++))
         fi
-        if grep -rn "field(default_factory=list\|field(default_factory=dict" contracts/ 2>/dev/null | head -5 | grep -q .; then
+        if grep -rn "field(default_factory=list\|field(default_factory=dict" shared/contracts/ 2>/dev/null | head -5 | grep -q .; then
             log_error "[dto-validate] Mutable default in frozen DTO"
             ((failures++))
         fi
@@ -985,7 +985,7 @@ restore_protected_paths() {
 
     # contracts/ — restore only modified/deleted EXISTING files; keep newly added files.
     local modified_contracts
-    modified_contracts=$(git diff --name-only --diff-filter=MD "${base_branch}" -- contracts/ 2>/dev/null || true)
+    modified_contracts=$(git diff --name-only --diff-filter=MD "${base_branch}" -- shared/contracts/ 2>/dev/null || true)
     if [[ -n "${modified_contracts}" ]]; then
         log_warn "[protected-files] auto-restoring modified contracts/ files from ${base_branch}"
         echo "${modified_contracts}" | while read -r f; do
@@ -997,7 +997,7 @@ restore_protected_paths() {
 
     # database/migrations/ — restore any modified/deleted committed migration files.
     local modified_migrations
-    modified_migrations=$(git diff --name-only --diff-filter=MD "${base_branch}" -- database/migrations/ 2>/dev/null || true)
+    modified_migrations=$(git diff --name-only --diff-filter=MD "${base_branch}" -- shared/database/migrations/ 2>/dev/null || true)
     if [[ -n "${modified_migrations}" ]]; then
         log_warn "[protected-files] auto-restoring modified database/migrations/ files from ${base_branch}"
         echo "${modified_migrations}" | while read -r f; do
@@ -1046,11 +1046,11 @@ validate_protected_files() {
     # All subsequent phases may only ADD new DTOs — removing or modifying existing fields is forbidden.
     if [[ "${phase_label}" != *"phase-0"* ]] && [[ "${phase_label}" != *"group-0"* ]]; then
         local contract_deletions
-        contract_deletions=$(git diff "${base_branch}" -- contracts/ 2>/dev/null \
+        contract_deletions=$(git diff "${base_branch}" -- shared/contracts/ 2>/dev/null \
             | grep '^-' | grep -v '^--- ' || true)
         if [[ -n "${contract_deletions}" ]]; then
             log_error "[protected-files] Existing contracts modified (additive-only policy):"
-            git diff --name-only --diff-filter=MD "${base_branch}" -- contracts/ 2>/dev/null \
+            git diff --name-only --diff-filter=MD "${base_branch}" -- shared/contracts/ 2>/dev/null \
                 | while read -r f; do log_error "  ${f}"; done
             ((violations++))
         fi
@@ -1065,7 +1065,7 @@ validate_protected_files() {
     # are free to grow.
     if [[ "${phase_label}" != *"phase-0"* ]] && [[ "${phase_label}" != *"group-0"* ]]; then
         local migration_mods
-        migration_mods=$(git diff --name-only --diff-filter=MD "${base_branch}" -- database/migrations/ 2>/dev/null || true)
+        migration_mods=$(git diff --name-only --diff-filter=MD "${base_branch}" -- shared/database/migrations/ 2>/dev/null || true)
         if [[ -n "${migration_mods}" ]]; then
             log_error "[protected-files] Existing migration files modified or deleted (immutable policy):"
             echo "${migration_mods}" | while read -r f; do log_error "  ${f}"; done

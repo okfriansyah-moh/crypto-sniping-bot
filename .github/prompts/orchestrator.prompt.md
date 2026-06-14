@@ -67,7 +67,7 @@ For each stage boundary, define:
 
 ### 9. Database Interaction
 
-- All DB access through `database/adapter.*`
+- All DB access through `shared/database/adapter.*`
 - Adapter accepts/returns frozen DTOs
 - All SQL uses portable syntax
 

@@ -235,7 +235,7 @@ func emitExitSignal(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 position_monitor:
@@ -264,4 +264,4 @@ position_monitor:
 - `docs/archive/architecture-context/11_position_engine.md` — TP/SL/trailing patterns
 - `.github/skills/position-management/SKILL.md` — TP/SL exit configuration
 - `.github/skills/drawdown-protection/SKILL.md` — Drawdown tier integration
-- `contracts/position.go` — `PositionState` DTO fields
+- `shared/contracts/position.go` — `PositionState` DTO fields

@@ -242,4 +242,4 @@ if shouldPromote(v1Stats, v2Stats, cfg) { activateVersion(newVersion) }
 - Architecture: `docs/reference/architecture.md` § 4.1–4.2 (Strategy Versioning)
 - DTO spec: `docs/reference/dto_contracts.md` (StrategyVersion, StrategyConfig)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 5
-- Config: `config/versioning.yaml`
+- Config: `shared/config/versioning.yaml`

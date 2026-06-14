@@ -283,7 +283,7 @@ func EmitExecutionQualityReport(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 execution_quality:
@@ -316,4 +316,4 @@ execution_quality:
 - `docs/archive/architecture-context/10_execution_engine.md` — Wallet sharding, prebuilt calldata
 - `.github/skills/execution-engine/SKILL.md` — Fee bump, idempotency keys
 - `.github/skills/observability/SKILL.md` — system_event emission
-- `contracts/execution.go` — `ExecutionResultDTO` fields
+- `shared/contracts/execution.go` — `ExecutionResultDTO` fields

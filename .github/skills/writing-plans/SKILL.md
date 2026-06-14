@@ -96,10 +96,10 @@ Status: [ ] In Progress / [ ] Complete
 Apply to every task:
 
 - Modules accept DTOs, return DTOs — no side effects
-- All DB writes go through `database/adapter.*` — never directly in modules
+- All DB writes go through `shared/database/adapter.*` — never directly in modules
 - Content-addressable IDs: `SHA256(content)[:16]`
 - Use `ON CONFLICT DO NOTHING` for all inserts
-- Config values from `config/*.yaml` — never hardcoded
+- Config values from `shared/config/*.yaml` — never hardcoded
 
 ---
 
@@ -112,7 +112,7 @@ After writing the plan, check:
 3. **Compilable states:** Every task leaves code compilable
 4. **No skipped tests:** Every task has a test verification step
 5. **DTO completeness:** All DTOs are defined before they're consumed
-6. **DB access:** Only orchestrator tasks touch `database/adapter.*`
+6. **DB access:** Only orchestrator tasks touch `shared/database/adapter.*`
 
 ---
 

@@ -52,7 +52,7 @@ Risk contribution = weighted combination of above flags
 ```
 
 ```yaml
-# config/data_quality.yaml
+# shared/config/data_quality.yaml
 wash_trading:
   max_tx_count_1m: 50
   min_unique_wallets: 5
@@ -121,7 +121,7 @@ func aggregateRiskScore(scores map[string]float64, weights map[string]float64) f
 ### Decision Gate (Config-Driven Thresholds)
 
 ```yaml
-# config/data_quality.yaml — per operational mode
+# shared/config/data_quality.yaml — per operational mode
 thresholds:
   strict:
     reject_above: 0.3
@@ -272,7 +272,7 @@ real RPC-backed detectors. This skill is the canonical reference for that work.
 **Phase 9 mandates:**
 
 - Detector inventory MUST be implemented per chain (EVM/Solana) per the table in § 9.1
-- All detectors run concurrently via `errgroup` with per-detector context timeout `detector_timeout_ms` (default 800 ms from `config/data_quality.yaml`)
+- All detectors run concurrently via `errgroup` with per-detector context timeout `detector_timeout_ms` (default 800 ms from `shared/config/data_quality.yaml`)
 - LRU cache (`detector_cache.go`) keyed by `(chain, token_address, detector_name)` with per-detector TTL
 - RPC timeout → `Indeterminate` flag → treated as risky-pass (never as safe)
 - Module remains DB-free; RPC clients (`evm_simulator`, `solana_simulator`) injected at worker construction
@@ -292,4 +292,4 @@ real RPC-backed detectors. This skill is the canonical reference for that work.
 - Architecture context: `docs/archive/architecture-context/3_data_quality_engine.md`
 - DTO spec: `docs/reference/dto_contracts.md` § 3.2 (DataQualityDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.1
-- Config: `config/data_quality.yaml`
+- Config: `shared/config/data_quality.yaml`

@@ -1,21 +1,11 @@
-# Integration tests
+# Dashboard integration tests (relocated)
 
-## Gate review regression fixture (2026-06-01)
+Operator dashboard cross-boundary integration tests live under:
 
-`gate_review_collect_test.go` replays `scripts/gate_review_collect.sh --analyze` against the
-production gate-review capture:
+**`backend-dashboard/tests/integration/`**
 
-- `output/logs/gate_raw_20260601_161344.log`
+Go `internal` import rules forbid importing `backend-dashboard/internal/api` from the root `tests/` tree — dashboard API integration tests must live inside `backend-dashboard/`.
 
-That file is a **real operational log window** from the June 1, 2026 production gate review
-(not a synthetic sample). It is stored under `output/` (gitignored); copy the capture locally
-to run the regression.
+See `backend-dashboard/tests/integration/README.md` for run commands.
 
-The test asserts **corrected evidence semantics** after the gate-evidence reconciliation plan:
-
-- No fake L2–L5 “dead worker” blockers from legacy message names (`features_extracted`, etc.)
-- Downstream `stage_completed` counts stay zero when `dq_worker` emitted=0
-- `traces_completed` is anchored on `learning_record_emitted` (L10), not partial lifecycle hints
-- Production auto-decision does not advance to shadow/micro/live on false evidence
-
-`DQ_SKIPPED` SQL funnel semantics are covered in `database/engines/postgres/lifecycle_stats_test.go`.
+**Do not add** `dashboard_*` or `operator_command_*` Go files here.

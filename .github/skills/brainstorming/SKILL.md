@@ -104,7 +104,7 @@ Explore context
 - **Explore alternatives** — always propose 2-3 approaches
 - **Incremental validation** — present design sections, get approval as you go
 - **skeleton-parallel constraints** — every design must respect:
-  - Module communication only through DTOs in `contracts/`
+  - Module communication only through DTOs in `shared/contracts/`
   - No direct DB access in modules (orchestrator only)
   - Same input + same config = identical output (determinism)
 

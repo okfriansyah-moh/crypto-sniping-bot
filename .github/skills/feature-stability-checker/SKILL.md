@@ -267,7 +267,7 @@ func (m *EdgeModule) AdjustWeightsForStability(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 feature_stability:
@@ -286,7 +286,7 @@ feature_stability:
 - [ ] Redistributed weights sum to same total as original weights
 - [ ] Stale features (zero-change) flagged as `system_event` (not blocked)
 - [ ] Stability ratio < 0.5 triggers `feature_stability_degraded` system event
-- [ ] All thresholds from `config/pipeline.yaml`
+- [ ] All thresholds from `shared/config/pipeline.yaml`
 
 ---
 
@@ -296,4 +296,4 @@ feature_stability:
 - `docs/archive/architecture-context/4_feature_extraction.md` — Feature confidence
 - `.github/skills/edge-detection/SKILL.md` — EdgeDTO production using features
 - `.github/skills/probability-modeling/SKILL.md` — P(success) model inputs
-- `contracts/feature.go` — `FeatureDTO`, `FeatureConfidence` fields
+- `shared/contracts/feature.go` — `FeatureDTO`, `FeatureConfidence` fields

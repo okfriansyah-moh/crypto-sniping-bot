@@ -296,4 +296,4 @@ result, err := rpcPool.Call(ctx, method, params)  // pool handles fallback, circ
 - Architecture: `docs/reference/architecture.md` § 3.8 (Execution Engine), § 6.2 (RPC)
 - Architecture context: `docs/archive/architecture-context/10_execution_engine.md`
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.8
-- Config: `config/rpc.yaml`
+- Config: `shared/config/rpc.yaml`

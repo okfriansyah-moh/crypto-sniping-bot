@@ -32,7 +32,7 @@ const (
 ```
 
 ```yaml
-# config/pipeline.yaml — mode threshold profiles
+# shared/config/pipeline.yaml — mode threshold profiles
 modes:
   strict:
     probability_threshold: 0.68
@@ -261,7 +261,7 @@ if ev < thresholds.EVThreshold { return "reject" }
 [ ] Three modes only: strict | balanced | exploration
 [ ] Mode persisted to database — never in-memory only
 [ ] Loaded from database at every pipeline run start
-[ ] Thresholds per mode defined in config/pipeline.yaml
+[ ] Thresholds per mode defined in shared/config/pipeline.yaml
 [ ] Valid transitions: strict↔balanced↔exploration (no skip)
 [ ] One transition per window (window size from config)
 [ ] Auto-upgrade on starvation (configurable trigger duration)
@@ -280,4 +280,4 @@ if ev < thresholds.EVThreshold { return "reject" }
 - Architecture context: `docs/archive/architecture-context/1_global_control_loop.md`
 - Architecture context: `docs/archive/architecture-context/13_observability_finalization.md` § 15
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 3 (Mode Controller)
-- Config: `config/pipeline.yaml` → `modes`, `mode_transitions`
+- Config: `shared/config/pipeline.yaml` → `modes`, `mode_transitions`

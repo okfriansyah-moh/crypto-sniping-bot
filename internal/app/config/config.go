@@ -80,6 +80,11 @@ type Config struct {
 	// shadow execution fills. Maps to price_oracle: in config/pipeline.yaml.
 	PriceOracle PriceOracleConfig `yaml:"price_oracle"`
 
+	// Dashboard holds operator-dashboard API settings from config/dashboard.yaml.
+	// Populated only when backend-dashboard calls LoadDashboardConfig; sniper-bot
+	// Config.Load() does not merge dashboard.yaml.
+	Dashboard DashboardConfig `yaml:"dashboard"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
 }
@@ -789,16 +794,16 @@ func Load(paths ...string) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("config: get working directory: %w", err)
 		}
-		paths = []string{filepath.Join(cwd, "config", "pipeline.yaml")}
-		chainsPath := filepath.Join(cwd, "config", "chains.yaml")
+		paths = []string{JoinConfigFile(cwd, "pipeline.yaml")}
+		chainsPath := JoinConfigFile(cwd, "chains.yaml")
 		if _, statErr := os.Stat(chainsPath); statErr == nil {
 			paths = append(paths, chainsPath)
 		}
-		budgetsPath := filepath.Join(cwd, "config", "budgets.yaml")
+		budgetsPath := JoinConfigFile(cwd, "budgets.yaml")
 		if _, statErr := os.Stat(budgetsPath); statErr == nil {
 			paths = append(paths, budgetsPath)
 		}
-		executionPath := filepath.Join(cwd, "config", "execution.yaml")
+		executionPath := JoinConfigFile(cwd, "execution.yaml")
 		if _, statErr := os.Stat(executionPath); statErr == nil {
 			paths = append(paths, executionPath)
 		}
@@ -807,7 +812,7 @@ func Load(paths ...string) (*Config, error) {
 			"priority.yaml",
 			"data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml",
 		} {
-			p := filepath.Join(cwd, "config", name)
+			p := JoinConfigFile(cwd, name)
 			if _, statErr := os.Stat(p); statErr == nil {
 				paths = append(paths, p)
 			}

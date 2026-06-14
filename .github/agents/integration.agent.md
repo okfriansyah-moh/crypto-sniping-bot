@@ -86,7 +86,7 @@ def test_stage_a_to_stage_b():
 ## Constraints
 
 - Do NOT implement module business logic — only integration wiring
-- Do NOT modify `contracts/` DTOs
+- Do NOT modify `shared/contracts/` DTOs
 - Do NOT change the pipeline stage order
 - Do NOT create shortcuts that bypass stages
 - The orchestrator is the ONLY component that calls modules

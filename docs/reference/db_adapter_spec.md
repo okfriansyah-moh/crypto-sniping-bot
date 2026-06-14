@@ -6,16 +6,16 @@
 
 ## 1. Design Principles
 
-- **Single entry point:** `database/adapter.go` is the ONLY database interface
-- **DTO-based I/O:** Adapter accepts and returns immutable DTOs from `contracts/` — no raw rows, no maps, no primitives
-- **Engine-agnostic interface:** Adapter API independent of Postgres; engine details isolated under `database/engines/`
+- **Single entry point:** `shared/database/adapter.go` is the ONLY database interface
+- **DTO-based I/O:** Adapter accepts and returns immutable DTOs from `shared/contracts/` — no raw rows, no maps, no primitives
+- **Engine-agnostic interface:** Adapter API independent of Postgres; engine details isolated under `shared/database/engines/`
 - **Portable SQL:** All SQL uses syntax compatible across Postgres-family engines (`ON CONFLICT`, `CURRENT_TIMESTAMP`, parameterized queries)
-- **Modules are DB-free:** No module under `internal/modules/` may import `database/`, import a DB driver, or contain SQL strings
+- **Modules are DB-free:** No module under `internal/modules/` may import `shared/database/`, import a DB driver, or contain SQL strings
 - **Event-sourced:** The `events` table is the authoritative log. All DTO transitions append to it. State tables are derived projections.
 - **Traceability enforced at write time:** Every event write validates `trace_id`, `correlation_id`, `causation_id` (except Layer 0), `version_id` — orphan events are rejected.
 - **Multi-chain ready (additive):** The adapter is chain-agnostic at the DTO layer. The `Chain` field on every DTO (`eth | bsc | solana`) is a free-form string; chain-specific interpretation lives in the consuming module. Adding a new chain (Phase 7: Solana) introduces only **additive** adapter methods (e.g. `UpsertSolanaEndpointState`, `InsertSolanaSignature`) — never modifies the existing interface. Chain-restricted methods (e.g. `AllocateNonce`, `ReconcileNonce`) document the restriction in their contract; callers are responsible for gating on `chain`. `InsertExecutionResult` accepts `ExecutionResultDTO` for **all** chains; chain-specific fields (Solana signature, EVM tx hash) map to the same `TxHash` slot, and `Nonce` is unused (`0`) for Solana.
-- **Solana ingestion state model (additive):** Solana ingestion uses two persistent state slices not present in the EVM model: a **monotonic watermark** (`solana_ingestion_watermark.slot`) and an **optional signature ledger** (`solana_signatures`) for idempotent execution. The adapter exposes `UpsertIngestionWatermark(ctx, chain, slot)` (rejects regressions with `ErrWatermarkRegression`), `GetIngestionWatermark`, `InsertSolanaSignature` (`ON CONFLICT DO NOTHING`), `UpdateSolanaSignatureStatus`, plus endpoint health/circuit-breaker methods (`UpsertSolanaEndpointState`, `GetSolanaEndpointState`, `UpsertSolanaEndpointHealth`, `ListSolanaEndpointsRanked`). All are additive; no existing call site is altered. The nonce manager (`AllocateNonce`, `ReconcileNonce`) remains EVM-only — Solana callers MUST NOT invoke it. See `docs/reference/architecture.md` § 3.11.10 and `docs/reference/implementation_roadmap.md` § 7.1.6 / § 7.7 for the production-grade hardening invariants. Migration: `database/migrations/20260101000007_solana_tables.sql`.
-- **Production hardening contract (architecture § 4.10):** The adapter is the **single** authoritative boundary for the determinism + exactly-once + failure-safety guarantees. Specifically: (a) event reads are ordered by `logical_order_key` (never `created_at`); (b) `ClaimExecution` is the only path that reserves an `execution_id` — in-memory locks are advisory only; (c) `MoveToDLQ` is the only path that records terminal failure of an event; (d) `UpsertPositionFromExecution` enforces the single-position-per-execution invariant via a UNIQUE constraint on `source_execution_id`; (e) `SetSystemHalt` / `IsSystemHalted` are the only legitimate read/write of the global kill switch; (f) `PromoteStrategyVersion` is the only path that activates a new strategy version. Direct SQL bypassing these methods is FORBIDDEN. Migration: `database/migrations/20260101000012_production_hardening.sql`.
+- **Solana ingestion state model (additive):** Solana ingestion uses two persistent state slices not present in the EVM model: a **monotonic watermark** (`solana_ingestion_watermark.slot`) and an **optional signature ledger** (`solana_signatures`) for idempotent execution. The adapter exposes `UpsertIngestionWatermark(ctx, chain, slot)` (rejects regressions with `ErrWatermarkRegression`), `GetIngestionWatermark`, `InsertSolanaSignature` (`ON CONFLICT DO NOTHING`), `UpdateSolanaSignatureStatus`, plus endpoint health/circuit-breaker methods (`UpsertSolanaEndpointState`, `GetSolanaEndpointState`, `UpsertSolanaEndpointHealth`, `ListSolanaEndpointsRanked`). All are additive; no existing call site is altered. The nonce manager (`AllocateNonce`, `ReconcileNonce`) remains EVM-only — Solana callers MUST NOT invoke it. See `docs/reference/architecture.md` § 3.11.10 and `docs/reference/implementation_roadmap.md` § 7.1.6 / § 7.7 for the production-grade hardening invariants. Migration: `shared/database/migrations/20260101000007_solana_tables.sql`.
+- **Production hardening contract (architecture § 4.10):** The adapter is the **single** authoritative boundary for the determinism + exactly-once + failure-safety guarantees. Specifically: (a) event reads are ordered by `logical_order_key` (never `created_at`); (b) `ClaimExecution` is the only path that reserves an `execution_id` — in-memory locks are advisory only; (c) `MoveToDLQ` is the only path that records terminal failure of an event; (d) `UpsertPositionFromExecution` enforces the single-position-per-execution invariant via a UNIQUE constraint on `source_execution_id`; (e) `SetSystemHalt` / `IsSystemHalted` are the only legitimate read/write of the global kill switch; (f) `PromoteStrategyVersion` is the only path that activates a new strategy version. Direct SQL bypassing these methods is FORBIDDEN. Migration: `shared/database/migrations/20260101000012_production_hardening.sql`.
 
 ---
 
@@ -342,7 +342,7 @@ type PipelineRun struct {
 ## 4. Engine Selection
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 database:
   engine: postgres
   host: localhost
@@ -744,7 +744,7 @@ At every write:
 
 ## 11.1 Schema Additions
 
-### Migration `database/migrations/20260101000006_production_gaps.sql`
+### Migration `shared/database/migrations/20260101000006_production_gaps.sql`
 
 ```sql
 -- ── events: priority + ttl ──────────────────────────────────────────────────
@@ -812,7 +812,7 @@ ALTER TABLE learning_records
     ADD COLUMN IF NOT EXISTS strategy_status TEXT    NOT NULL DEFAULT 'active';
 ```
 
-### Migration `database/migrations/20260101000007_events_partitioning.sql`
+### Migration `shared/database/migrations/20260101000007_events_partitioning.sql`
 
 (Applied only when enabling horizontal scale. Postgres 13+.)
 
@@ -834,7 +834,7 @@ INSERT INTO events SELECT * FROM events_legacy;
 DROP TABLE events_legacy;
 ```
 
-### Migration `database/migrations/20260101000008_events_archive.sql`
+### Migration `shared/database/migrations/20260101000008_events_archive.sql`
 
 ```sql
 CREATE TABLE IF NOT EXISTS events_archive (

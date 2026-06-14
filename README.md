@@ -12,6 +12,28 @@ If any factor → 0, profit → 0. Every change must preserve every factor.
 
 ---
 
+## Repository layout
+
+Three deployable units plus a shared kernel:
+
+```
+crypto-sniping-bot/
+├── sniper-bot/              # pipeline + workers + telegram (:8080)
+├── backend-dashboard/       # operator REST API (:8090)
+├── frontend-dashboard/      # operator SPA
+├── shared/
+│   ├── contracts/           # DTOs (import: crypto-sniping-bot/shared/contracts)
+│   ├── database/            # adapter + migrations
+│   └── config/              # YAML thresholds
+├── internal/                # cross-app Go (operator, bootstrap, health)
+├── docs/  scripts/  Makefile  docker-compose.yml
+└── go.mod
+```
+
+See `shared/README.md` for import paths and Docker config mapping.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -21,11 +43,15 @@ go build ./...
 # Run tests
 go test ./...
 
-# Start server
-go run ./cmd serve
+# Start sniper
+go run ./sniper-bot/cmd/ serve
+# or: make serve
+
+# Dashboard API
+make dashboard-serve
 
 # Run migrations
-go run ./cmd migrate up
+make migrate-up
 ```
 
 ---

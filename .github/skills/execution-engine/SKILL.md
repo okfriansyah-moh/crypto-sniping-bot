@@ -44,7 +44,7 @@ func assignWallet(tokenAddress string, walletPool []Wallet) Wallet {
 - No concurrent sends with the same nonce
 
 ```yaml
-# config/execution.yaml
+# shared/config/execution.yaml
 execution:
   wallet_pool_size: 5 # number of sharding wallets
   max_in_flight_per_wallet: 1 # never more than this
@@ -223,7 +223,7 @@ if report.SlippageAnalysis.AvgBPS > cfg.SlippagePoorThresholdBPS { // 8 bps
 }
 ```
 
-**Quality thresholds (from `config/execution.yaml`):**
+**Quality thresholds (from `shared/config/execution.yaml`):**
 
 | Metric             | Good    | Review Trigger |
 | ------------------ | ------- | -------------- |
@@ -272,7 +272,7 @@ return submitIdempotent(ctx, spec, wallet)
 ## Config Reference
 
 ```yaml
-# config/execution.yaml
+# shared/config/execution.yaml
 execution:
   wallet_pool_size: 5
   max_in_flight_per_wallet: 1
@@ -317,6 +317,6 @@ execution:
 - Architecture context: `docs/archive/architecture-context/10_execution_engine.md`
 - DTO spec: `docs/reference/dto_contracts.md` § 3.9 (ExecutionResultDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.8
-- Config: `config/execution.yaml`
+- Config: `shared/config/execution.yaml`
 - Related skill: `rpc-management` (circuit breaker, endpoint health)
 - `.github/skills/execution-quality-analyzer/SKILL.md` — Post-execution quality audit (slippage/fill/latency/cost-as-edge)

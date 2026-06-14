@@ -24,10 +24,10 @@ Resolve merge conflicts that arise from parallel development branches. Uses a un
 
 | Path          | Merge Rule                                    |
 | ------------- | --------------------------------------------- |
-| `contracts/*` | Union: keep all DTOs from both branches       |
-| `database/*`  | Phase 0 branch wins — only Phase 0 may modify |
+| `shared/contracts/*` | Union: keep all DTOs from both branches       |
+| `shared/database/*`  | Phase 0 branch wins — only Phase 0 may modify |
 | `docs/*`      | Keep unchanged — neither branch should modify |
-| `config/*`    | Union: combine new keys from both branches    |
+| `shared/config/*`    | Union: combine new keys from both branches    |
 
 ### Conflict Markers
 

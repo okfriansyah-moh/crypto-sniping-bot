@@ -12,12 +12,21 @@ BINARY_NAME=crypto-sniping-bot
 # Build
 .PHONY: build
 build:
-	$(GOBUILD) -o bin/$(BINARY_NAME) ./cmd/
+	$(GOBUILD) -o bin/$(BINARY_NAME) ./sniper-bot/cmd/
 
 # Run
-.PHONY: run
-run:
-	$(GOCMD) run ./cmd/ serve
+.PHONY: run serve
+run: serve
+serve:
+	$(GOCMD) run ./sniper-bot/cmd/ serve
+
+# Operator dashboard API (read-only process — Task 8+)
+.PHONY: dashboard-build dashboard-serve
+dashboard-build:
+	$(GOBUILD) -o bin/dashboard-api ./backend-dashboard/cmd/...
+
+dashboard-serve:
+	$(GOCMD) run ./backend-dashboard/cmd/... serve
 
 # Test
 .PHONY: test
@@ -48,11 +57,11 @@ tidy:
 # Database migration
 .PHONY: migrate-up
 migrate-up:
-	$(GOCMD) run ./cmd/ migrate up
+	$(GOCMD) run ./sniper-bot/cmd/ migrate up
 
 .PHONY: migrate-down
 migrate-down:
-	$(GOCMD) run ./cmd/ migrate down
+	$(GOCMD) run ./sniper-bot/cmd/ migrate down
 
 # Clean
 .PHONY: clean
@@ -66,12 +75,12 @@ clean:
 # Usage:
 #   make log-collect            # collect for 60 min (default)
 #   make log-collect MINS=10    # collect for 10 min (quick test)
-#   make log-collect MINS=5 SVC=bot
+#   make log-collect MINS=5 SVC=sniper-bot
 #
 # After it finishes, open a new Copilot chat and paste the summary file path.
 
 MINS ?= 60
-SVC  ?= bot
+SVC  ?= sniper-bot
 
 .PHONY: log-collect
 log-collect:
@@ -105,7 +114,7 @@ log-analyze:
 # Usage:
 #   make gate-collect               # collect for 60 min (default)
 #   make gate-collect MINS=10       # quick smoke test — 10 min window
-#   make gate-collect MINS=5 SVC=bot MODE=PIPELINE_PROOF
+#   make gate-collect MINS=5 SVC=sniper-bot MODE=PIPELINE_PROOF
 #   make gate-latest                # print the most recent gate brief to stdout
 #   make gate-list                  # list all gate review sessions
 #   make gate-analyze LOG=output/logs/gate_raw_TIMESTAMP.log
@@ -172,7 +181,7 @@ battle-test:
 
 .PHONY: battle-test-go
 battle-test-go:
-	$(GOTEST) -v -count=1 ./tests/integration/... -run 'BattleTest'
+	$(GOTEST) -v -count=1 ./sniper-bot/tests/integration/... -run 'BattleTest'
 
 # Phase 2 full §1.1 acceptance (Task 19) — all six success criteria.
 .PHONY: phase2-validate
@@ -186,6 +195,26 @@ phase2-proof:
 	@bash scripts/validate_phase2_acceptance.sh
 
 # ── Docker targets ────────────────────────────────────────────────────────────
+
+# Build and start all services in detached mode (db, migrate, hydrate, sniper-bot, dashboard-*).
+.PHONY: up
+up: docker-up
+
+# Stop all services (data volume is preserved).
+.PHONY: down
+down: docker-down
+
+# Local dashboard dev: Postgres in Docker + API on :8090 + Vite on :5174 (avoids a2a :5173).
+.PHONY: dashboard-dev
+dashboard-dev:
+	@test -n "$$DASHBOARD_API_KEY" || (echo "ERROR: export DASHBOARD_API_KEY first" && exit 1)
+	@test -n "$$SNIPER_DB_PASSWORD" || (echo "ERROR: export SNIPER_DB_PASSWORD for Postgres" && exit 1)
+	@echo "Starting Postgres (if needed), dashboard-api :8090, Vite :5174..."
+	@$(MAKE) postgres
+	@trap 'kill 0' INT TERM; \
+	SNIPER_DB_HOST=localhost $(GOCMD) run ./backend-dashboard/cmd/... serve & \
+	sleep 2; \
+	cd frontend-dashboard && VITE_DASHBOARD_API_KEY="$$DASHBOARD_API_KEY" VITE_DASHBOARD_OPERATOR_ID="$${DASHBOARD_ALLOWED_OPERATORS:-$$DASHBOARD_OPERATOR_ID}" npm run dev -- --port 5174 --strictPort
 
 # Build the Docker image (does not start any services).
 .PHONY: docker-build
@@ -221,10 +250,10 @@ docker-clean:
 docker-clean-all:
 	docker compose down -v
 
-# Tail bot logs.
+# Tail sniper-bot logs.
 .PHONY: docker-logs
 docker-logs:
-	docker compose logs -f bot
+	docker compose logs -f sniper-bot
 
 # ── Postgres backup / restore (local + VPS sync) ─────────────────────────────
 

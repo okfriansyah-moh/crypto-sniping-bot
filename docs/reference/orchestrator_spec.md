@@ -219,7 +219,7 @@ result_c = stage_c.process(result_a, result_b, config)
 
 ## 9. Database Interaction
 
-All database operations go through `database/adapter.*`:
+All database operations go through `shared/database/adapter.*`:
 
 ```python
 adapter = DatabaseAdapter(config)

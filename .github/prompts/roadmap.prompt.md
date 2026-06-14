@@ -15,7 +15,7 @@ Generate `docs/reference/implementation_roadmap.md` with:
 ### Phase 0 — Core Infrastructure
 
 - Database schema + migrations
-- Database adapter (`database/adapter.*`)
+- Database adapter (`shared/database/adapter.*`)
 - Configuration loader
 - Logging setup
 - Entry point (`app/main.py`)
@@ -35,7 +35,7 @@ What this phase delivers.
 ### Tasks
 
 1. [ ] Create module package under `app/modules/`
-2. [ ] Define input/output DTOs in `contracts/`
+2. [ ] Define input/output DTOs in `shared/contracts/`
 3. [ ] Implement core processing logic
 4. [ ] Write database migration (if needed)
 5. [ ] Add orchestrator wiring
@@ -48,8 +48,8 @@ SQL for any new tables or columns.
 
 ### Input/Output DTOs
 
-- Input: `SomeInputDTO` from `contracts/input.py`
-- Output: `SomeOutputDTO` in `contracts/output.py`
+- Input: `SomeInputDTO` from `shared/contracts/input.py`
+- Output: `SomeOutputDTO` in `shared/contracts/output.py`
 
 ### Exit Criteria
 

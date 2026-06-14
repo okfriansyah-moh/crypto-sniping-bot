@@ -141,14 +141,14 @@ The **profit-first skill gate** (see `.github/skills/profit-first/SKILL.md`) req
 
 | Layer                        | What's added                                                                                                                 |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `contracts/`                 | **Nothing.** `MarketDataDTO` is reused as-is. (Strict additive-only enforcement per copilot-instructions § Protected Files.) |
-| `database/adapter.go`        | One new interface method: `GetTokensForRescan`                                                                               |
-| `database/engines/postgres/` | One new file `rescan.go` implementing `GetTokensForRescan`                                                                   |
-| `database/migrations/`       | One new migration `20260503000022_rescan_indexes.sql` (helper indexes only, no schema change)                                |
+| `shared/contracts/`                 | **Nothing.** `MarketDataDTO` is reused as-is. (Strict additive-only enforcement per copilot-instructions § Protected Files.) |
+| `shared/database/adapter.go`        | One new interface method: `GetTokensForRescan`                                                                               |
+| `shared/database/engines/postgres/` | One new file `rescan.go` implementing `GetTokensForRescan`                                                                   |
+| `shared/database/migrations/`       | One new migration `20260503000022_rescan_indexes.sql` (helper indexes only, no schema change)                                |
 | `internal/app/config/`       | Extend `Config` with `RescanConfig` struct                                                                                   |
 | `internal/workers/`          | New file `run_rescan.go` (ticker loop)                                                                                       |
 | `cmd/server.go`              | One new `go func()` to start the worker                                                                                      |
-| `config/pipeline.yaml`       | Additive `rescan:` block (disabled by default)                                                                               |
+| `shared/config/pipeline.yaml`       | Additive `rescan:` block (disabled by default)                                                                               |
 | Tests                        | Unit + integration tests under `internal/workers/` and `tests/integration/`                                                  |
 
 ---
@@ -249,7 +249,7 @@ Task 8 (Docs sync — architecture.md § 3.0.x, log-reviewer PRS)
 **Files (modify, additive only):**
 
 - `internal/app/config/config.go` — embed `Rescan RescanConfig` field
-- `config/pipeline.yaml` — append `rescan:` block
+- `shared/config/pipeline.yaml` — append `rescan:` block
 
 **Schema (Go):**
 
@@ -334,7 +334,7 @@ ModeOverrides: {
 
 **Goal:** Add helper indexes for the rescan query. **No schema changes** — all required columns already exist.
 
-**File:** `database/migrations/20260503000022_rescan_indexes.sql`
+**File:** `shared/database/migrations/20260503000022_rescan_indexes.sql`
 
 ```sql
 -- Phase 10 — rescan layer support indexes.
@@ -375,7 +375,7 @@ COMMIT;
 
 **Goal:** Add the `GetTokensForRescan` method to `database.Adapter`.
 
-**File (modify, additive only):** `database/adapter.go`
+**File (modify, additive only):** `shared/database/adapter.go`
 
 **Method signature:**
 
@@ -392,7 +392,7 @@ COMMIT;
 GetTokensForRescan(ctx context.Context, q RescanQuery) ([]contracts.MarketDataDTO, error)
 ```
 
-**`RescanQuery` struct (define in `database/adapter.go`):**
+**`RescanQuery` struct (define in `shared/database/adapter.go`):**
 
 ```go
 type RescanQuery struct {
@@ -410,7 +410,7 @@ type RescanQuery struct {
 
 **Skills:** `dto`, `modularity`, `database-portability`
 **Agent:** `phase-builder` → `dto-guardian` (verifies adapter signature; no DTO changes)
-**Exit criteria:** Interface compiles; method documented with the contract above; `database/adapter_test.go` extends with a no-op stub if needed.
+**Exit criteria:** Interface compiles; method documented with the contract above; `shared/database/adapter_test.go` extends with a no-op stub if needed.
 
 ---
 
@@ -418,7 +418,7 @@ type RescanQuery struct {
 
 **Goal:** Implement `GetTokensForRescan` on the postgres engine.
 
-**File:** `database/engines/postgres/rescan.go`
+**File:** `shared/database/engines/postgres/rescan.go`
 
 **SQL (parameterized, portable):**
 
@@ -472,7 +472,7 @@ LIMIT $9
 
 **Implementation rules:**
 
-- Use `pgx`/`database/sql` parameterized queries — **never** string interpolation (`security-audit` skill, OWASP A03).
+- Use `pgx`/`shared/database/sql` parameterized queries — **never** string interpolation (`security-audit` skill, OWASP A03).
 - Map rows into `contracts.MarketDataDTO` — direct field assignment, no reflection.
 - On query error: wrap with `fmt.Errorf("postgres.GetTokensForRescan: %w", err)`.
 - Empty result is **not** an error — return `([]MarketDataDTO{}, nil)`.
@@ -695,7 +695,7 @@ go func() {
 - `docs/reference/architecture.md` — add § 3.0.5 "Rescan Layer (0.5)" describing the worker, its profit hypothesis, and its position in the pipeline. **One section, additive.**
 - `.github/skills/log-reviewer/SKILL.md` — extend R4 detectors with rescan patterns and add PRS dimension #11 _or_ fold into existing dimensions (see § 9 below).
 - `.github/skills/rescan-orchestration/SKILL.md` — **NEW** skill capturing the rescan band pattern for future reuse.
-- `config/phases.yaml` — add Phase 10 entry under Group G (this is config, not docs — additive).
+- `shared/config/phases.yaml` — add Phase 10 entry under Group G (this is config, not docs — additive).
 
 **Skills:** `docs-sync`, `parallel-dev-docs`
 **Agent:** `phase-builder` → `merge-reviewer`
@@ -705,7 +705,7 @@ go func() {
 
 ## 8. Phase Mapping for `run_parallel.sh`
 
-This work registers as **Phase 10 — `rescan-layer`** in `config/phases.yaml`. Add the following block:
+This work registers as **Phase 10 — `rescan-layer`** in `shared/config/phases.yaml`. Add the following block:
 
 ```yaml
 10:
@@ -719,7 +719,7 @@ This work registers as **Phase 10 — `rescan-layer`** in `config/phases.yaml`. 
 
 **Group G rationale:** Must run after Phase 9 (profitability-restoration) so that DQ sub-scores are populated correctly — rescan eligibility queries `data_quality.honeypot_score`/`rug_score` which Phase 9 makes non-stub. Running Phase 10 before Phase 9 would filter on constant-zero scores and re-emit every reject indiscriminately.
 
-**Update the comment block in `config/phases.yaml`:**
+**Update the comment block in `shared/config/phases.yaml`:**
 
 ```
 #   Group G — RESCAN LAYER:     Phase 10 (time-banded rescan) — after Phase 9
@@ -820,7 +820,7 @@ Per `.github/copilot-instructions.md`:
 | Operational modes                              | Eligibility thresholds are mode-overridden at every tick.                                                                                                                                                   |
 | Learning safety                                | No bounded-update logic in this worker (it doesn't tune anything). It _feeds_ Layer 10, which has its own bounded-update guards.                                                                            |
 | Forbidden technologies                         | None introduced. No microservices, no Kafka, no Redis, no LLM, no cloud APIs.                                                                                                                               |
-| Protected files policy                         | `contracts/` not modified. Existing migrations not modified. New migration uses post-dated prefix `20260503000022_`. New skill, new worker, new adapter method, new test files — all additive.              |
+| Protected files policy                         | `shared/contracts/` not modified. Existing migrations not modified. New migration uses post-dated prefix `20260503000022_`. New skill, new worker, new adapter method, new test files — all additive.              |
 | File naming standards                          | `run_rescan.go`, `rescan_config.go`, `rescan.go`, `rescan_pipeline_test.go` — all functional names.                                                                                                         |
 
 ---
@@ -871,7 +871,7 @@ The phase is complete when **all** of the following are true:
 **Enable the rescan layer** (manual operator step):
 
 ```bash
-# 1. Edit config/pipeline.yaml — set rescan.enabled: true
+# 1. Edit shared/config/pipeline.yaml — set rescan.enabled: true
 # 2. Restart the bot:
 make restart
 # 3. Verify in logs:
@@ -917,5 +917,5 @@ make logs | grep rescan_band_completed | tail -20
 - `.github/skills/log-reviewer/SKILL.md` (PRS, R4 detectors — updated in Task 8)
 - `.github/skills/rescan-orchestration/SKILL.md` (NEW — created in Task 8)
 - `.github/agents/phase-builder.agent.md` (autonomous phase implementor)
-- `config/phases.yaml` (Phase 10 entry — added in Task 8)
+- `shared/config/phases.yaml` (Phase 10 entry — added in Task 8)
 - `scripts/run_parallel.sh` (runner: `start --mode=2 10`)

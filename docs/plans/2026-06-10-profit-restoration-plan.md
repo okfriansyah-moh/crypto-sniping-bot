@@ -90,7 +90,7 @@ pumpfun-amm decoder emits WSOL as TokenAddress (92%)
 | L9       | `internal/modules/position/`                                                             | On-chain price client (replace DEXScreener hot path) |
 | L10      | `internal/modules/learning/`, `internal/workers/`                                        | Shadow FN recorder, observer, A/B promoter wired     |
 | Platform | `internal/workers/run_validation.go`, `run_edge.go`, `run_selection.go`, `cmd/server.go` | Worker wiring                                        |
-| Config   | `config/priority.yaml`, `config/chains.yaml`, `config/pipeline.yaml`                     | Mode lookup, pre_filter, rescan probe policy         |
+| Config   | `shared/config/priority.yaml`, `shared/config/chains.yaml`, `shared/config/pipeline.yaml`                     | Mode lookup, pre_filter, rescan probe policy         |
 | RPC      | `internal/rpc/solana_rpc.go`, `internal/modules/probes/`                                 | Batch accounts; txSubscribe payload reuse            |
 
 ### Phase 2 Additional Impact (Tasks 13–19)
@@ -99,9 +99,9 @@ pumpfun-amm decoder emits WSOL as TokenAddress (92%)
 | -------- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
 | L0       | `internal/modules/ingestion_solana/`                                   | Mint-pair resolution; system-mint reject; Raydium yield |
 | L0       | `internal/workers/creator_profile_aggregator.go`                       | Skip system-mint token launches                         |
-| L10      | `database/engines/postgres/learning.go`                                | Shadow observer SQL fix                                 |
+| L10      | `shared/database/engines/postgres/learning.go`                                | Shadow observer SQL fix                                 |
 | Platform | `scripts/gate_review_collect.sh`, `scripts/validate_pipeline_proof.sh` | Throughput verdict automation                           |
-| Config   | `config/chains.yaml`                                                   | `ingestion.system_mint_reject` list                     |
+| Config   | `shared/config/chains.yaml`                                                   | `ingestion.system_mint_reject` list                     |
 
 ### DTO Flow (before → after)
 
@@ -136,10 +136,10 @@ This plan maintains the following architecture invariants:
 - [x] **Profit invariant**: `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality` — improves E, P, X, AQ; C and DQ floors held constant by design
 - [x] **Determinism**: same input + same config = identical output — mode lookup from DB system state + event timestamps; no `math/rand`
 - [x] **Idempotency**: content-addressable IDs, `ON CONFLICT DO NOTHING`
-- [x] **Module isolation**: no cross-module imports; all comms via `contracts/` DTOs
+- [x] **Module isolation**: no cross-module imports; all comms via `shared/contracts/` DTOs
 - [x] **No direct DB access from modules**: adapter-only pattern preserved
 - [x] **DTO additive-only**: no existing fields renamed, removed, or type-changed
-- [x] **Config-driven**: all new thresholds in `config/` YAML, not hardcoded in Go
+- [x] **Config-driven**: all new thresholds in `shared/config/` YAML, not hardcoded in Go
 - [x] **Event bus backbone**: all state transitions flow through PostgreSQL `events` table
 - [x] **Security invariants**: HTTPS-only URLs, API keys via `os.Getenv`, bounded HTTP bodies
 - [x] **Layer-1 hard rejects intact**: serial launcher (STRICT/BALANCED), no-social-links, high-supply never bypassed
@@ -236,7 +236,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 ### Task 1 — Config: Mode Threshold Resolver ✅
 
-**Goal:** Single runtime helper that maps `STRICT|BALANCED|EXPLORATION|VERY_EXPLORATION` → `ev_threshold_bps`, `edge_strength_min`, `max_positions`, `explore_budget_pct` from `config/priority.yaml`.
+**Goal:** Single runtime helper that maps `STRICT|BALANCED|EXPLORATION|VERY_EXPLORATION` → `ev_threshold_bps`, `edge_strength_min`, `max_positions`, `explore_budget_pct` from `shared/config/priority.yaml`.
 
 **Layer(s) affected:** Config, Platform
 
@@ -244,7 +244,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 - `internal/app/config/priority.go` (create) — `ModeThresholds` struct + `ResolveModeThresholds(mode string) ModeThresholds`
 - `internal/app/config/config.go` (modify) — expose `Priority` on root `Config` if not already wired
-- `config/priority.yaml` (modify) — add comment cross-ref to workers; verify `max_positions` values align with selection
+- `shared/config/priority.yaml` (modify) — add comment cross-ref to workers; verify `max_positions` values align with selection
 
 **Invariant check:**
 
@@ -278,7 +278,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 - [x] No hardcoded thresholds in module
 - [x] STRICT mode never below configured STRICT floor
-- [x] No cross-module imports (only `contracts/`)
+- [x] No cross-module imports (only `shared/contracts/`)
 - [x] Config values from YAML, not hardcoded
 
 **Validation:**
@@ -307,7 +307,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 **Invariant check:**
 
 - [x] Does not bypass L1 hard rejects (edge runs after DQ)
-- [x] No cross-module imports (only `contracts/`)
+- [x] No cross-module imports (only `shared/contracts/`)
 - [x] Config values from YAML, not hardcoded
 
 **Validation:**
@@ -331,7 +331,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 - `internal/modules/selection/per_creator_dedup.go` (modify if needed) — integrate into batch path
 - `internal/modules/selection/top_k.go` (create) — greedy Top-K + diversity bucket (reuse `DiversityBucket` field)
 - `internal/workers/run_selection.go` (modify) — accumulate validated edges in 2–5s window OR process with adapter batch query; call `ProcessBatch`
-- `config/pipeline.yaml` (modify) — `selection.batch_window_ms`, `selection.top_k` (default = `priority.modes.*.max_positions`)
+- `shared/config/pipeline.yaml` (modify) — `selection.batch_window_ms`, `selection.top_k` (default = `priority.modes.*.max_positions`)
 - `internal/app/config/config.go` (modify) — `SelectionConfig` fields
 
 **Invariant check:**
@@ -390,7 +390,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 **Files to create/modify:**
 
 - `internal/modules/evaluation/evaluation.go` (modify) — load prob from correlation event chain via adapter helper
-- `database/adapter.go` + `database/engines/postgres/` (modify) — `GetProbabilityForLifecycle(ctx, lifecycleID) (float64, bool)` if missing
+- `shared/database/adapter.go` + `shared/database/engines/postgres/` (modify) — `GetProbabilityForLifecycle(ctx, lifecycleID) (float64, bool)` if missing
 - `internal/modules/evaluation/evaluation_test.go` (modify)
 
 **Invariant check:**
@@ -447,7 +447,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 - `internal/rpc/solana_rpc.go` (modify) — `GetMultipleAccounts(ctx, []pubkey)`
 - `internal/modules/probes/solana_batch.go` (create) — batch fetch helper used by probe worker
 - `internal/workers/run_market_probes.go` (modify) — batch path for new tokens; rescan band-aware skip for `solana_pumpfun_lp` on Phase 2
-- `config/pipeline.yaml` (modify) — `probes.rescan_skip_pumpfun_lp_phase2: true`, `probes.batch_accounts: true`
+- `shared/config/pipeline.yaml` (modify) — `probes.rescan_skip_pumpfun_lp_phase2: true`, `probes.batch_accounts: true`
 - `internal/app/config/probes_config.go` (modify)
 
 **Invariant check:**
@@ -473,7 +473,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 **Files to create/modify:**
 
-- `config/chains.yaml` (modify) — `pre_filter.enabled: true`, `max_creator_prev_token_count: 25` (or align with VERY_EXPLORATION DQ ceiling)
+- `shared/config/chains.yaml` (modify) — `pre_filter.enabled: true`, `max_creator_prev_token_count: 25` (or align with VERY_EXPLORATION DQ ceiling)
 - `cmd/server.go` (modify) — verify `CreatorProfileReader` wired to ingestion module (exists from Task 25; confirm not nil)
 - `internal/modules/ingestion_solana/ingestion_solana.go` (modify only if reader unwired)
 
@@ -503,7 +503,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 - `internal/rpc/pool_price_solana.go` (create) — read bonding-curve / AMM vault reserves via cached `getAccountInfo` (respect TTL from config)
 - `internal/modules/position/position.go` (no change — consumes `PriceClient` interface)
 - `cmd/server.go` (modify) — inject `PoolPriceClient` for Solana instead of `DEXScreenerPriceClient` when `price_oracle.mode: on_chain`
-- `config/pipeline.yaml` (modify) — `price_oracle.mode: on_chain`, `price_oracle.cache_ttl_seconds: 5`
+- `shared/config/pipeline.yaml` (modify) — `price_oracle.mode: on_chain`, `price_oracle.cache_ttl_seconds: 5`
 - `internal/workers/run_execution.go` (modify) — shadow fill uses same oracle
 
 **Invariant check:**
@@ -532,7 +532,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 - `internal/modules/health/shadow_gate.go` (create) — query adapter for shadow trade stats
 - `internal/telegram/commands.go` (modify) — `/status` shows gate pass/fail
-- `config/pipeline.yaml` (modify) — `execution.shadow_gate.min_trades: 30`, `min_window_days: 14`, `min_aggregate_pnl_bps: 0`
+- `shared/config/pipeline.yaml` (modify) — `execution.shadow_gate.min_trades: 30`, `min_window_days: 14`, `min_aggregate_pnl_bps: 0`
 
 **Invariant check:**
 
@@ -623,7 +623,7 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 **Files to create/modify:**
 
-- `config/chains.yaml` (modify) — add `ingestion.system_mint_reject:` block:
+- `shared/config/chains.yaml` (modify) — add `ingestion.system_mint_reject:` block:
   ```yaml
   ingestion:
     system_mint_reject:
@@ -666,14 +666,14 @@ Use the existing table format in `docs/ops/PROGRESS_REPORT.md` (see prior `PG-*`
 
 **Files to create/modify:**
 
-- `database/engines/postgres/learning.go` (modify) — replace interval expression:
+- `shared/database/engines/postgres/learning.go` (modify) — replace interval expression:
   ```sql
   -- BEFORE (broken with pgx int arg):
   AND rejected_at < NOW() - ($1 || ' seconds')::interval
   -- AFTER (pgx-safe):
   AND rejected_at < NOW() - make_interval(secs => $1::double precision)
   ```
-- `database/engines/postgres/learning_test.go` (modify or create) — integration-style test with `windowSeconds=3600` against test DB or sqlmock verifying query compiles and args bind
+- `shared/database/engines/postgres/learning_test.go` (modify or create) — integration-style test with `windowSeconds=3600` against test DB or sqlmock verifying query compiles and args bind
 - `internal/workers/run_shadow_observer.go` (modify only if observer needs regression log) — optional: add `shadow_observer_tick` debug on success path for gate verification
 
 **Invariant check:**
@@ -926,7 +926,7 @@ make gate-proof MINS=30                     # collect + validate in one step
 
 ## 7. Deep Knowledge Reference
 
-### §7.1 Operational Mode Thresholds (`config/priority.yaml`)
+### §7.1 Operational Mode Thresholds (`shared/config/priority.yaml`)
 
 | Mode             | `ev_threshold_bps` | `edge_strength_min` | `max_positions` | `explore_budget_pct` |
 | ---------------- | ------------------ | ------------------- | --------------- | -------------------- |
@@ -946,7 +946,7 @@ EV = P × prior_gain_bps − (1−P) × prior_loss_bps − fixed_costs_bps − s
 ACCEPT iff EV ≥ ev_threshold_bps(mode) AND latency_p95 ≤ opportunity_window_ms
 ```
 
-Priors from `config/pipeline.yaml` `validation:` block. Model P used when `use_model_output: true` and join succeeds.
+Priors from `shared/config/pipeline.yaml` `validation:` block. Model P used when `use_model_output: true` and join succeeds.
 
 ### §7.3 Top-K Selection (L6) — Fixed $5 Variant
 

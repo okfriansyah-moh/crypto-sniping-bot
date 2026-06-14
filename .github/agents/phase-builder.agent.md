@@ -66,8 +66,8 @@ You are an elite Staff+ Software Architect and Developer implementing a **determ
 
 When running inside `scripts/run_parallel.sh`, the orchestrator validates protected paths after every stage. Any modification to existing protected files causes the **entire phase to roll back to its pre-checkpoint**, wasting all completed work.
 
-- `contracts/` is **ADDITIVE-ONLY** outside Phase 0. You MAY add new `.go` files for new DTOs. You MUST NEVER modify, reformat, rename, or delete any existing file under `contracts/` — `allocation.go`, `contracts.go`, `data_quality.go`, `edge.go`, `evaluation.go`, `event_envelope.go`, `execution.go`, `expired_event.go`, `feature.go`, `latency.go`, `learning_record.go`, `market_data.go`, `position.go`, `probability.go`, `selection.go`, `slippage.go`, `system_state.go`, `trace.go`, `validated_edge.go`, or any `_test.go` siblings of these.
-- `database/migrations/` already-committed `.sql` files are **IMMUTABLE**. Add NEW migration files only, with a strictly later `YYYYMMDD000NNN_` prefix. Never edit or delete existing migrations.
+- `shared/contracts/` is **ADDITIVE-ONLY** outside Phase 0. You MAY add new `.go` files for new DTOs. You MUST NEVER modify, reformat, rename, or delete any existing file under `shared/contracts/` — `allocation.go`, `contracts.go`, `data_quality.go`, `edge.go`, `evaluation.go`, `event_envelope.go`, `execution.go`, `expired_event.go`, `feature.go`, `latency.go`, `learning_record.go`, `market_data.go`, `position.go`, `probability.go`, `selection.go`, `slippage.go`, `system_state.go`, `trace.go`, `validated_edge.go`, or any `_test.go` siblings of these.
+- `shared/database/migrations/` already-committed `.sql` files are **IMMUTABLE**. Add NEW migration files only, with a strictly later `YYYYMMDD000NNN_` prefix. Never edit or delete existing migrations.
 - `docs/` is **READ-ONLY**. Only the orchestrator may update `docs/ops/PROGRESS_REPORT.md`.
 
 If compile/test errors seem to require touching an existing contract file, STOP. Adjust the consumer code or add a NEW additive contract instead. Never edit the existing one — even for "trivial" reformatting, gofmt, import grouping, or comment changes. The check is line-deletion based: any removed line in a tracked contracts/ file is a violation.
@@ -83,12 +83,12 @@ The user will specify a **phase number** (e.g., "Phase 0", "Phase 3"). You must:
 5. Read `docs/reference/dto_contracts.md` — for DTO definitions and validation rules
 6. Read `docs/reference/db_adapter_spec.md` — for database adapter interface and SQL compatibility rules
 7. Read `.github/copilot-instructions.md` — for hard architectural constraints
-8. Read the relevant DTO definitions from `contracts/` consumed/emitted by this phase
+8. Read the relevant DTO definitions from `shared/contracts/` consumed/emitted by this phase
 9. Implement the phase following the execution protocol below
 
 ## Source of Truth
 
-These documents + `contracts/` are your **absolute source of truth**. Never contradict them.
+These documents + `shared/contracts/` are your **absolute source of truth**. Never contradict them.
 
 ---
 
@@ -115,7 +115,7 @@ When the user says "implement Phase X", you MUST:
 If the user says "parallel mode" or "in parallel with Phase X", you MUST:
 
 1. **Enforce file ownership boundaries** — only touch files belonging to YOUR phase
-2. **Treat DTO contracts as frozen** — use the exact definitions from `contracts/`
+2. **Treat DTO contracts as frozen** — use the exact definitions from `shared/contracts/`
 3. **Never modify files owned by other phases** — list them as DO NOT TOUCH
 4. **Mock upstream DTOs for testing** — write tests with fixture data matching the input contract
 5. **Design modules to accept constructed DTOs** — no upstream module needs to be running
@@ -128,14 +128,14 @@ If the user does NOT say "parallel mode", implement normally but still respect m
 
 1. **Only implement work belonging to the target phase** — no stubs for future phases
 2. **Modular Monolith** — all code in `app/modules/`, single process
-3. **DTO-Only Communication** — modules communicate only through immutable DTOs in `contracts/`
-4. **No cross-module imports** between `app/modules/*` packages — only `contracts/` types
+3. **DTO-Only Communication** — modules communicate only through immutable DTOs in `shared/contracts/`
+4. **No cross-module imports** between `app/modules/*` packages — only `shared/contracts/` types
 5. **Orchestrator owns the call graph** — modules never call each other directly
 6. **Deterministic** — same input + same config = identical output. No `random`, no non-deterministic inference
 7. **Idempotent** — running twice on same input produces no duplicates and no corruption
 8. **Content-addressable IDs** — `entity_id = SHA256(content_signature)[:16]`
 9. **Database is the single source of truth** — `ON CONFLICT DO NOTHING` semantics
-10. **Database access** through `database/adapter.*` only — never raw SQL in modules
+10. **Database access** through `shared/database/adapter.*` only — never raw SQL in modules
 11. **Structured logging** via language-appropriate library — no unstructured console output
 12. **Type annotations** on all public function signatures
 13. **Config via YAML** — no hardcoded paths, thresholds, or magic numbers

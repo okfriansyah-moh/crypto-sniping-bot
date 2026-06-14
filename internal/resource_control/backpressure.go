@@ -3,7 +3,7 @@ package resource_control
 import (
 	"context"
 
-	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/shared/database"
 )
 
 // exitEventTypes are event types that MUST never be dropped under any backpressure condition.

@@ -303,5 +303,5 @@ The momentum score (from `DetectMomentum`) uses:
 - Architecture context: `docs/archive/architecture-context/5_sniper_mode.md`
 - DTO spec: `docs/reference/dto_contracts.md` § 3.4 (EdgeDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.3
-- Config: `config/edge.yaml`, `config/cohorts.yaml`
+- Config: `shared/config/edge.yaml`, `shared/config/cohorts.yaml`
 - `.github/skills/momentum-detector/SKILL.md` — Gate 5 implementation (trend, RSI, volume)

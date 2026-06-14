@@ -134,11 +134,11 @@ func validate(entity EntityDTO, config Config) bool {
 ### Import Rules
 
 1. Standard library first
-2. Third-party second (only in `database/`, adapters)
-3. Project imports third (`contracts/`, same-module)
+2. Third-party second (only in `shared/database/`, adapters)
+3. Project imports third (`shared/contracts/`, same-module)
 4. Blank line between each group
 5. **NEVER** wildcard imports — explicit imports only
-6. **NEVER** import another module's internals — only `contracts/`
+6. **NEVER** import another module's internals — only `shared/contracts/`
 
 ---
 
@@ -329,4 +329,4 @@ public Optional<EntityResult> findEntity(String id) {
 - NEVER exceed 30 lines per function without strong justification
 - NEVER use `print()`/`console.log()` — use structured logging
 - ALWAYS maintain import order: stdlib → third-party → project
-- NEVER import another module's internals — only `contracts/` types
+- NEVER import another module's internals — only `shared/contracts/` types

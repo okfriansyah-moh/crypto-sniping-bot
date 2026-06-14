@@ -264,4 +264,4 @@ if err := sendWithRetry(ctx, bot, chatID, msg, cfg); err != nil {
 - Architecture: `docs/reference/architecture.md` § 2.5 (Telegram via Event Bus), § 4.4 (Operator Commands)
 - Architecture context: `docs/archive/architecture-context/2_system_backbone.md`
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 6
-- Config: `config/telegram.yaml` (authorized IDs, templates — NO bot token)
+- Config: `shared/config/telegram.yaml` (authorized IDs, templates — NO bot token)

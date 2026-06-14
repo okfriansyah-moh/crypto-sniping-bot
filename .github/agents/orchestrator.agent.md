@@ -70,12 +70,12 @@ You are a pipeline orchestrator specialist. Your job is to build and validate th
 ## Constraints
 
 - Do NOT implement module business logic — only orchestration
-- Do NOT modify `contracts/` DTOs
+- Do NOT modify `shared/contracts/` DTOs
 - Do NOT add new pipeline stages
 - Do NOT change stage ordering
 - Do NOT bypass checkpoint writes
 - Database is the single source of truth for all pipeline state
-- All database access goes through `database/adapter.*`
+- All database access goes through `shared/database/adapter.*`
 - The orchestrator is the ONLY component that calls the adapter
 - All SQL uses portable syntax (`ON CONFLICT DO NOTHING`, not `INSERT OR IGNORE`)
 

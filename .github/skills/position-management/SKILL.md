@@ -265,4 +265,4 @@ pattern, failure handling).
 - Architecture context: `docs/archive/architecture-context/11_position_engine.md`
 - DTO spec: `docs/reference/dto_contracts.md` § 3.10 (PositionStateDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.9
-- Config: `config/position.yaml`, `config/cohorts.yaml`
+- Config: `shared/config/position.yaml`, `shared/config/cohorts.yaml`

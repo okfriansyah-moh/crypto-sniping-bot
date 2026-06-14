@@ -37,7 +37,7 @@ For each DTO in the system:
 | entity_id | str  | 16 hex chars, SHA-256 |
 | ...       | ...  | ...                   |
 
-- **Source file:** `contracts/module_name.py`
+- **Source file:** `shared/contracts/module_name.py`
 - **Producer:** module_name
 - **Consumers:** module_a, module_b
 ```

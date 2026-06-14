@@ -1,16 +1,19 @@
 # crypto-sniping-bot — Docker Compose
-# Usage: docker compose up --build
+# Usage: make up   (or: docker compose up --build -d)
 #
 # Prerequisites:
 #   1. Copy .env.example to .env and fill in all required values.
-#   2. If using Solana, set SOLANA_KEYS_DIR to the host directory containing
+#   2. Set DASHBOARD_API_KEY for dashboard-api and dashboard-ui build.
+#   3. If using Solana, set SOLANA_KEYS_DIR to the host directory containing
 #      your Solana keypair JSON file(s).
 #
 # Services:
-#   db      — PostgreSQL 16 (persistent volume)
-#   migrate — One-shot migration runner (exits 0 on success)
-#   hydrate — One-shot historical profile seeder (exits 0 on success)
-#   bot     — Main trading daemon (port 8080)
+#   db             — PostgreSQL 16 (persistent volume)
+#   migrate        — One-shot migration runner (exits 0 on success)
+#   hydrate        — One-shot historical profile seeder (exits 0 on success)
+#   sniper-bot     — Trading daemon (port 8080) — no dashboard code mounted
+#   dashboard-api  — Read-only operator API (port 8090) — no wallet keys
+#   dashboard-ui   — nginx static UI (port 3000) — proxies /api → dashboard-api
 
 services:
 
@@ -43,7 +46,6 @@ services:
     env_file:
       - .env
     environment:
-      # Overrides to use the in-compose service hostnames.
       SNIPER_DB_HOST: db
       SNIPER_DB_SSL_MODE: disable
       CONFIG_PATH: /app/config/pipeline.yaml
@@ -62,7 +64,6 @@ services:
     env_file:
       - .env
     environment:
-      # Overrides to use the in-compose service hostnames.
       SNIPER_DB_HOST: db
       SNIPER_DB_SSL_MODE: disable
       CONFIG_PATH: /app/config/pipeline.yaml
@@ -71,8 +72,8 @@ services:
         condition: service_completed_successfully
     restart: on-failure
 
-  # ── Trading bot ───────────────────────────────────────────────────────────────
-  bot:
+  # ── Trading bot (sniper deploy unit) ─────────────────────────────────────────
+  sniper-bot:
     build:
       context: .
       dockerfile: Dockerfile
@@ -80,18 +81,11 @@ services:
     env_file:
       - .env
     environment:
-      # Overrides to use the in-compose service hostnames.
       SNIPER_DB_HOST: db
       SNIPER_DB_SSL_MODE: disable
       CONFIG_PATH: /app/config/pipeline.yaml
-      # Solana keypair path inside the container (file is bind-mounted below).
       SOLANA_WALLET_KEY_1: /keys/solana-wallet-1.json
     volumes:
-      # Solana keypair directory (bind-mount, read-only).
-      # Set SOLANA_KEYS_DIR in .env to your host keypair directory.
-      # If not using Solana, leave SOLANA_KEYS_DIR unset; /tmp/sniper-keys is used as
-      # a harmless fallback (the bot will not load the keypair unless SOLANA_RPC_HTTP_1
-      # is set in .env).
       - ${SOLANA_KEYS_DIR:-/tmp/sniper-keys}:/keys:ro
     ports:
       - "${PORT:-8080}:8080"
@@ -100,12 +94,60 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
-      # /app/healthcheck is compiled into the distroless image (no shell/wget available).
       test: ["CMD", "/app/healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ── Operator dashboard API (read-only; no wallet/RPC secrets) ─────────────────
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: backend-dashboard/Dockerfile
+    image: crypto-sniping-bot-dashboard-api:local
+    environment:
+      SNIPER_DB_HOST: db
+      SNIPER_DB_USER: sniper
+      SNIPER_DB_NAME: sniper
+      SNIPER_DB_PASSWORD: ${SNIPER_DB_PASSWORD}
+      SNIPER_DB_SSL_MODE: disable
+      DASHBOARD_API_KEY: ${DASHBOARD_API_KEY}
+      CONFIG_PATH: /app/config/pipeline.yaml
+    ports:
+      - "${DASHBOARD_PORT:-8090}:8090"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── Operator dashboard UI (nginx → dashboard-api) ─────────────────────────────
+  dashboard-ui:
+    build:
+      context: .
+      dockerfile: frontend-dashboard/Dockerfile
+      args:
+        VITE_DASHBOARD_API_KEY: ${DASHBOARD_API_KEY}
+        VITE_API_BASE_URL: ""
+    image: crypto-sniping-bot-dashboard-ui:local
+    ports:
+      - "${DASHBOARD_UI_PORT:-3000}:3000"
+    depends_on:
+      dashboard-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   pgdata:

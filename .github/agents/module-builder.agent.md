@@ -43,8 +43,8 @@ You are a module implementation specialist. Your job is to build individual pipe
    - Internal helpers as needed (private, never imported externally)
 
 2. **Implement processing logic**:
-   - Accept immutable DTOs from `contracts/` as input
-   - Return immutable DTOs from `contracts/` as output
+   - Accept immutable DTOs from `shared/contracts/` as input
+   - Return immutable DTOs from `shared/contracts/` as output
    - Config passed as `dict` from YAML (provided by orchestrator)
    - No side effects visible to other modules
 
@@ -62,7 +62,7 @@ You are a module implementation specialist. Your job is to build individual pipe
 ## Constraints
 
 - Module MUST NOT import from other `app/modules/*` packages
-- Module MUST NOT import from `database/`, `app/orchestrator/`, or any DB driver
+- Module MUST NOT import from `shared/database/`, `app/orchestrator/`, or any DB driver
 - Module MUST NOT read config files directly — config is passed in
 - Module MUST NOT call other modules — only the orchestrator does that
 - All IDs must be content-addressable (SHA-256 based)

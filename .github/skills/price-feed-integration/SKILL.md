@@ -132,7 +132,7 @@ no schema changes, no adapter modifications.
 - `token` (contract address / mint pubkey) — from `PositionStateDTO.TokenAddress`
 - RPC clients injected at boot (`*ethclient.Client`, `*solana.Client`)
 - Native-token USD price oracle (Chainlink / Pyth) — cached
-- Config: `config/pipeline.yaml position.*` (timeouts, thresholds, poll cadence)
+- Config: `shared/config/pipeline.yaml position.*` (timeouts, thresholds, poll cadence)
 
 ## Outputs
 

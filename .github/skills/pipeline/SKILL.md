@@ -15,7 +15,7 @@ Enforce correct pipeline stage ordering, validate DTO flow between stages, and s
 - Never skip stages
 - Never parallelize stages at runtime
 - Some stages may be per-entity (run once per item in a batch)
-- All checkpoint writes go through `database/adapter.*`
+- All checkpoint writes go through `shared/database/adapter.*`
 
 ## Inputs
 

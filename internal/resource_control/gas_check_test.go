@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/shared/database"
 )
 
 // ── GasBudget.CheckWallet ─────────────────────────────────────────────────────
