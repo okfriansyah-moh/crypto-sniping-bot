@@ -34,24 +34,94 @@ See `shared/README.md` for import paths and Docker config mapping.
 
 ---
 
-## Quick Start
+## Operator runbook (daily workflow)
+
+Three deployable processes run together: **sniper-bot** (pipeline), **dashboard-api** (REST), **dashboard-ui** (operator SPA).
+
+### 1. First-time setup
 
 ```bash
-# Build
+cp .env.example .env
+# Edit .env — at minimum: SNIPER_DB_PASSWORD, DASHBOARD_API_KEY, RPC keys, wallets
+```
+
+### 2. Start everything (build + run)
+
+```bash
+make start
+```
+
+Same as `make up` / `make docker-up`. This brings up:
+
+| Service | URL | Role |
+|---------|-----|------|
+| `sniper-bot` | http://localhost:8080/health | Pipeline + workers + Telegram |
+| `dashboard-api` | http://localhost:8090/api/v1/health | Operator REST API (read + commands) |
+| `dashboard-ui` | http://localhost:3000 | Operator dashboard (nginx → API) |
+| `db` | localhost:5432 | Shared PostgreSQL |
+
+One-shot jobs (`migrate`, `hydrate`) run automatically before the sniper starts.
+
+### 3. Watch logs
+
+```bash
+make docker-logs                      # all app services (sniper + dashboard-api + dashboard-ui)
+make docker-logs GREP=error           # filter stream (regex)
+make docker-logs LOG_SVCS=sniper-bot  # single service
+```
+
+### 4. Production gate review (unchanged workflow)
+
+```bash
+make gate-collect MINS=30             # collect sniper logs → gate brief + evidence JSON
+make gate-latest                    # print latest brief
+make gate-validate                  # PIPELINE_PROOF acceptance on newest evidence
+```
+
+`gate-collect` tails **`sniper-bot`** logs by default (`SVC=sniper-bot`). Override only if needed:
+
+```bash
+make gate-collect MINS=30 SVC=sniper-bot MODE=PIPELINE_PROOF
+```
+
+### 5. Stop (database preserved)
+
+```bash
+make stop          # alias: make down / make docker-down
+```
+
+Use `make docker-clean-all` only when you want a **fresh empty database**.
+
+---
+
+## Local development (without full Docker UI build)
+
+Hot-reload dashboard while sniper runs in Docker (or not):
+
+```bash
+export DASHBOARD_API_KEY=... SNIPER_DB_PASSWORD=...
+make dashboard-dev    # Postgres + API :8090 + Vite :5174
+```
+
+Or run components individually:
+
+```bash
+make postgres && make migrate-up
+make serve            # sniper only (native Go)
+make dashboard-serve  # API only (:8090)
+make frontend-dev     # Vite only (:5174)
+```
+
+---
+
+## Quick Start (developers)
+
+```bash
 go build ./...
-
-# Run tests
 go test ./...
-
-# Start sniper
-go run ./sniper-bot/cmd/ serve
-# or: make serve
-
-# Dashboard API
-make dashboard-serve
-
-# Run migrations
 make migrate-up
+make serve            # sniper-bot
+make dashboard-serve  # backend-dashboard
 ```
 
 ---
@@ -60,56 +130,47 @@ make migrate-up
 
 All common operations are wrapped in `make` targets. Run `make <target>`.
 
-### Build, Quality, and Analysis
+### Docker & operator
 
-| Target              | Description                                                |
-| ------------------- | ---------------------------------------------------------- |
-| `make build`        | Compile to `bin/crypto-sniping-bot`                        |
-| `make run`          | `go run ./cmd serve`                                       |
-| `make test`         | Run all tests with race detector                           |
-| `make test-cover`   | Tests + HTML coverage report                               |
-| `make vet`          | `go vet ./...`                                             |
-| `make lint`         | `golangci-lint run ./...` (requires golangci-lint)         |
-| `make tidy`         | `go mod tidy`                                              |
-| `make migrate-up`   | Apply all pending migrations                               |
-| `make migrate-down` | Roll back last migration                                   |
-| `make clean`        | Remove `bin/`, `coverage.out`, `coverage.html`             |
-| `make quality`      | Runs `vet` + `lint` + `test` (full gate)                   |
-| `make log-collect`  | Collect logs + write log-reviewer summary (default 60 min) |
-| `make log-latest`   | Print the most recent log-reviewer summary to stdout       |
-| `make log-list`     | List all log-reviewer session summaries                    |
-| `make log-analyze`  | Re-analyse an existing raw log file (`LOG=path`)           |
-| `make gate-collect`  | Collect logs + write production-gate-reviewer brief        |
-| `make gate-latest`   | Print the most recent gate-review brief to stdout          |
-| `make gate-list`     | List all gate-review sessions                              |
-| `make gate-analyze`  | Re-analyse an existing gate raw log (`LOG=path`)           |
-| `make gate-validate`  | PIPELINE_PROOF acceptance check on latest evidence JSON    |
-| `make gate-proof`     | Collect gate logs, then run pipeline-proof acceptance      |
-| `make gate-proof-mock` | Offline L0→L10 proof via synthetic fixture (no Helius)   |
-| `make gate-proof-inject` | Live inject + wait for L10 (known-good token, no Helius) |
-| `make phase2-validate`| Phase 2 full §1.1 acceptance (six criteria) on evidence    |
-| `make phase2-proof`   | Collect gate logs, then run Phase 2 full acceptance        |
+| Target | Description |
+|--------|-------------|
+| **`make start`** | **Primary:** build + run all services (db, migrate, hydrate, sniper-bot, dashboard-api, dashboard-ui) |
+| `make stop` | Stop all services (DB data preserved) — alias: `make down` |
+| `make docker-up` / `make up` | Same as `make start` (without the status banner) |
+| `make docker-down` | Stop all services |
+| **`make docker-logs`** | Follow logs: sniper-bot + dashboard-api + dashboard-ui |
+| `make docker-logs GREP=error` | Filter log stream (extended regex) |
+| `make dashboard-dev` | Local dev: Postgres + API :8090 + Vite :5174 |
+| `make frontend-dev` | Vite only on :5174 (API must already be running) |
+| `make docker-build` | Build images without starting |
+| `make postgres` | PostgreSQL only |
+| `make docker-clean-all` | Stop **and delete** database volume (destructive) |
+| `make db-backup` / `make db-restore` | Snapshot / restore local DB |
 
-### Docker
+### Build, quality, and gate review
 
-| Target                                      | Description                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------ |
-| `make docker-build`                         | Build Docker image without starting services                             |
-| `make docker-up`                            | Build image + run DB migration + hydrate historical profiles + start bot |
-| `make postgres`                             | Start PostgreSQL only                                                    |
-| `make docker-up-postgres`                   | Alias for `make postgres`                                                |
-| `make docker-down`                          | Stop all services (data volume preserved)                                |
-| `make docker-clean`                         | Stop all services (data volume preserved)                                |
-| `make docker-clean-all`                     | Stop all services **and delete the database volume**                     |
-| `make docker-logs`                          | Tail live bot logs (`docker compose logs -f bot`)                        |
-| `make db-backup`                            | Create compressed PostgreSQL dump to `backups/`                          |
-| `make db-restore FILE=...`                  | Restore local dump into local Docker DB                                  |
-| `make db-backup-vps VPS_HOST=...`           | Download VPS DB dump to local `backups/`                                 |
-| `make db-restore-vps VPS_HOST=... FILE=...` | Upload local dump and restore into VPS DB                                |
+| Target | Description |
+|--------|-------------|
+| `make build` | Compile sniper to `bin/crypto-sniping-bot` |
+| `make dashboard-build` | Compile dashboard API to `bin/dashboard-api` |
+| `make serve` / `make run` | Run sniper natively (`go run ./sniper-bot/cmd/ serve`) |
+| `make test` | All tests with race detector |
+| `make vet` / `make lint` / `make quality` | Static analysis + tests |
+| `make migrate-up` | Apply DB migrations (native) |
+| **`make gate-collect`** | Production gate review — collect logs + write brief (default 60 min) |
+| `make gate-collect MINS=30` | 30-minute gate window |
+| `make gate-latest` | Print most recent gate brief |
+| `make gate-validate` | PIPELINE_PROOF acceptance on latest evidence |
+| `make gate-proof MINS=30` | Collect + validate in one step |
+| `make log-collect` | Log-reviewer session (PRS dimensions) |
+| `make gate-proof-mock` | Offline L0→L10 proof (synthetic fixture) |
+| `make phase2-proof` | Phase 2 full acceptance collect + validate |
+| `make test-cover` | Tests + HTML coverage report |
+| `make clean` | Remove `bin/`, coverage artifacts |
 
-### Docker + Postgres Persistence Scenarios (Beginner)
+See sections below for log-collect, gate-collect workflows, and DB sync scenarios.
 
-This section explains when to use each command in real life, with copy-paste flows.
+### Docker + Postgres persistence scenarios
 
 #### Scenario 1: Daily local development without losing DB data
 
@@ -118,21 +179,19 @@ Use this when you are coding/testing on your laptop and want Postgres data to st
 1. Start everything:
 
 ```bash
-make docker-up
+make start
 ```
 
 2. Stop safely at end of session (data preserved):
 
 ```bash
-make docker-clean
-# or
-make docker-down
+make stop
 ```
 
 3. Next day, continue from previous DB state:
 
 ```bash
-make docker-up
+make start
 ```
 
 Important: `make docker-clean-all` is destructive. Use it only when you intentionally want a fresh empty database.
@@ -259,7 +318,7 @@ Collect live bot logs unattended, pre-analyse them against all 10 PRS dimensions
 ```bash
 make log-collect              # collect for 60 min (default), then write summary
 make log-collect MINS=5       # quick smoke test — 5 min window
-make log-collect MINS=10 SVC=bot
+make log-collect MINS=10 SVC=sniper-bot
 make log-latest               # print the most recent summary to stdout
 make log-list                 # list all collected session summaries
 ```
@@ -285,7 +344,7 @@ Collect live bot logs unattended, compute production-gate-reviewer evidence, and
 ```bash
 make gate-collect              # collect for 60 min (default), then write brief
 make gate-collect MINS=5       # quick smoke test — 5 min window
-make gate-collect MINS=10 SVC=bot
+make gate-collect MINS=10 SVC=sniper-bot
 make gate-collect MINS=10 MODE=PIPELINE_PROOF   # force review mode
 make gate-latest               # print the most recent gate brief to stdout
 make gate-list                 # list all gate review sessions
@@ -301,7 +360,8 @@ make phase2-proof MINS=30      # collect 30m, then run full Phase 2 acceptance
 
 **Workflow:**
 
-1. Run `make gate-collect` in any terminal — it runs completely unattended.
+0. Ensure the stack is running: `make start` (or already up from a prior session).
+1. Run `make gate-collect MINS=30` in any terminal — it runs completely unattended.
 2. After the window elapses (or you press Ctrl-C), it writes three files to `output/logs/`:
    - `gate_brief_<TIMESTAMP>.txt` — structured gate-review brief (MODE, BLOCKERS, OPERATIONAL EVIDENCE, PRODUCTION DECISION)
    - `gate_evidence_<TIMESTAMP>.json` — machine-readable evidence snapshot
@@ -350,7 +410,7 @@ This analyzes `tests/fixtures/gate_pipeline_proof_pass.log` (synthetic L0→L10 
 To exercise the **real workers** with a known-good injected token (still no Helius):
 
 ```bash
-make docker-up                    # stack running
+make start                        # stack running (sniper + dashboard + db)
 export DATABASE_URL=postgres://...  # or SNIPER_DB_* vars
 make gate-proof-inject            # default mock token
 # optional custom token:

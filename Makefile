@@ -20,13 +20,21 @@ run: serve
 serve:
 	$(GOCMD) run ./sniper-bot/cmd/ serve
 
-# Operator dashboard API (read-only process — Task 8+)
+# ── Operator dashboard API (read-only process — Task 8+)
 .PHONY: dashboard-build dashboard-serve
 dashboard-build:
 	$(GOBUILD) -o bin/dashboard-api ./backend-dashboard/cmd/...
 
 dashboard-serve:
 	$(GOCMD) run ./backend-dashboard/cmd/... serve
+
+# ── Frontend dashboard (Vite dev — port 5174 avoids a2a :5173)
+.PHONY: frontend-dev
+frontend-dev:
+	@test -n "$$DASHBOARD_API_KEY" || (echo "ERROR: export DASHBOARD_API_KEY first" && exit 1)
+	cd frontend-dashboard && VITE_DASHBOARD_API_KEY="$$DASHBOARD_API_KEY" \
+		VITE_DASHBOARD_OPERATOR_ID="$${DASHBOARD_ALLOWED_OPERATORS:-$$DASHBOARD_OPERATOR_ID}" \
+		npm run dev -- --port 5174 --strictPort
 
 # Test
 .PHONY: test
@@ -195,13 +203,33 @@ phase2-proof:
 	@bash scripts/validate_phase2_acceptance.sh
 
 # ── Docker targets ────────────────────────────────────────────────────────────
+# Primary operator entry points:
+#   make start          — build + run all deployable services (alias: make up)
+#   make docker-logs    — follow sniper-bot + dashboard-api + dashboard-ui logs
+#   make gate-collect   — production gate review (default: sniper-bot logs)
 
 # Build and start all services in detached mode (db, migrate, hydrate, sniper-bot, dashboard-*).
-.PHONY: up
+.PHONY: start up
+start: docker-up
+	@echo ""
+	@echo "════════════════════════════════════════════════════════════"
+	@echo "  crypto-sniping-bot — all services running"
+	@echo "════════════════════════════════════════════════════════════"
+	@echo "  Sniper health       http://localhost:$${PORT:-8080}/health"
+	@echo "  Dashboard API       http://localhost:$${DASHBOARD_PORT:-8090}/api/v1/health"
+	@echo "  Dashboard UI        http://localhost:$${DASHBOARD_UI_PORT:-3000}"
+	@echo ""
+	@echo "  make docker-logs                 # follow all app logs"
+	@echo "  make docker-logs GREP=error      # filter log stream"
+	@echo "  make gate-collect MINS=30        # production gate review"
+	@echo "  make stop                        # stop all (DB data preserved)"
+	@echo "════════════════════════════════════════════════════════════"
+
 up: docker-up
 
 # Stop all services (data volume is preserved).
-.PHONY: down
+.PHONY: stop down
+stop: docker-down
 down: docker-down
 
 # Local dashboard dev: Postgres in Docker + API on :8090 + Vite on :5174 (avoids a2a :5173).
@@ -250,10 +278,17 @@ docker-clean:
 docker-clean-all:
 	docker compose down -v
 
-# Tail sniper-bot logs.
+# Tail logs from all long-running deployable services.
+# Optional: GREP=pattern filters the stream; SVC overrides service list.
+LOG_SVCS ?= sniper-bot dashboard-api dashboard-ui
+
 .PHONY: docker-logs
 docker-logs:
-	docker compose logs -f sniper-bot
+ifneq ($(GREP),)
+	docker compose logs -f $(LOG_SVCS) 2>&1 | grep --line-buffered -E "$(GREP)" || true
+else
+	docker compose logs -f $(LOG_SVCS)
+endif
 
 # ── Postgres backup / restore (local + VPS sync) ─────────────────────────────
 
