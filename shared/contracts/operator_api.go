@@ -77,11 +77,20 @@ type AlertBannerDTO struct {
 
 // PipelineStatsResponseDTO is the payload for GET /api/v1/pipeline.
 type PipelineStatsResponseDTO struct {
-	WindowHours       int                 `json:"window_hours"`
-	Chain             string              `json:"chain,omitempty"`
-	Funnel            PipelineFunnelDTO   `json:"funnel"`
-	LayerHeartbeats   []LayerHeartbeatDTO `json:"layer_heartbeats"`
-	ThroughputVerdict string              `json:"throughput_verdict,omitempty"`
+	WindowHours       int                    `json:"window_hours"`
+	Chain             string                 `json:"chain,omitempty"`
+	Funnel            PipelineFunnelDTO        `json:"funnel"`
+	LayerHeartbeats   []LayerHeartbeatDTO      `json:"layer_heartbeats"`
+	ThroughputVerdict string                 `json:"throughput_verdict,omitempty"`
+	ProbePending      *ProbePendingStatsDTO    `json:"probe_pending,omitempty"`
+}
+
+// ProbePendingStatsDTO is queue depth for deferred probe tokens.
+type ProbePendingStatsDTO struct {
+	PendingCount int64 `json:"pending_count"`
+	DueNow       int64 `json:"due_now"`
+	Expired24h   int64 `json:"expired_24h"`
+	Deferred24h  int64 `json:"deferred_24h"`
 }
 
 // PipelineFunnelDTO holds cumulative L0–L10 funnel counts for the pipeline view.

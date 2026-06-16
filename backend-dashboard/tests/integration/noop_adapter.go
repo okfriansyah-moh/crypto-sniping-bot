@@ -41,6 +41,25 @@ func (s *noopAdapter) InsertMarketData(_ context.Context, _ contracts.MarketData
 func (s *noopAdapter) GetMarketData(_ context.Context, _ string) (*contracts.MarketDataDTO, error) {
 	return nil, database.ErrNotFound
 }
+func (s *noopAdapter) GetLatestMarketDataForToken(_ context.Context, _, _ string) (*contracts.MarketDataDTO, error) {
+	return nil, nil
+}
+func (s *noopAdapter) EnqueueProbePending(_ context.Context, _ database.ProbePendingEnqueue) error {
+	return nil
+}
+func (s *noopAdapter) ClaimDueProbePending(_ context.Context, _ int) ([]database.ProbePendingRow, error) {
+	return nil, nil
+}
+func (s *noopAdapter) CompleteProbePending(_ context.Context, _ string) error { return nil }
+func (s *noopAdapter) FailProbePending(_ context.Context, _, _ string, _ int) error {
+	return nil
+}
+func (s *noopAdapter) ExpireStaleProbePending(_ context.Context, _ int) (int64, error) {
+	return 0, nil
+}
+func (s *noopAdapter) GetProbePendingStats(_ context.Context) (*database.ProbePendingStats, error) {
+	return &database.ProbePendingStats{}, nil
+}
 
 func (s *noopAdapter) StartLifecycle(_ context.Context, _ contracts.MarketDataDTO) (string, error) {
 	return "lc-1", nil

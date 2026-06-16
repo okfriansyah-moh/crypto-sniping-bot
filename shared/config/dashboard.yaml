@@ -5,7 +5,8 @@
 dashboard:
   listen_port: 8090
   cors_allowed_origins:
-    - "http://localhost:5173" # Vite dev (frontend-dashboard)
+    - "http://localhost:5173" # Vite default (legacy)
+    - "http://localhost:5175" # Vite dev (frontend-dashboard — make dashboard-dev)
     - "http://localhost:3000"
   poll_interval_seconds: 30
   max_events_per_request: 50

@@ -35,6 +35,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, "pipeline stats unavailable")
 		return
 	}
+	if ps, psErr := operator.BuildProbePendingStats(r.Context(), h.db); psErr == nil {
+		out.ProbePending = ps
+	}
 
 	httputil.WriteJSON(w, http.StatusOK, out)
 }

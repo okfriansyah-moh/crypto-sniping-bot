@@ -99,8 +99,7 @@ WHERE
         dq.decision = 'REJECT'
         OR ($7 AND dq.decision IN ('PASS', 'RISKY_PASS'))
         OR ($9 AND dq.decision = 'SKIP'
-                AND dq.flags @> '["serial_launcher_skipped"]'::jsonb
-                AND COALESCE(md.holder_dist_known, FALSE) = FALSE)
+                AND dq.flags @> '["serial_launcher_skipped:holder_unknown"]'::jsonb)
     )
     AND (
         NOT $8

@@ -15,6 +15,7 @@ import (
 // ─── Mock Adapter ─────────────────────────────────────────────────────────────
 
 type mockAdapter struct {
+	database.ProbePendingQueueStub
 	versions map[string]*database.StrategyVersion
 	runs     map[string]*database.PipelineRun
 	events   []database.Event

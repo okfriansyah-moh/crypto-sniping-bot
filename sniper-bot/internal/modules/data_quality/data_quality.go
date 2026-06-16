@@ -135,6 +135,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	profileName, profile := resolveProfile(mode, m.runtime)
+	slProfile := effectiveSerialLauncherProfile(profile)
 
 	// serialLauncherPendingRiskCheck is set to true when an EXPLORATION/
 	// VERY_EXPLORATION token has passed the non-risk quality gates and is
@@ -246,7 +247,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	// Any non-risk gate fails → return buildSkipResult immediately (SKIP, no event).
 	// Unknown creator in EXPLORATION → SKIP (not a quality failure, not a reject).
 	if m.runtime != nil && m.runtime.Thresholds.MaxCreatorPrevTokenCount > 0 {
-		effectiveMax := profile.MaxCreatorPrevTokenCount
+		effectiveMax := slProfile.MaxCreatorPrevTokenCount
 		usingGlobal := effectiveMax == 0
 		if usingGlobal {
 			effectiveMax = m.runtime.Thresholds.MaxCreatorPrevTokenCount
@@ -260,30 +261,42 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 				rejectReasons = append(rejectReasons, "serial_launcher")
 			} else {
 				// EXPLORATION/VERY_EXPLORATION: check non-risk quality gates.
-				// Social links must be confirmed present.
-				socialLinksOK := !profile.SerialLauncherRequiresSocialLinks ||
+				socialLinksOK := !slProfile.SerialLauncherRequiresSocialLinks ||
 					(in.SocialLinksKnown && in.HasSocialLinks)
-				// Holder count must be confirmed ≥ threshold. Unknown count fails closed
-				// because we cannot verify the token has genuine holder distribution.
-				holderCountOK := profile.SerialLauncherMinHolderCount == 0 ||
-					(in.HolderDistKnown && in.HolderCount >= profile.SerialLauncherMinHolderCount)
+				holderCountOK := slProfile.SerialLauncherMinHolderCount == 0 ||
+					(in.HolderDistKnown && in.HolderCount >= slProfile.SerialLauncherMinHolderCount)
 
 				if !socialLinksOK || !holderCountOK {
-					m.logger.Info("serial_launcher_skip",
-						"token", in.TokenAddress,
-						"chain", in.Chain,
-						"creator", in.CreatorAddress,
-						"creator_count", in.CreatorPrevTokenCount,
-						"effective_max", effectiveMax,
-						"social_links_ok", socialLinksOK,
-						"holder_count_ok", holderCountOK,
-						"mode", profileName,
-					)
-					return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkipped}, profileName), nil
+					if evaluateMomentumOverride(in, slProfile.SerialLauncherMomentumOverride) {
+						serialLauncherPendingRiskCheck = true
+					} else {
+						var skipFlag string
+						switch {
+						case !socialLinksOK:
+							skipFlag = contracts.FlagSerialLauncherSkippedNoSocial
+						case !in.HolderDistKnown:
+							skipFlag = contracts.FlagSerialLauncherSkippedHolderUnknown
+						default:
+							skipFlag = contracts.FlagSerialLauncherSkippedLowHolders
+						}
+						m.logger.Info("serial_launcher_skip",
+							"token", in.TokenAddress,
+							"chain", in.Chain,
+							"creator", in.CreatorAddress,
+							"creator_count", in.CreatorPrevTokenCount,
+							"effective_max", effectiveMax,
+							"social_links_ok", socialLinksOK,
+							"holder_count_ok", holderCountOK,
+							"skip_flag", skipFlag,
+							"mode", profileName,
+						)
+						return buildSkipResult(in, []string{skipFlag}, profileName), nil
+					}
+				} else {
+					// Non-risk gates passed; defer the SerialLauncherMaxRiskScore check
+					// to post-aggregation (riskScore is not yet computed at this point).
+					serialLauncherPendingRiskCheck = true
 				}
-				// Non-risk gates passed; defer the SerialLauncherMaxRiskScore check
-				// to post-aggregation (riskScore is not yet computed at this point).
-				serialLauncherPendingRiskCheck = true
 			}
 		}
 
@@ -306,7 +319,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 					"creator", in.CreatorAddress,
 					"mode", profileName,
 				)
-				return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkipped}, profileName), nil
+				return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkippedHolderUnknown}, profileName), nil
 			}
 		}
 	}
@@ -583,7 +596,10 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	// This block fires only for EXPLORATION/VERY_EXPLORATION tokens that passed
 	// the non-risk quality gates in the pre-check block above.
 	if serialLauncherPendingRiskCheck {
-		maxRisk := profile.SerialLauncherMaxRiskScore
+		maxRisk := slProfile.SerialLauncherMaxRiskScore
+		if slProfile.SerialLauncherMomentumOverride.Enabled && slProfile.SerialLauncherMomentumOverride.MaxRiskScore > 0 {
+			maxRisk = slProfile.SerialLauncherMomentumOverride.MaxRiskScore
+		}
 		if maxRisk > 0 && riskScore >= maxRisk {
 			m.logger.Info("serial_launcher_skip_risk",
 				"token", in.TokenAddress,
@@ -593,7 +609,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 				"max_risk", maxRisk,
 				"mode", profileName,
 			)
-			return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkipped}, profileName), nil
+			return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkippedRisk}, profileName), nil
 		}
 		// All gates passed: add the monitoring flag.
 		// makeDecision will produce PASS or RISKY_PASS based on riskScore;

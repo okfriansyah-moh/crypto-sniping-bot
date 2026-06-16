@@ -165,7 +165,8 @@ func runRescanTick(
 
 		var emitted, skipped int
 		for _, dto := range rows {
-			if err := emitRescanEvent(ctx, adapter, dto, band, bucketTs, versionID); err != nil {
+			hydrated := hydrateRescanDTO(ctx, adapter, dto)
+			if err := emitRescanEvent(ctx, adapter, hydrated, band, bucketTs, versionID); err != nil {
 				// Per-token failure must not abort the band — monitoring-loop-engine skill.
 				logger.Warn("rescan_emit_failed",
 					"token", dto.TokenAddress,
@@ -249,6 +250,38 @@ func emitRescanEvent(
 		return fmt.Errorf("insert_event: %w", err)
 	}
 	return nil
+}
+
+// hydrateRescanDTO merges Known-fields from the latest persisted market_data row.
+func hydrateRescanDTO(ctx context.Context, adapter database.Adapter, dto contracts.MarketDataDTO) contracts.MarketDataDTO {
+	latest, err := adapter.GetLatestMarketDataForToken(ctx, dto.Chain, dto.TokenAddress)
+	if err != nil || latest == nil {
+		return dto
+	}
+	out := dto
+	if latest.HolderDistKnown {
+		out.HolderDistKnown = true
+		out.HolderCount = latest.HolderCount
+		out.Top5HolderPct = latest.Top5HolderPct
+	}
+	if latest.SocialLinksKnown {
+		out.SocialLinksKnown = true
+		out.HasSocialLinks = latest.HasSocialLinks
+	}
+	if latest.TotalSupplyKnown {
+		out.TotalSupplyKnown = true
+		out.TotalSupply = latest.TotalSupply
+	}
+	if latest.CreatorPrevTokenCountKnown {
+		out.CreatorPrevTokenCountKnown = true
+		out.CreatorPrevTokenCount = latest.CreatorPrevTokenCount
+	}
+	if latest.SolanaAuthoritiesKnown {
+		out.SolanaAuthoritiesKnown = true
+		out.MintAuthorityRenounced = latest.MintAuthorityRenounced
+		out.FreezeAuthorityRenounced = latest.FreezeAuthorityRenounced
+	}
+	return out
 }
 
 // resolveEligibility returns the eligibility thresholds for the given

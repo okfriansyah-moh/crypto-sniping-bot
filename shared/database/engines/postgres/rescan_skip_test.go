@@ -7,14 +7,14 @@ import (
 
 // TestRescan_IncludesSkipWhenFlagSetAndProbeFailed verifies that the rescan SQL
 // contains the $9 condition that includes SKIP'd tokens when the
-// serial_launcher_skipped flag is set and holder_dist_known is FALSE.
+// serial_launcher_skipped:holder_unknown flag is set.
 func TestRescan_IncludesSkipWhenFlagSetAndProbeFailed(t *testing.T) {
 	t.Parallel()
 	if !strings.Contains(rescanQuerySQL, "$9 AND dq.decision = 'SKIP'") {
 		t.Error("query must include $9 skip retry condition for SKIP decisions")
 	}
-	if !strings.Contains(rescanQuerySQL, `dq.flags @> '["serial_launcher_skipped"]'::jsonb`) {
-		t.Error("query must filter by serial_launcher_skipped flag in flags JSONB column")
+	if !strings.Contains(rescanQuerySQL, `dq.flags @> '["serial_launcher_skipped:holder_unknown"]'::jsonb`) {
+		t.Error("query must filter by serial_launcher_skipped:holder_unknown flag in flags JSONB column")
 	}
 }
 
@@ -26,7 +26,6 @@ func TestRescan_ExcludesSkipWhenFlagOff(t *testing.T) {
 	if !strings.Contains(rescanQuerySQL, "LIMIT $10") {
 		t.Error("LIMIT must be $10 after adding $9 skip retry param")
 	}
-	// Also verify $9 is referenced before $10 — maintains correct parameter order.
 	idx9 := strings.Index(rescanQuerySQL, "$9")
 	idx10 := strings.Index(rescanQuerySQL, "$10")
 	if idx9 < 0 || idx10 < 0 || idx9 >= idx10 {
@@ -34,12 +33,11 @@ func TestRescan_ExcludesSkipWhenFlagOff(t *testing.T) {
 	}
 }
 
-// TestRescan_ExcludesSkipWithKnownHolderDist verifies that the SKIP retry
-// condition is gated on holder_dist_known=FALSE, so tokens with a known (valid)
-// holder distribution are never re-ingested via the skip-retry path.
+// TestRescan_ExcludesSkipWithKnownHolderDist verifies that generic SKIP retry
+// no longer keys off holder_dist_known on market_data — only the holder_unknown skip flag.
 func TestRescan_ExcludesSkipWithKnownHolderDist(t *testing.T) {
 	t.Parallel()
-	if !strings.Contains(rescanQuerySQL, "COALESCE(md.holder_dist_known, FALSE) = FALSE") {
-		t.Error("query must filter to holder_dist_known=FALSE for skip retry eligibility")
+	if strings.Contains(rescanQuerySQL, "COALESCE(md.holder_dist_known, FALSE) = FALSE") {
+		t.Error("skip retry must not use market_data holder_dist_known; use granular skip flag instead")
 	}
 }

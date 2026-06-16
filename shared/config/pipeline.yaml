@@ -361,6 +361,22 @@ probes:
   # Reduce to 350 if downgrading to Helius free tier (1M credits/month).
   # Set to 0 to disable (unlimited — not recommended).
   max_probes_per_hour: 1200
+  max_probe_credits_per_hour: 2400
+  probe_credit_costs:
+    solana_authorities: 1
+    solana_pumpfun_lp: 1
+    solana_holder_dist: 11
+    solana_metadata: 0
+    solana_creator_reputation: 0
+  rate_limit_buckets:
+    fresh_tokens_per_hour: 0
+    rescan_tokens_per_hour: 0
+  pending_queue:
+    enabled: true
+    drain_interval_seconds: 60
+    max_attempts: 3
+    ttl_hours: 24
+    drain_batch_size: 50
   # batch_accounts: one getMultipleAccounts for mint + bonding curve on new
   # tokens (saves ~1 Helius credit per pump.fun probe vs two getAccountInfo).
   batch_accounts: true
@@ -435,9 +451,9 @@ probes:
 rescan:
   enabled: true
   interval_seconds: 60
-  max_per_band_per_tick: 30
+  max_per_band_per_tick: 10
   skip_open_positions: true
-  include_skipped_for_retry: true # Task 29: retry SKIP'd tokens now that Task 26 fallback makes HolderDistKnown=true ≥90%
+  include_skipped_for_retry: false
   eligibility:
     max_honeypot_score: 0.5
     max_rug_score: 0.65

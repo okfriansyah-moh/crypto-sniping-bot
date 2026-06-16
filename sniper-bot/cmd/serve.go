@@ -139,10 +139,12 @@ func runServer() {
 				"known_token_count", len(cfg.NameDedup.KnownTokens),
 			)
 		}
-		if cfg.Probes.MaxProbesPerHour > 0 {
-			probeWorker.WithProbeRateLimit(cfg.Probes.MaxProbesPerHour)
-			logger.Info("market_probes_rate_limit_enabled",
+		if cfg.Probes.MaxProbesPerHour > 0 || cfg.Probes.MaxProbeCreditsPerHour > 0 {
+			probeWorker.WithProbeBudget(cfg.Probes)
+			logger.Info("market_probes_budget_enabled",
 				"max_probes_per_hour", cfg.Probes.MaxProbesPerHour,
+				"max_probe_credits_per_hour", cfg.Probes.MaxProbeCreditsPerHour,
+				"pending_queue", cfg.Probes.PendingQueue.Enabled,
 			)
 		}
 		if cfg.Probes.BatchAccounts && solanaRPCClient != nil {
@@ -226,6 +228,17 @@ func runServer() {
 			logger.Error("rescan_worker_exited", "error", err)
 		}
 	}()
+
+	if cfg.Probes.PendingQueue.Enabled {
+		go func() {
+			if err := workers.RunProbePendingWorker(ctx, db, cfg, logger); err != nil && err != ctx.Err() {
+				logger.Error("probe_pending_worker_exited", "error", err)
+			}
+		}()
+		logger.Info("probe_pending_worker_enabled",
+			"drain_interval_seconds", cfg.Probes.PendingQueue.DrainIntervalSeconds,
+		)
+	}
 
 	// Latency profile emitter — periodic per-chain profile generator (Phase 4).
 	latencyWorker := workers.NewLatencyWorker(db, cfg, orch.VersionID(), logger)

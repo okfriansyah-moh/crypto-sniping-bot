@@ -28,6 +28,23 @@ type ProbesConfig struct {
 	// Helius free tier — observed rate without filtering is ~65k credits/hr.
 	MaxProbesPerHour int `yaml:"max_probes_per_hour"`
 
+	// MaxProbeCreditsPerHour is a credit-aware ceiling on Helius RPC usage per
+	// rolling hour. When > 0, takes precedence over token-only MaxProbesPerHour
+	// for budget exhaustion decisions. Tokens over budget are enqueued in
+	// probe_pending_queue instead of forwarded to DQ with Known=false.
+	MaxProbeCreditsPerHour int `yaml:"max_probe_credits_per_hour"`
+
+	// ProbeCreditCosts maps probe names to estimated Helius credits per call.
+	// Used when MaxProbeCreditsPerHour > 0.
+	ProbeCreditCosts map[string]int `yaml:"probe_credit_costs"`
+
+	// RateLimitBuckets optionally splits the hourly token budget between fresh
+	// ingest and rescan events. Zero values share the global MaxProbesPerHour pool.
+	RateLimitBuckets ProbeRateLimitBuckets `yaml:"rate_limit_buckets"`
+
+	// PendingQueue configures the DB-backed deferral queue for rate-limited tokens.
+	PendingQueue ProbePendingQueueConfig `yaml:"pending_queue"`
+
 	// BatchAccounts enables a single getMultipleAccounts call for the
 	// solana_authorities (mint) + solana_pumpfun_lp (bonding curve) probes
 	// on new-token ingest events. Saves ~1 Helius credit per pump.fun token
@@ -75,6 +92,21 @@ type ProbesConfig struct {
 
 	// EVMPairReserves configures the Uniswap-V2 getReserves probe.
 	EVMPairReserves EVMPairReservesYAML `yaml:"evm_pair_reserves"`
+}
+
+// ProbeRateLimitBuckets splits probe budget between event sources.
+type ProbeRateLimitBuckets struct {
+	FreshTokensPerHour  int `yaml:"fresh_tokens_per_hour"`
+	RescanTokensPerHour int `yaml:"rescan_tokens_per_hour"`
+}
+
+// ProbePendingQueueConfig configures deferred probe processing.
+type ProbePendingQueueConfig struct {
+	Enabled             bool `yaml:"enabled"`
+	DrainIntervalSeconds int `yaml:"drain_interval_seconds"`
+	MaxAttempts         int  `yaml:"max_attempts"`
+	TTLHours            int  `yaml:"ttl_hours"`
+	DrainBatchSize      int  `yaml:"drain_batch_size"`
 }
 
 // HoneypotSimYAML mirrors probes.HoneypotSimConfig but lives in the
@@ -159,4 +191,34 @@ type SolanaCreatorReputationYAML struct {
 	// env var). Empty string disables the Helius DAS fallback.
 	// NEVER set this field directly in pipeline.yaml — it contains an API key.
 	HeliusRPCURL string `yaml:"-"`
+}
+
+// applyProbesDefaults fills zero-value probe config fields with safe defaults.
+func applyProbesDefaults(p *ProbesConfig) {
+	if p == nil {
+		return
+	}
+	if len(p.ProbeCreditCosts) == 0 {
+		p.ProbeCreditCosts = map[string]int{
+			"solana_authorities":        1,
+			"solana_pumpfun_lp":           1,
+			"solana_holder_dist":          11,
+			"solana_metadata":             0,
+			"solana_creator_reputation":   0,
+			"evm_pair_reserves":           1,
+			"honeypot_sim":                1,
+		}
+	}
+	if p.PendingQueue.DrainIntervalSeconds == 0 {
+		p.PendingQueue.DrainIntervalSeconds = 60
+	}
+	if p.PendingQueue.MaxAttempts == 0 {
+		p.PendingQueue.MaxAttempts = 3
+	}
+	if p.PendingQueue.TTLHours == 0 {
+		p.PendingQueue.TTLHours = 24
+	}
+	if p.PendingQueue.DrainBatchSize == 0 {
+		p.PendingQueue.DrainBatchSize = 50
+	}
 }

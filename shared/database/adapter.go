@@ -69,6 +69,30 @@ type Adapter interface {
 	// GetMarketData retrieves a MarketDataDTO by event ID.
 	GetMarketData(ctx context.Context, eventID string) (*contracts.MarketDataDTO, error)
 
+	// GetLatestMarketDataForToken returns the most recent market_data row for a
+	// chain+token pair. Used by rescan hydration and probe pending retry.
+	// Returns (nil, nil) when not found.
+	GetLatestMarketDataForToken(ctx context.Context, chain, tokenAddress string) (*contracts.MarketDataDTO, error)
+
+	// EnqueueProbePending stores a token deferred because probe budget was exhausted.
+	// Idempotent on pending_id (ON CONFLICT DO NOTHING).
+	EnqueueProbePending(ctx context.Context, req ProbePendingEnqueue) error
+
+	// ClaimDueProbePending atomically claims up to limit rows with due_at <= NOW().
+	ClaimDueProbePending(ctx context.Context, limit int) ([]ProbePendingRow, error)
+
+	// CompleteProbePending marks a deferred row completed after successful re-emission.
+	CompleteProbePending(ctx context.Context, pendingID string) error
+
+	// FailProbePending returns a claimed row to pending or marks it expired.
+	FailProbePending(ctx context.Context, pendingID, errMsg string, maxAttempts int) error
+
+	// ExpireStaleProbePending marks rows older than ttlHours as expired.
+	ExpireStaleProbePending(ctx context.Context, ttlHours int) (int64, error)
+
+	// GetProbePendingStats returns queue depth metrics for the operator dashboard.
+	GetProbePendingStats(ctx context.Context) (*ProbePendingStats, error)
+
 	// GetLatestPoolAddressForToken returns the pool_address from the most recent
 	// market_data row for the given chain and token. Used by the on-chain Solana
 	// pool price client to resolve AMM/bonding-curve accounts without adding
@@ -1064,6 +1088,42 @@ type DLQFilter struct {
 	Consumer string // optional; "" = all consumers
 	Reason   string // optional; "" = all reasons
 	Limit    int    // max rows; 0 = 100
+}
+
+// ProbePendingEnqueue is the input for EnqueueProbePending.
+type ProbePendingEnqueue struct {
+	PendingID     string
+	SourceEventID string
+	TokenAddress  string
+	Chain         string
+	Market        string
+	Priority      int // 0=fresh ingest, 1=pending retry, 2=rescan
+	Payload       contracts.MarketDataDTO
+	EnqueuedAt    time.Time
+	DueAt         time.Time
+}
+
+// ProbePendingRow is a claimed row from probe_pending_queue.
+type ProbePendingRow struct {
+	PendingID     string
+	SourceEventID string
+	TokenAddress  string
+	Chain         string
+	Market        string
+	Priority      int
+	Payload       contracts.MarketDataDTO
+	EnqueuedAt    time.Time
+	DueAt         time.Time
+	AttemptCount  int
+}
+
+// ProbePendingStats is queue depth for the operator dashboard.
+type ProbePendingStats struct {
+	PendingCount int64
+	DueNow       int64
+	Expired24h   int64
+	Completed24h int64
+	Deferred24h  int64
 }
 
 // RescanQuery parameterises the GetTokensForRescan adapter method.

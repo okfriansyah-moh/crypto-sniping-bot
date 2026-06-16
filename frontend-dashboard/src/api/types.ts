@@ -99,12 +99,20 @@ export interface LayerHeartbeatDTO {
   last_seen_at: string;
 }
 
+export interface ProbePendingStatsDTO {
+  pending_count: number;
+  due_now: number;
+  expired_24h: number;
+  deferred_24h: number;
+}
+
 export interface PipelineStatsResponseDTO {
   window_hours: number;
   chain?: string;
   funnel: PipelineFunnelDTO;
   layer_heartbeats: LayerHeartbeatDTO[];
   throughput_verdict?: ThroughputVerdict;
+  probe_pending?: ProbePendingStatsDTO;
 }
 
 export interface PositionRowDTO {

@@ -19,6 +19,7 @@ import (
 	"crypto-sniping-bot/backend-dashboard/internal/api/pipeline"
 	"crypto-sniping-bot/backend-dashboard/internal/api/pnl"
 	"crypto-sniping-bot/backend-dashboard/internal/api/positions"
+	"crypto-sniping-bot/backend-dashboard/internal/api/probepending"
 )
 
 // Deps are shared dependencies for dashboard API route registration.
@@ -37,6 +38,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 	mux.Handle("GET /api/v1/overview", overview.NewHandler(deps.DB, deps.PipelineCfg, deps.StartTime))
 	mux.Handle("GET /api/v1/health", health.NewHandler(deps.DB, deps.PipelineCfg))
 	mux.Handle("GET /api/v1/pipeline", pipeline.NewHandler(deps.DB))
+	mux.Handle("GET /api/v1/probes/pending", probepending.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/positions", positions.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/pnl", pnl.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/dq", dq.NewHandler(deps.DB))

@@ -15,6 +15,7 @@ import (
 // ── minimal stub adapter ──────────────────────────────────────────────────────
 
 type dispatcherStubAdapter struct {
+	database.ProbePendingQueueStub
 	nextEvent *database.Event
 	claimErr  error
 	markErr   error

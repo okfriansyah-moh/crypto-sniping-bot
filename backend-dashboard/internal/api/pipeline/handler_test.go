@@ -28,6 +28,10 @@ func (s *pipelineStubDB) GetPipelineStats(context.Context, int) (*database.Pipel
 	return s.stats, nil
 }
 
+func (s *pipelineStubDB) GetProbePendingStats(context.Context) (*database.ProbePendingStats, error) {
+	return &database.ProbePendingStats{}, nil
+}
+
 func TestHandler_ReturnsPipelineJSON(t *testing.T) {
 	stub := &pipelineStubDB{
 		stats: &database.PipelineStats{

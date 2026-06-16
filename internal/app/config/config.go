@@ -845,6 +845,7 @@ func Load(paths ...string) (*Config, error) {
 
 	// Apply rescan defaults (Phase 10) before validation.
 	applyRescanDefaults(&cfg.Rescan)
+	applyProbesDefaults(&cfg.Probes)
 
 	// Apply operational-mode threshold defaults (docs/plans/2026-06-10-profit-restoration-plan.md Task 1).
 	applyPriorityDefaults(&cfg.Priority)

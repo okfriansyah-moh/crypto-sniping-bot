@@ -36,7 +36,7 @@ func newDashboardTestServer(t *testing.T, db *dashboardFixtureDB) *httptest.Serv
 		GateEvidenceDir:              gateDir,
 		ConfigManifestDir:            configDir,
 		DestructiveConfirmTTLSeconds: 60,
-		CorsAllowedOrigins:           []string{"http://localhost:5174"},
+		CorsAllowedOrigins:           []string{"http://localhost:5175"},
 	}
 
 	pipelineCfg := &config.Config{

@@ -36,7 +36,12 @@ const (
 //	Informational only; not used by downstream layers (token is dropped silently).
 const (
 	FlagSerialLauncherMonitored = "serial_launcher_monitored"
-	FlagSerialLauncherSkipped   = "serial_launcher_skipped"
+	FlagSerialLauncherSkipped   = "serial_launcher_skipped" // legacy; prefer granular flags below
+
+	FlagSerialLauncherSkippedNoSocial      = "serial_launcher_skipped:no_social"
+	FlagSerialLauncherSkippedLowHolders    = "serial_launcher_skipped:low_holders"
+	FlagSerialLauncherSkippedHolderUnknown = "serial_launcher_skipped:holder_unknown"
+	FlagSerialLauncherSkippedRisk          = "serial_launcher_skipped:risk"
 )
 
 // DataQualityDTO carries the pass/reject decision with risk attribution.

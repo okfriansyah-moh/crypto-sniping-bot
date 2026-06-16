@@ -34,9 +34,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/shared/contracts"
 	"crypto-sniping-bot/shared/database"
 	"crypto-sniping-bot/sniper-bot/internal/modules/probes"
@@ -59,13 +59,12 @@ type MarketProbesWorker struct {
 	knownTokens      map[string]struct{} // copycat detection list (lowercase + trimmed)
 	seenNames        sync.Map            // in-process cache: "chain:normalizedName" → struct{}
 
-	// Probe rate limiter — caps Helius RPC HTTP calls per rolling hour.
-	// Tokens over the cap are emitted with Known=false flags; DQ's
-	// fail-closed rules (reject_unknown_social_links etc.) handle them.
-	maxProbesPerHour int        // 0 = unlimited
-	probedThisHour   int64      // atomic counter; reset each hour window
-	hourMu           sync.Mutex // guards hourWindowStart reset
-	hourWindowStart  time.Time  // start of the current one-hour window
+	// Probe rate limiter — caps Helius RPC usage per rolling hour.
+	// Tokens over budget are enqueued in probe_pending_queue instead of
+	// forwarded to DQ with Known=false (false structural rejects).
+	maxProbesPerHour    int         // 0 = unlimited (legacy token cap)
+	probeBudget         *probeBudget // credit-aware budget; nil = disabled
+	pendingQueueEnabled bool
 
 	// Batch account fetch (Task 8): one getMultipleAccounts for authorities +
 	// pumpfun_lp on new-token events.
@@ -116,21 +115,20 @@ func (w *MarketProbesWorker) WithNameDedup(knownTokens []string) *MarketProbesWo
 	return w
 }
 
-// WithProbeRateLimit sets a hard ceiling on the number of tokens that trigger
-// Helius RPC probe calls per rolling one-hour window. When maxPerHour is
-// reached within an hour, additional tokens bypass all probes and are emitted
-// with Known=false flags. The DQ layer's fail-closed rules then reject them
-// without consuming any further Helius credits.
-//
-// Credit math at maxPerHour=350 (Helius free tier, 1M credits/month):
-//
-//	350 × 3 credits × 720 hr = 756k credits/month (probes only)
-//
-// Set maxPerHour=0 to disable rate limiting (unlimited probes).
-// Call this after NewMarketProbesWorker and before registering the worker.
+// WithProbeRateLimit sets a hard ceiling on tokens probed per rolling hour.
+// Prefer WithProbeBudget for credit-aware deferral via probe_pending_queue.
 func (w *MarketProbesWorker) WithProbeRateLimit(maxPerHour int) *MarketProbesWorker {
 	w.maxProbesPerHour = maxPerHour
-	w.hourWindowStart = time.Now()
+	return w
+}
+
+// WithProbeBudget configures credit-aware rate limiting and optional pending queue deferral.
+func (w *MarketProbesWorker) WithProbeBudget(cfg config.ProbesConfig) *MarketProbesWorker {
+	w.maxProbesPerHour = cfg.MaxProbesPerHour
+	w.pendingQueueEnabled = cfg.PendingQueue.Enabled
+	if cfg.MaxProbesPerHour > 0 || cfg.MaxProbeCreditsPerHour > 0 {
+		w.probeBudget = newProbeBudget(cfg)
+	}
 	return w
 }
 
@@ -279,43 +277,37 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	}
 
 	var results []probes.ProbeResult
-	// ── Probe rate limiter ────────────────────────────────────────────────
-	// When maxProbesPerHour > 0, enforce a hard ceiling on Helius RPC HTTP
-	// calls per rolling one-hour window. Tokens over the cap skip all probes
-	// and proceed with Known=false flags — DQ's fail-closed structural rejects
-	// handle them without spending any additional Helius credits.
-	if w.maxProbesPerHour > 0 {
-		// Reset counter at the start of each new hour window.
-		w.hourMu.Lock()
-		if time.Since(w.hourWindowStart) >= time.Hour {
-			w.hourWindowStart = time.Now()
-			atomic.StoreInt64(&w.probedThisHour, 0)
-		}
-		w.hourMu.Unlock()
 
-		count := atomic.AddInt64(&w.probedThisHour, 1)
-		if count > int64(w.maxProbesPerHour) {
-			// Over the hourly cap — emit immediately with Known=false flags.
-			enriched.EventID = contracts.ContentIDFromString(fmt.Sprintf("md_enriched:%s", md.EventID))
-			if err := w.adapter.InsertMarketData(ctx, enriched); err != nil {
-				w.logger.Warn("market_probes_persist_failed",
-					"event_id", enriched.EventID,
-					"trace_id", evt.TraceID,
+	isRescanEvent := strings.HasPrefix(enriched.Transport, "rescan_")
+	if isRescanEvent {
+		w.hydrateEnrichedFromLatest(ctx, &enriched)
+	}
+
+	probeNames := w.enabledProbeNames(isRescanEvent, enriched.Transport)
+	if w.probeBudget != nil && !w.probeBudget.tryConsume(enriched.Transport, probeNames) {
+		if w.pendingQueueEnabled {
+			if err := w.deferProbePending(ctx, enriched, evt); err != nil {
+				w.logger.Warn("probe_pending_enqueue_failed",
+					"event_id", evt.EventID,
+					"token", md.TokenAddress,
 					"error", err,
 				)
+			} else {
+				w.logger.Info("probe_pending_enqueued",
+					"event_id", evt.EventID,
+					"token", md.TokenAddress,
+					"transport", enriched.Transport,
+					"probes_saved", len(w.probes),
+				)
 			}
-			w.logger.Info("pre_probe_rate_limit_skipped",
+		} else {
+			w.logger.Info("pre_probe_rate_limit_deferred_no_queue",
 				"event_id", evt.EventID,
 				"token", md.TokenAddress,
-				"probed_this_hour", count,
-				"max_probes_per_hour", w.maxProbesPerHour,
-				"probes_saved", len(w.probes),
-			)
-			return makeOutputEvent(
-				enriched.EventID, enriched, MarketDataEnrichedEventType,
-				evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+				"transport", enriched.Transport,
 			)
 		}
+		return nil, nil
 	}
 
 	// ── Rescan-aware probe skip ───────────────────────────────────────────
@@ -340,7 +332,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	//
 	// All other probes (metadata, creator_reputation) are HTTP-only (no Helius
 	// credits) so they are not skipped for rescan events.
-	isRescan := strings.HasPrefix(enriched.Transport, "rescan_")
+	isRescan := isRescanEvent
 	// Phase 2 late-rescan bands re-fetch holder distribution for fresh DQ data.
 	isLateRescan := isRescan && (enriched.Transport == "rescan_12h" ||
 		enriched.Transport == "rescan_24h" ||
@@ -493,4 +485,85 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		enriched.EventID, enriched, MarketDataEnrichedEventType,
 		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 	)
+}
+
+func (w *MarketProbesWorker) enabledProbeNames(isRescan bool, transport string) []string {
+	isLateRescan := isRescan && (transport == "rescan_12h" ||
+		transport == "rescan_24h" ||
+		transport == "rescan_36h" ||
+		transport == "rescan_48h")
+	names := make([]string, 0, len(w.probes))
+	for _, p := range w.probes {
+		name := p.Name()
+		if isRescan {
+			if name == "solana_authorities" {
+				continue
+			}
+			if name == "solana_holder_dist" && !isLateRescan {
+				continue
+			}
+			if name == "solana_pumpfun_lp" && w.rescanSkipPumpfunLpPhase2 && isLateRescan {
+				continue
+			}
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func (w *MarketProbesWorker) deferProbePending(
+	ctx context.Context,
+	md contracts.MarketDataDTO,
+	evt *database.Event,
+) error {
+	dueAt := time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
+	if w.probeBudget != nil {
+		dueAt = w.probeBudget.nextHourBoundary()
+	}
+	priority := 0
+	if isRescanTransport(md.Transport) {
+		priority = 2
+	} else if md.Transport == "probe_pending_retry" {
+		priority = 1
+	}
+	pendingID := database.ProbePendingID(evt.EventID, dueAt)
+	return w.adapter.EnqueueProbePending(ctx, database.ProbePendingEnqueue{
+		PendingID:     pendingID,
+		SourceEventID: evt.EventID,
+		TokenAddress:  md.TokenAddress,
+		Chain:         md.Chain,
+		Market:        md.Market,
+		Priority:      priority,
+		Payload:       md,
+		DueAt:         dueAt,
+	})
+}
+
+func (w *MarketProbesWorker) hydrateEnrichedFromLatest(ctx context.Context, md *contracts.MarketDataDTO) {
+	latest, err := w.adapter.GetLatestMarketDataForToken(ctx, md.Chain, md.TokenAddress)
+	if err != nil || latest == nil {
+		return
+	}
+	if latest.HolderDistKnown {
+		md.HolderDistKnown = true
+		md.HolderCount = latest.HolderCount
+		md.Top5HolderPct = latest.Top5HolderPct
+	}
+	if latest.SocialLinksKnown {
+		md.SocialLinksKnown = true
+		md.HasSocialLinks = latest.HasSocialLinks
+	}
+	if latest.TotalSupplyKnown {
+		md.TotalSupplyKnown = true
+		md.TotalSupply = latest.TotalSupply
+	}
+	if latest.CreatorPrevTokenCountKnown {
+		md.CreatorPrevTokenCountKnown = true
+		md.CreatorPrevTokenCount = latest.CreatorPrevTokenCount
+	}
+	if latest.SolanaAuthoritiesKnown {
+		md.SolanaAuthoritiesKnown = true
+		md.MintAuthorityRenounced = latest.MintAuthorityRenounced
+		md.FreezeAuthorityRenounced = latest.FreezeAuthorityRenounced
+	}
 }

@@ -320,6 +320,16 @@ data_quality:
       serial_launcher_requires_social_links: true
       serial_launcher_max_risk_score: 0.45
       serial_launcher_min_holder_count: 25
+      shadow_pipeline_proof: true
+      serial_launcher_momentum_override:
+        enabled: false
+        min_holder_count: 100
+        min_liquidity_usd: 10000
+        max_top5_holder_pct: 0.60
+        require_authorities_renounced: true
+        require_narrative: false
+        min_narrative_score: 6.0
+        max_risk_score: 0.45
 
   # ── Etherscan / BscScan v2 API ────────────────────────────────
   contract_verified_api:

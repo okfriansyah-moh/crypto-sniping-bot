@@ -26,15 +26,19 @@ dashboard-build:
 	$(GOBUILD) -o bin/dashboard-api ./backend-dashboard/cmd/...
 
 dashboard-serve:
-	$(GOCMD) run ./backend-dashboard/cmd/... serve
+	@bash -c 'set -a; source scripts/ensure_env.sh; set +a; \
+		echo "Starting Postgres (if needed)..."; \
+		$(MAKE) postgres; \
+		sleep 2; \
+		SNIPER_DB_HOST=localhost $(GOCMD) run ./backend-dashboard/cmd/... serve'
 
-# ── Frontend dashboard (Vite dev — port 5174 avoids a2a :5173)
+# ── Frontend dashboard (Vite dev — port 5175 avoids a2a :5173/:5174)
 .PHONY: frontend-dev
 frontend-dev:
-	@test -n "$$DASHBOARD_API_KEY" || (echo "ERROR: export DASHBOARD_API_KEY first" && exit 1)
-	cd frontend-dashboard && VITE_DASHBOARD_API_KEY="$$DASHBOARD_API_KEY" \
-		VITE_DASHBOARD_OPERATOR_ID="$${DASHBOARD_ALLOWED_OPERATORS:-$$DASHBOARD_OPERATOR_ID}" \
-		npm run dev -- --port 5174 --strictPort
+	@bash -c 'set -a; source scripts/ensure_env.sh; set +a; \
+		cd frontend-dashboard && VITE_DASHBOARD_API_KEY="$$DASHBOARD_API_KEY" \
+		VITE_DASHBOARD_OPERATOR_ID="$$DASHBOARD_ALLOWED_OPERATORS" \
+		npm run dev -- --port 5175 --strictPort'
 
 # Test
 .PHONY: test
@@ -232,17 +236,18 @@ up: docker-up
 stop: docker-down
 down: docker-down
 
-# Local dashboard dev: Postgres in Docker + API on :8090 + Vite on :5174 (avoids a2a :5173).
+# Local dashboard dev: Postgres in Docker + API on :8090 + Vite on :5175 (avoids a2a :5173/:5174).
 .PHONY: dashboard-dev
 dashboard-dev:
-	@test -n "$$DASHBOARD_API_KEY" || (echo "ERROR: export DASHBOARD_API_KEY first" && exit 1)
-	@test -n "$$SNIPER_DB_PASSWORD" || (echo "ERROR: export SNIPER_DB_PASSWORD for Postgres" && exit 1)
-	@echo "Starting Postgres (if needed), dashboard-api :8090, Vite :5174..."
-	@$(MAKE) postgres
-	@trap 'kill 0' INT TERM; \
-	SNIPER_DB_HOST=localhost $(GOCMD) run ./backend-dashboard/cmd/... serve & \
-	sleep 2; \
-	cd frontend-dashboard && VITE_DASHBOARD_API_KEY="$$DASHBOARD_API_KEY" VITE_DASHBOARD_OPERATOR_ID="$${DASHBOARD_ALLOWED_OPERATORS:-$$DASHBOARD_OPERATOR_ID}" npm run dev -- --port 5174 --strictPort
+	@bash -c 'set -a; source scripts/ensure_env.sh; set +a; \
+		echo "Starting Postgres (if needed), dashboard-api :8090, Vite :5175..."; \
+		$(MAKE) postgres; \
+		trap "kill 0" INT TERM; \
+		SNIPER_DB_HOST=localhost $(GOCMD) run ./backend-dashboard/cmd/... serve & \
+		sleep 2; \
+		cd frontend-dashboard && VITE_DASHBOARD_API_KEY="$$DASHBOARD_API_KEY" \
+		VITE_DASHBOARD_OPERATOR_ID="$$DASHBOARD_ALLOWED_OPERATORS" \
+		npm run dev -- --port 5175 --strictPort'
 
 # Build the Docker image (does not start any services).
 .PHONY: docker-build
@@ -252,7 +257,8 @@ docker-build:
 # Build and start all services in detached mode.
 .PHONY: docker-up
 docker-up:
-	docker compose up --build -d
+	@bash scripts/ensure_env.sh
+	docker compose --env-file .env up --build -d
 
 # Start PostgreSQL only (persistent volume, no bot).
 .PHONY: postgres

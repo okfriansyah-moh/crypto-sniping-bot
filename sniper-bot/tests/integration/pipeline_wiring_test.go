@@ -25,6 +25,7 @@ import (
 // ─── In-Memory Adapter ────────────────────────────────────────────────────────
 
 type memAdapter struct {
+	database.ProbePendingQueueStub
 	mu       sync.Mutex
 	events   []database.Event
 	runs     map[string]*database.PipelineRun

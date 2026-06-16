@@ -19,6 +19,7 @@ import (
 // stubAdapter is a zero-value-safe Adapter stub for worker helper tests.
 // Methods relevant to helpers are overridable via fields.
 type stubAdapter struct {
+	database.ProbePendingQueueStub
 	transitionErr   error
 	lifecycleResult *database.Lifecycle
 	lifecycleErr    error

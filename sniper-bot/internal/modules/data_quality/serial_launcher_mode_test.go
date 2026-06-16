@@ -23,6 +23,20 @@ import (
 	"crypto-sniping-bot/internal/app/config"
 )
 
+func hasSerialLauncherSkipFlag(flags []string) bool {
+	for _, f := range flags {
+		switch f {
+		case contracts.FlagSerialLauncherSkipped,
+			contracts.FlagSerialLauncherSkippedNoSocial,
+			contracts.FlagSerialLauncherSkippedLowHolders,
+			contracts.FlagSerialLauncherSkippedHolderUnknown,
+			contracts.FlagSerialLauncherSkippedRisk:
+			return true
+		}
+	}
+	return false
+}
+
 // runtimeWithSerialLauncherProfiles returns a runtime config with:
 //   - Global MaxCreatorPrevTokenCount=1 (STRICT/BALANCED threshold)
 //   - RejectUnknownCreatorCount=true (mandatory fail-closed for STRICT/BALANCED)
@@ -210,7 +224,7 @@ func TestSerialLauncherMode_ExplorationNoSocialLinks_Skip(t *testing.T) {
 	if out.Decision != contracts.DecisionSkip {
 		t.Errorf("EXPLORATION no social links: want SKIP, got %q", out.Decision)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("EXPLORATION no social links: want serial_launcher_skipped flag, got %v", out.Flags)
 	}
 	if len(out.RejectReasons) != 0 {
@@ -234,7 +248,7 @@ func TestSerialLauncherMode_ExplorationSocialLinksUnknown_Skip(t *testing.T) {
 	if out.Decision != contracts.DecisionSkip {
 		t.Errorf("EXPLORATION social links unknown: want SKIP, got %q", out.Decision)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("EXPLORATION social links unknown: want serial_launcher_skipped flag, got %v", out.Flags)
 	}
 }
@@ -256,7 +270,7 @@ func TestSerialLauncherMode_ExplorationInsufficientHolders_Skip(t *testing.T) {
 	if out.Decision != contracts.DecisionSkip {
 		t.Errorf("EXPLORATION insufficient holders: want SKIP, got %q", out.Decision)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("EXPLORATION insufficient holders: want serial_launcher_skipped flag, got %v", out.Flags)
 	}
 }
@@ -278,7 +292,7 @@ func TestSerialLauncherMode_ExplorationUnknownCreator_Skip(t *testing.T) {
 	if out.Decision != contracts.DecisionSkip {
 		t.Errorf("EXPLORATION unknown creator: want SKIP, got %q", out.Decision)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("EXPLORATION unknown creator: want serial_launcher_skipped flag, got %v", out.Flags)
 	}
 	// SKIP must not have reject reasons.
@@ -308,7 +322,7 @@ func TestSerialLauncherMode_ExplorationBelowEffectiveMax_NormalProcessing(t *tes
 		t.Errorf("EXPLORATION count<threshold: must not have serial_launcher reject reason, got %v", out.RejectReasons)
 	}
 	// Must not have serial_launcher flags.
-	if containsString(out.Flags, contracts.FlagSerialLauncherMonitored) || containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if containsString(out.Flags, contracts.FlagSerialLauncherMonitored) || hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("EXPLORATION count<threshold: must not have serial_launcher flags, got %v", out.Flags)
 	}
 }
@@ -354,7 +368,7 @@ func TestSerialLauncherMode_VeryExplorationInsufficientHolders_Skip(t *testing.T
 	if out.Decision != contracts.DecisionSkip {
 		t.Errorf("VERY_EXPLORATION insufficient holders: want SKIP, got %q", out.Decision)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("VERY_EXPLORATION insufficient holders: want serial_launcher_skipped flag, got %v", out.Flags)
 	}
 }
@@ -571,7 +585,7 @@ func TestSerialLauncherMode_ExplorationGatesUnchangedByTask22Hotfix(t *testing.T
 	if out.Decision != contracts.DecisionSkip {
 		t.Errorf("EXPLORATION must still SKIP for no-social-links after Task 22 hotfix, got %q", out.Decision)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("EXPLORATION: want serial_launcher_skipped flag after hotfix, got %v", out.Flags)
 	}
 }
@@ -607,7 +621,7 @@ func TestSerialLauncherMode_VeryExploration_NoSocialLinks_SkipAfterTask28(t *tes
 		t.Errorf("VERY_EXPLORATION Task28 no-social-links: want SKIP (gate re-enabled), got %q (flags=%v, reasons=%v)",
 			out.Decision, out.Flags, out.RejectReasons)
 	}
-	if !containsString(out.Flags, contracts.FlagSerialLauncherSkipped) {
+	if !hasSerialLauncherSkipFlag(out.Flags) {
 		t.Errorf("VERY_EXPLORATION Task28 no-social-links: want serial_launcher_skipped flag, got %v", out.Flags)
 	}
 }

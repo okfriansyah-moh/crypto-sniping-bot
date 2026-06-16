@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"crypto-sniping-bot/shared/contracts"
 	"crypto-sniping-bot/shared/database"
@@ -219,6 +220,7 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		if err := doMandatoryTransition(ctx, w.adapter, lifecycleID, fromState, "DQ_SKIPPED", "serial_launcher_skip", "dq_worker"); err != nil {
 			return nil, fmt.Errorf("dq_worker: skip_transition: %w", err)
 		}
+		recordDQSkipShadow(ctx, w.adapter, dqDTO, w.logger)
 		return nil, nil // No downstream event — SKIP is silent.
 	}
 
@@ -249,4 +251,31 @@ func (w *DataQualityWorker) Process(ctx context.Context, evt *database.Event) (*
 		dqDTO.EventID, dqDTO, "data_quality_event",
 		evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
 	)
+}
+
+func recordDQSkipShadow(
+	ctx context.Context,
+	adapter database.Adapter,
+	dqDTO contracts.DataQualityDTO,
+	logger *slog.Logger,
+) {
+	shadowID := contracts.ContentIDFromString(dqDTO.TokenLifecycleID + "dq_skip" + dqDTO.EventID)
+	st := database.ShadowTrade{
+		ShadowID:            shadowID,
+		TokenAddress:        dqDTO.TokenAddress,
+		Stage:               "dq_skip",
+		RejectedAt:          time.Now().UTC().Format(time.RFC3339Nano),
+		ObservationComplete: false,
+		Classification:      "pending_skip_fn",
+		VersionID:           dqDTO.VersionID,
+	}
+	if err := adapter.InsertShadowTrade(ctx, st); err != nil {
+		if logger != nil {
+			logger.Warn("dq_skip_shadow_record_failed",
+				"token", dqDTO.TokenAddress,
+				"shadow_id", shadowID,
+				"error", err,
+			)
+		}
+	}
 }

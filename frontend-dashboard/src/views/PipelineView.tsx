@@ -63,6 +63,32 @@ function PipelineContent({ data }: { data: PipelineStatsResponseDTO }) {
       </div>
 
       <div className="card view-section">
+        <h3>Probe pending queue</h3>
+        {data.probe_pending ? (
+          <div className="probe-pending-grid">
+            <div>
+              <div className="label">Pending</div>
+              <div className="count">{data.probe_pending.pending_count}</div>
+            </div>
+            <div>
+              <div className="label">Due now</div>
+              <div className="count">{data.probe_pending.due_now}</div>
+            </div>
+            <div>
+              <div className="label">Deferred (24h)</div>
+              <div className="count">{data.probe_pending.deferred_24h}</div>
+            </div>
+            <div>
+              <div className="label">Expired (24h)</div>
+              <div className="count">{data.probe_pending.expired_24h}</div>
+            </div>
+          </div>
+        ) : (
+          <p className="hint">No probe pending metrics available.</p>
+        )}
+      </div>
+
+      <div className="card view-section">
         <h3>Layer detail (L0 → L10)</h3>
         <div className="table-wrap">
           <table>

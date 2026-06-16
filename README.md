@@ -41,17 +41,22 @@ Three deployable processes run together: **sniper-bot** (pipeline), **dashboard-
 ### 1. First-time setup
 
 ```bash
-cp .env.example .env
-# Edit .env — at minimum: SNIPER_DB_PASSWORD, DASHBOARD_API_KEY, RPC keys, wallets
-```
-
-### 2. Start everything (build + run)
-
-```bash
 make start
 ```
 
-Same as `make up` / `make docker-up`. This brings up:
+That’s it. On first run, `scripts/ensure_env.sh` will:
+
+1. Create `.env` from `.env.example` if missing  
+2. Auto-generate `DASHBOARD_API_KEY` and `SNIPER_DB_PASSWORD` if still placeholders  
+3. Set `DASHBOARD_ALLOWED_OPERATORS=local-operator` if unset  
+
+Secrets are written to `.env` (gitignored). **No `export` commands needed.**
+
+Edit `.env` afterward to add RPC keys, wallets, and Telegram — only when you’re ready for live trading.
+
+### 2. Services and URLs
+
+Same as `make up` / `make docker-up`. `make start` brings up:
 
 | Service | URL | Role |
 |---------|-----|------|
@@ -99,8 +104,7 @@ Use `make docker-clean-all` only when you want a **fresh empty database**.
 Hot-reload dashboard while sniper runs in Docker (or not):
 
 ```bash
-export DASHBOARD_API_KEY=... SNIPER_DB_PASSWORD=...
-make dashboard-dev    # Postgres + API :8090 + Vite :5174
+make dashboard-dev    # loads .env automatically — Postgres + API :8090 + Vite :5175
 ```
 
 Or run components individually:
@@ -109,7 +113,7 @@ Or run components individually:
 make postgres && make migrate-up
 make serve            # sniper only (native Go)
 make dashboard-serve  # API only (:8090)
-make frontend-dev     # Vite only (:5174)
+make frontend-dev     # Vite only (:5175)
 ```
 
 ---
@@ -140,8 +144,8 @@ All common operations are wrapped in `make` targets. Run `make <target>`.
 | `make docker-down` | Stop all services |
 | **`make docker-logs`** | Follow logs: sniper-bot + dashboard-api + dashboard-ui |
 | `make docker-logs GREP=error` | Filter log stream (extended regex) |
-| `make dashboard-dev` | Local dev: Postgres + API :8090 + Vite :5174 |
-| `make frontend-dev` | Vite only on :5174 (API must already be running) |
+| `make dashboard-dev` | Local dev: Postgres + API :8090 + Vite :5175 |
+| `make frontend-dev` | Vite only on :5175 (API must already be running) |
 | `make docker-build` | Build images without starting |
 | `make postgres` | PostgreSQL only |
 | `make docker-clean-all` | Stop **and delete** database volume (destructive) |
