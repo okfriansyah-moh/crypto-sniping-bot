@@ -157,21 +157,63 @@ WHERE pending_id = $1`
 
 // ExpireStaleProbePending marks pending rows older than ttlHours as expired.
 func (d *DB) ExpireStaleProbePending(ctx context.Context, ttlHours int) (int64, error) {
+	rows, err := d.ExpireStaleProbePendingRows(ctx, ttlHours)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(rows)), nil
+}
+
+// ExpireStaleProbePendingRows marks stale rows expired and returns them for re-emission.
+func (d *DB) ExpireStaleProbePendingRows(ctx context.Context, ttlHours int) ([]database.ProbePendingRow, error) {
 	if ttlHours <= 0 {
 		ttlHours = 48
 	}
 	const q = `
 UPDATE probe_pending_queue
 SET status = 'expired', last_error = 'ttl_exceeded'
-WHERE status IN ('pending', 'claimed')
-  AND enqueued_at < NOW() - ($1 * INTERVAL '1 hour')`
+WHERE pending_id IN (
+    SELECT pending_id FROM probe_pending_queue
+    WHERE status IN ('pending', 'claimed')
+      AND enqueued_at < NOW() - ($1 * INTERVAL '1 hour')
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING pending_id, source_event_id, token_address, chain, market,
+          priority, payload, enqueued_at, due_at, attempt_count`
 
-	res, err := d.pool.ExecContext(ctx, q, ttlHours)
+	rows, err := d.pool.QueryContext(ctx, q, ttlHours)
 	if err != nil {
-		return 0, fmt.Errorf("expire stale probe pending: %w", err)
+		return nil, fmt.Errorf("expire stale probe pending rows: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	defer rows.Close()
+
+	var out []database.ProbePendingRow
+	for rows.Next() {
+		var row database.ProbePendingRow
+		var payload []byte
+		if err := rows.Scan(
+			&row.PendingID,
+			&row.SourceEventID,
+			&row.TokenAddress,
+			&row.Chain,
+			&row.Market,
+			&row.Priority,
+			&payload,
+			&row.EnqueuedAt,
+			&row.DueAt,
+			&row.AttemptCount,
+		); err != nil {
+			return nil, fmt.Errorf("expire stale probe pending scan: %w", err)
+		}
+		if err := json.Unmarshal(payload, &row.Payload); err != nil {
+			return nil, fmt.Errorf("expire stale probe pending unmarshal: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("expire stale probe pending rows: %w", err)
+	}
+	return out, nil
 }
 
 // GetProbePendingStats returns queue depth metrics for the operator dashboard.

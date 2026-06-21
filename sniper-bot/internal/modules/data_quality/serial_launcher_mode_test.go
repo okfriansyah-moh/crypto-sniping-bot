@@ -30,6 +30,7 @@ func hasSerialLauncherSkipFlag(flags []string) bool {
 			contracts.FlagSerialLauncherSkippedNoSocial,
 			contracts.FlagSerialLauncherSkippedLowHolders,
 			contracts.FlagSerialLauncherSkippedHolderUnknown,
+			contracts.FlagSerialLauncherSkippedCreatorUnknown,
 			contracts.FlagSerialLauncherSkippedRisk:
 			return true
 		}

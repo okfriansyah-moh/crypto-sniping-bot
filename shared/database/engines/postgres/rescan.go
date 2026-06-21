@@ -99,7 +99,16 @@ WHERE
         dq.decision = 'REJECT'
         OR ($7 AND dq.decision IN ('PASS', 'RISKY_PASS'))
         OR ($9 AND dq.decision = 'SKIP'
-                AND dq.flags @> '["serial_launcher_skipped:holder_unknown"]'::jsonb)
+                AND (
+                    dq.flags @> '["serial_launcher_skipped:holder_unknown"]'::jsonb
+                    OR dq.flags @> '["serial_launcher_skipped:creator_unknown"]'::jsonb
+                    OR dq.flags @> '["serial_launcher_skipped:no_social"]'::jsonb
+                    OR dq.flags @> '["probe_partial:social"]'::jsonb
+                    OR dq.flags @> '["probe_partial:creator"]'::jsonb
+                    OR dq.flags @> '["probe_partial:holder"]'::jsonb
+                    OR dq.flags @> '["probe_partial:supply"]'::jsonb
+                    OR dq.flags @> '["probe_exhausted"]'::jsonb
+                ))
     )
     AND (
         NOT $8

@@ -83,6 +83,9 @@ func (r *probePendingRecorder) FailProbePending(_ context.Context, _, _ string, 
 func (r *probePendingRecorder) ExpireStaleProbePending(_ context.Context, _ int) (int64, error) {
 	return 0, nil
 }
+func (r *probePendingRecorder) ExpireStaleProbePendingRows(_ context.Context, _ int) ([]database.ProbePendingRow, error) {
+	return nil, nil
+}
 func (r *probePendingRecorder) GetProbePendingStats(_ context.Context) (*database.ProbePendingStats, error) {
 	return &database.ProbePendingStats{}, nil
 }

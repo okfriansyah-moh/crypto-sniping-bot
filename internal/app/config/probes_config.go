@@ -92,6 +92,20 @@ type ProbesConfig struct {
 
 	// EVMPairReserves configures the Uniswap-V2 getReserves probe.
 	EVMPairReserves EVMPairReservesYAML `yaml:"evm_pair_reserves"`
+
+	// ProbeCompletion configures sequential reliable probe passes (inline retry,
+	// honest status logging, background probe_pending for incomplete fields).
+	ProbeCompletion ProbeCompletionConfig `yaml:"probe_completion"`
+}
+
+// ProbeCompletionConfig controls mandatory-field completion on the hot path.
+type ProbeCompletionConfig struct {
+	Enabled              bool     `yaml:"enabled"`
+	InlineRetries        int      `yaml:"inline_retries"`
+	InlineRetryMs        int      `yaml:"inline_retry_ms"`
+	BackgroundRetry      bool     `yaml:"background_retry"`
+	MandatoryFields      []string `yaml:"mandatory_fields"`
+	ExemptHolderOnTopics []string `yaml:"exempt_holder_on_topics"`
 }
 
 // ProbeRateLimitBuckets splits probe budget between event sources.
@@ -220,5 +234,16 @@ func applyProbesDefaults(p *ProbesConfig) {
 	}
 	if p.PendingQueue.DrainBatchSize == 0 {
 		p.PendingQueue.DrainBatchSize = 50
+	}
+	if p.ProbeCompletion.Enabled && len(p.ProbeCompletion.MandatoryFields) == 0 {
+		p.ProbeCompletion.MandatoryFields = []string{
+			"social_links", "total_supply", "creator_count", "holder_dist",
+		}
+	}
+	if p.ProbeCompletion.InlineRetryMs == 0 {
+		p.ProbeCompletion.InlineRetryMs = 500
+	}
+	if p.ProbeCompletion.ExemptHolderOnTopics == nil {
+		p.ProbeCompletion.ExemptHolderOnTopics = []string{"PumpFunCreate"}
 	}
 }

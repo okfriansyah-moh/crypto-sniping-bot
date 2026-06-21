@@ -409,6 +409,32 @@ GROUP BY reason
 ORDER BY cnt DESC, reason ASC
 LIMIT 20`
 
+const dqProbeCompletenessSQL = `
+SELECT
+    COALESCE(100.0 * AVG(CASE WHEN holder_dist_known THEN 1.0 ELSE 0.0 END), 0),
+    COALESCE(100.0 * AVG(CASE WHEN lp_stats_known THEN 1.0 ELSE 0.0 END), 0),
+    COALESCE(100.0 * AVG(CASE WHEN COALESCE(creator_address, '') <> '' THEN 1.0 ELSE 0.0 END), 0),
+    COALESCE(100.0 * AVG(CASE WHEN holder_dist_known AND lp_stats_known THEN 1.0 ELSE 0.0 END), 0)
+FROM market_data
+WHERE ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+  AND ($2 = '' OR chain = $2)`
+
+const dqFairChanceSkipSQL = `
+SELECT COUNT(*)
+FROM data_quality
+WHERE decision = 'SKIP'
+  AND created_at >= NOW() - ($1 * INTERVAL '1 hour')
+  AND ($2 = '' OR chain = $2)
+  AND (
+    flags @> '["probe_partial:social"]'::jsonb
+    OR flags @> '["probe_partial:creator"]'::jsonb
+    OR flags @> '["probe_partial:holder"]'::jsonb
+    OR flags @> '["probe_partial:supply"]'::jsonb
+    OR flags @> '["probe_exhausted"]'::jsonb
+    OR flags @> '["no_social_monitored"]'::jsonb
+    OR flags @> '["probe_partial_monitored"]'::jsonb
+  )`
+
 // GetDQBreakdown returns decision histograms and top reject reasons for the
 // operator dashboard DQ view. Read-only.
 func (d *DB) GetDQBreakdown(ctx context.Context, windowHours int, chain string) (*database.DQBreakdown, error) {
@@ -450,6 +476,14 @@ func (d *DB) GetDQBreakdown(ctx context.Context, windowHours int, chain string) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("get dq breakdown reject reasons rows: %w", err)
 	}
+
+	_ = d.pool.QueryRowContext(ctx, dqProbeCompletenessSQL, windowHours, chain).Scan(
+		&out.SocialLinksKnownPct,
+		&out.TotalSupplyKnownPct,
+		&out.CreatorCountKnownPct,
+		&out.HolderDistKnownPct,
+	)
+	_ = d.pool.QueryRowContext(ctx, dqFairChanceSkipSQL, windowHours, chain).Scan(&out.FairChanceSkipCount)
 
 	return out, nil
 }

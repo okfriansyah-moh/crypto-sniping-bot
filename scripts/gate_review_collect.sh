@@ -264,6 +264,11 @@ COUNT_PROBES_COMPLETED=$(count_jq 'select(.msg == "market_probes_completed")')
 COUNT_DQ_PASS=$(count_jq 'select(.msg == "dq_decision" and (.decision == "PASS" or .decision == "RISKY_PASS"))')
 COUNT_DQ_SKIP=$(count_jq 'select(.msg == "dq_decision" and .decision == "SKIP")')
 COUNT_DQ_REJECT=$(count_jq 'select(.msg == "dq_decision" and .decision == "REJECT")')
+COUNT_PROBE_PASS_COMPLETE=$(count_jq 'select(.msg == "market_probes_completed" and .probe_pass_complete == true)')
+COUNT_PROBE_INCOMPLETE_ENQUEUED=$(count_jq 'select(.msg == "market_probes_completed" and .background_retry_enqueued == true)')
+COUNT_PROBE_EXHAUSTED_RETRY=$(count_jq 'select(.msg == "probe_pending_requeued" and .transport == "probe_exhausted_retry")')
+COUNT_UNKNOWN_REJECT=$(jq -r 'select(.msg == "dq_decision" and .decision == "REJECT" and ((.reject_reasons // []) | index("unknown_social_links") or index("unknown_creator_count") or index("unknown_holder_count") or index("unknown_total_supply"))) | .trace_id' "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+COUNT_PROBE_PARTIAL_SKIP=$(count_jq 'select(.msg == "dq_skip" and ((.flags // []) | index("probe_partial:social") or index("probe_partial:creator") or index("probe_partial:holder") or index("probe_partial:supply") or index("probe_exhausted")))')
 # serial_launcher_skipped dominates Helius pump.fun — intentional capital guardrail, not a code defect.
 COUNT_SERIAL_LAUNCHER_SKIP=$(jq -r 'select(.msg == "dq_decision" and (.flags // [] | index("serial_launcher_skipped"))) | .trace_id' "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
 COUNT_SHADOW_OBS_FAIL=$(count_jq 'select(.msg == "shadow_observer_failed")')
@@ -729,6 +734,11 @@ echo "  Throughput metrics (PLAN §1.1):"
 echo "    wsol_token_address_emitted   $WSOL_TOKEN_ADDRESS_EMITTED"
 echo "    ingestion_valid_token_ratio  $INGESTION_VALID_TOKEN_RATIO  ($INGESTION_VALID_COUNT/$COUNT_INGESTION)"
 echo "    market_probes_completed      $COUNT_PROBES_COMPLETED"
+echo "    probe_pass_complete          $COUNT_PROBE_PASS_COMPLETE"
+echo "    probe_incomplete_enqueued    $COUNT_PROBE_INCOMPLETE_ENQUEUED"
+echo "    probe_exhausted_retry        $COUNT_PROBE_EXHAUSTED_RETRY"
+echo "    unknown_star_reject_traces   $COUNT_UNKNOWN_REJECT"
+echo "    probe_partial_skip           $COUNT_PROBE_PARTIAL_SKIP"
 echo "    market_probes_completion     $MARKET_PROBES_COMPLETION_RATIO"
 echo "    market_probes_backlog_ratio  $MARKET_PROBES_BACKLOG_RATIO"
 echo "    dq_pass_or_risky_pass         $COUNT_DQ_PASS"
@@ -848,6 +858,11 @@ HB_RAYDIUM_V4_JSON="null"
   echo "    \"ingestion_emitted\": $COUNT_INGESTION,"
   echo "    \"ingestion_valid_count\": $INGESTION_VALID_COUNT,"
   echo "    \"market_probes_completed\": $COUNT_PROBES_COMPLETED,"
+  echo "    \"probe_pass_complete\": $COUNT_PROBE_PASS_COMPLETE,"
+  echo "    \"probe_incomplete_enqueued\": $COUNT_PROBE_INCOMPLETE_ENQUEUED,"
+  echo "    \"probe_exhausted_retry\": $COUNT_PROBE_EXHAUSTED_RETRY,"
+  echo "    \"unknown_star_reject_traces\": $COUNT_UNKNOWN_REJECT,"
+  echo "    \"probe_partial_skip\": $COUNT_PROBE_PARTIAL_SKIP,"
   echo "    \"market_probes_completion_ratio\": \"$MARKET_PROBES_COMPLETION_RATIO\","
   echo "    \"market_probes_backlog_ratio\": \"$MARKET_PROBES_BACKLOG_RATIO\","
   echo "    \"dq_pass_or_risky_pass\": $COUNT_DQ_PASS,"

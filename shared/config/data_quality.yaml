@@ -321,6 +321,9 @@ data_quality:
       serial_launcher_max_risk_score: 0.45
       serial_launcher_min_holder_count: 25
       shadow_pipeline_proof: true
+      no_social_monitoring:
+        enabled: true
+        require_all_other_mandatory_known: true
       serial_launcher_momentum_override:
         enabled: false
         min_holder_count: 100

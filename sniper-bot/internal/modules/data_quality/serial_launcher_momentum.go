@@ -36,9 +36,10 @@ func evaluateMomentumOverride(in contracts.MarketDataDTO, cfg config.SerialLaunc
 	return true
 }
 
-// effectiveSerialLauncherProfile applies shadow pipeline proof relaxation when enabled.
-func effectiveSerialLauncherProfile(profile config.DataQualityModeProfile) config.DataQualityModeProfile {
-	if !profile.ShadowPipelineProof {
+// effectiveSerialLauncherProfile applies shadow pipeline proof relaxation only
+// when shadow_mode is active (PIPELINE_PROOF / shadow runs).
+func effectiveSerialLauncherProfile(profile config.DataQualityModeProfile, shadowMode bool) config.DataQualityModeProfile {
+	if !profile.ShadowPipelineProof || !shadowMode {
 		return profile
 	}
 	relaxed := profile

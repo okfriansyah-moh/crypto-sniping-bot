@@ -3,6 +3,7 @@ package probes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,8 +215,8 @@ func TestSolanaCreatorReputation_EmptyCreatorAddressSkipped(t *testing.T) {
 		CreatorAddress: "", // blank
 	}
 	out, err := p.Probe(context.Background(), in)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrSkippedEmptyCreator) {
+		t.Fatalf("want ErrSkippedEmptyCreator, got err=%v", err)
 	}
 	if out.CreatorPrevTokenCountKnown {
 		t.Fatal("probe must skip DTO with empty CreatorAddress")

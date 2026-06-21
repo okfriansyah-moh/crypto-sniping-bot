@@ -60,6 +60,31 @@ function DQContent({ data }: { data: DQBreakdownResponseDTO }) {
     <>
       <div className="grid grid-3 view-section">
         <div className="card">
+          <h3>Probe completeness ({data.window_hours}h)</h3>
+          <ul className="reject-reason-list">
+            <li>
+              <span className="mono">holder_dist_known</span>
+              <span>{formatPct(data.holder_dist_known_pct ?? 0)}</span>
+            </li>
+            <li>
+              <span className="mono">lp_stats_known (supply proxy)</span>
+              <span>{formatPct(data.total_supply_known_pct ?? 0)}</span>
+            </li>
+            <li>
+              <span className="mono">creator_address set</span>
+              <span>{formatPct(data.creator_count_known_pct ?? 0)}</span>
+            </li>
+          </ul>
+        </div>
+        <div className="card">
+          <h3>Fair-chance SKIPs</h3>
+          <div className="value">{(data.fair_chance_skip_count ?? 0).toLocaleString()}</div>
+          <div className="hint">probe_partial / probe_exhausted / monitored flags</div>
+        </div>
+      </div>
+
+      <div className="grid grid-3 view-section">
+        <div className="card">
           <h3>Decisions ({data.window_hours}h)</h3>
           <div className="value">{data.total_decisions.toLocaleString()}</div>
           <div className="hint">

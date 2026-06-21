@@ -161,6 +161,13 @@ func runServer() {
 				"rescan_skip_pumpfun_lp_phase2", cfg.Probes.RescanSkipPumpfunLpPhase2,
 			)
 		}
+		if cfg.Probes.ProbeCompletion.Enabled {
+			probeWorker.WithProbeCompletion(cfg.Probes.ProbeCompletion, &cfg.DataQualityRuntime)
+			logger.Info("market_probes_completion_enabled",
+				"inline_retries", cfg.Probes.ProbeCompletion.InlineRetries,
+				"background_retry", cfg.Probes.ProbeCompletion.BackgroundRetry,
+			)
+		}
 		orch.RegisterStage(
 			"market_probes_worker",
 			probeWorker,

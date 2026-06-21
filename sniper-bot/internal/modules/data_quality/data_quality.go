@@ -135,7 +135,8 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	profileName, profile := resolveProfile(mode, m.runtime)
-	slProfile := effectiveSerialLauncherProfile(profile)
+	shadowMode := m.runtime != nil && m.runtime.Providers.ShadowMode
+	slProfile := effectiveSerialLauncherProfile(profile, shadowMode)
 
 	// serialLauncherPendingRiskCheck is set to true when an EXPLORATION/
 	// VERY_EXPLORATION token has passed the non-risk quality gates and is
@@ -274,6 +275,8 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 						switch {
 						case !socialLinksOK:
 							skipFlag = contracts.FlagSerialLauncherSkippedNoSocial
+						case !in.HolderDistKnown && in.CreatorAddress == "":
+							skipFlag = contracts.FlagSerialLauncherSkippedCreatorUnknown
 						case !in.HolderDistKnown:
 							skipFlag = contracts.FlagSerialLauncherSkippedHolderUnknown
 						default:
@@ -319,7 +322,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 					"creator", in.CreatorAddress,
 					"mode", profileName,
 				)
-				return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkippedHolderUnknown}, profileName), nil
+				return buildSkipResult(in, []string{contracts.FlagSerialLauncherSkippedCreatorUnknown}, profileName), nil
 			}
 		}
 	}
@@ -723,6 +726,17 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	sort.Strings(rejectReasons)
 	flags = dedupSorted(flags)
 	sort.Strings(flags)
+
+	// Fair DQ: EXPLORATION+ unknown fields → SKIP/rescan or monitored RISKY_PASS.
+	if m.runtime != nil {
+		thresholds := m.runtime.Thresholds
+		rejectReasons, flags = applyNoSocialMonitoring(mode, in, rejectReasons, flags, profile.NoSocialMonitoring, thresholds)
+		var fairSkip bool
+		in, flags, rejectReasons, fairSkip = applyFairUnknownEvaluation(mode, in, isNewLaunch, flags, rejectReasons, profile)
+		if fairSkip {
+			return buildSkipResult(in, flags, profileName), nil
+		}
+	}
 
 	// ── Decision ───────────────────────────────────────────────────────
 	decision := makeDecision(riskScore, hardReject, profile)

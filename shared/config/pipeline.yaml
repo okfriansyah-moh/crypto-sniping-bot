@@ -445,6 +445,19 @@ probes:
     max_body_bytes: 131072 # 128 KiB
     page_limit: 50
 
+  probe_completion:
+    enabled: true
+    inline_retries: 2
+    inline_retry_ms: 500
+    background_retry: true
+    mandatory_fields:
+      - social_links
+      - total_supply
+      - creator_count
+      - holder_dist
+    exempt_holder_on_topics:
+      - PumpFunCreate
+
 # Phase 10 — time-banded rescan worker (Layer 0.5).
 # Enabled by default for Phase 10+ pipelines.
 # See docs/plans/2026-06-10-profit-restoration-plan.md for full design rationale.
@@ -453,7 +466,7 @@ rescan:
   interval_seconds: 60
   max_per_band_per_tick: 10
   skip_open_positions: true
-  include_skipped_for_retry: false
+  include_skipped_for_retry: true
   eligibility:
     max_honeypot_score: 0.5
     max_rug_score: 0.65

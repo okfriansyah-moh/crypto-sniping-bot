@@ -218,6 +218,14 @@ func (m *Module) recordEmitTelemetry(dto *contracts.MarketDataDTO) {
 	}
 }
 
+// txFeePayer returns the first account key (fee payer) when present.
+func txFeePayer(tx *TransactionResult) string {
+	if tx == nil || len(tx.AccountKeys) == 0 {
+		return ""
+	}
+	return tx.AccountKeys[0]
+}
+
 // applyCreatorGuard enforces that dto.CreatorAddress is never a known pump.fun
 // factory program ID. When a factory program is detected, it is replaced with
 // fallback (when valid) or cleared. Telemetry counters are incremented and a
@@ -839,7 +847,7 @@ func (m *Module) processNotification(
 				dtoNilSkip.Add(1)
 				continue
 			}
-			m.applyCreatorGuard(dto, "")
+			m.applyCreatorGuard(dto, txFeePayer(tx))
 			if m.applySystemMintReject(dto) {
 				continue
 			}

@@ -154,6 +154,11 @@ export interface DQBreakdownResponseDTO {
   skip_count: number;
   pass_rate_pct: number;
   top_reject_reasons: DQRejectReasonDTO[];
+  social_links_known_pct?: number;
+  total_supply_known_pct?: number;
+  creator_count_known_pct?: number;
+  holder_dist_known_pct?: number;
+  fair_chance_skip_count?: number;
 }
 
 export interface GateCriterionDTO {

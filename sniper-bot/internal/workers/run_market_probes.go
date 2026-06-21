@@ -30,6 +30,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -77,6 +78,9 @@ type MarketProbesWorker struct {
 	batchAuthoritiesTimeoutMs int
 	batchPumpfunLpTimeoutMs   int
 	batchCommitment           string
+
+	probeCompletion config.ProbeCompletionConfig
+	dqRuntime       *config.DataQualityRuntimeConfig
 }
 
 // NewMarketProbesWorker constructs a worker. Pass nil/empty `probeList`
@@ -129,6 +133,13 @@ func (w *MarketProbesWorker) WithProbeBudget(cfg config.ProbesConfig) *MarketPro
 	if cfg.MaxProbesPerHour > 0 || cfg.MaxProbeCreditsPerHour > 0 {
 		w.probeBudget = newProbeBudget(cfg)
 	}
+	return w
+}
+
+// WithProbeCompletion wires mandatory-field completion (inline retry + background queue).
+func (w *MarketProbesWorker) WithProbeCompletion(pc config.ProbeCompletionConfig, dq *config.DataQualityRuntimeConfig) *MarketProbesWorker {
+	w.probeCompletion = pc
+	w.dqRuntime = dq
 	return w
 }
 
@@ -344,9 +355,8 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		if enriched.SolanaAuthoritiesKnown {
 			rescanSkipProbes["solana_authorities"] = true
 		}
-		// Skip holder distribution for Phase 1 bands (15m–8h) only.
-		// Phase 2 bands (12h–48h) re-fetch for fresh whale accumulation data.
-		if !isLateRescan {
+		// Skip holder distribution for Phase 1 bands unless fair-chance retry forces it.
+		if !isLateRescan && !shouldForceHolderProbeOnRescan(enriched.Transport, enriched) {
 			rescanSkipProbes["solana_holder_dist"] = true
 		}
 		if w.rescanSkipPumpfunLpPhase2 && isLateRescan {
@@ -414,27 +424,25 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 			)
 			continue
 		}
-		start := time.Now()
-		out, err := p.Probe(ctx, enriched)
-		dur := time.Since(start).Milliseconds()
-		res := probes.ProbeResult{
-			ProbeName:  p.Name(),
-			Success:    err == nil,
-			DurationMs: dur,
-		}
-		if err != nil {
-			res.Error = err.Error()
-			w.logger.Warn("market_probe_failed",
-				"probe", p.Name(),
+		var res probes.ProbeResult
+		enriched, res = w.runSingleProbe(ctx, p, enriched, evt)
+		results = append(results, res)
+	}
+
+	missing := mandatoryKnownMissing(enriched, w.probeCompletion, w.dqRuntime)
+	passComplete := probePassComplete(missing)
+	backgroundEnqueued := false
+	if w.probeCompletion.Enabled && w.probeCompletion.BackgroundRetry && len(missing) > 0 && w.pendingQueueEnabled {
+		if err := w.deferProbeIncomplete(ctx, enriched, evt, missing); err != nil {
+			w.logger.Warn("probe_incomplete_enqueue_failed",
 				"event_id", evt.EventID,
-				"trace_id", evt.TraceID,
-				"version_id", evt.VersionID,
+				"token", enriched.TokenAddress,
+				"missing", missing,
 				"error", err,
 			)
 		} else {
-			enriched = out
+			backgroundEnqueued = true
 		}
-		results = append(results, res)
 	}
 
 	// Log aggregate probe results so timing data is observable.
@@ -449,12 +457,22 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 		"has_social_links", enriched.HasSocialLinks,
 		"creator_count_known", enriched.CreatorPrevTokenCountKnown,
 		"total_supply_known", enriched.TotalSupplyKnown,
+		"holder_dist_known", enriched.HolderDistKnown,
+		"missing_known_fields", missing,
+		"probe_pass_complete", passComplete,
+		"background_retry_enqueued", backgroundEnqueued,
 	)
 	for _, r := range results {
 		probeAttrs = append(probeAttrs,
 			"probe."+r.ProbeName+".ok", r.Success,
 			"probe."+r.ProbeName+".ms", r.DurationMs,
 		)
+		if r.SkipReason != "" {
+			probeAttrs = append(probeAttrs, "probe."+r.ProbeName+".skip_reason", r.SkipReason)
+		}
+		if r.Error != "" {
+			probeAttrs = append(probeAttrs, "probe."+r.ProbeName+".error", r.Error)
+		}
 	}
 	w.logger.Info("market_probes_completed", probeAttrs...)
 
@@ -499,7 +517,7 @@ func (w *MarketProbesWorker) enabledProbeNames(isRescan bool, transport string) 
 			if name == "solana_authorities" {
 				continue
 			}
-			if name == "solana_holder_dist" && !isLateRescan {
+			if name == "solana_holder_dist" && !isLateRescan && !shouldForceHolderProbeOnRescan(transport, contracts.MarketDataDTO{Transport: transport}) {
 				continue
 			}
 			if name == "solana_pumpfun_lp" && w.rescanSkipPumpfunLpPhase2 && isLateRescan {
@@ -516,14 +534,32 @@ func (w *MarketProbesWorker) deferProbePending(
 	md contracts.MarketDataDTO,
 	evt *database.Event,
 ) error {
+	return w.enqueueProbePending(ctx, md, evt, 0)
+}
+
+func (w *MarketProbesWorker) deferProbeIncomplete(
+	ctx context.Context,
+	md contracts.MarketDataDTO,
+	evt *database.Event,
+	_ []string,
+) error {
+	return w.enqueueProbePending(ctx, md, evt, 1)
+}
+
+func (w *MarketProbesWorker) enqueueProbePending(
+	ctx context.Context,
+	md contracts.MarketDataDTO,
+	evt *database.Event,
+	priorityBoost int,
+) error {
 	dueAt := time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
 	if w.probeBudget != nil {
 		dueAt = w.probeBudget.nextHourBoundary()
 	}
-	priority := 0
+	priority := priorityBoost
 	if isRescanTransport(md.Transport) {
 		priority = 2
-	} else if md.Transport == "probe_pending_retry" {
+	} else if md.Transport == "probe_pending_retry" || md.Transport == "probe_exhausted_retry" {
 		priority = 1
 	}
 	pendingID := database.ProbePendingID(evt.EventID, dueAt)
@@ -537,6 +573,118 @@ func (w *MarketProbesWorker) deferProbePending(
 		Payload:       md,
 		DueAt:         dueAt,
 	})
+}
+
+func (w *MarketProbesWorker) runSingleProbe(
+	ctx context.Context,
+	p probes.MarketProbe,
+	enriched contracts.MarketDataDTO,
+	evt *database.Event,
+) (contracts.MarketDataDTO, probes.ProbeResult) {
+	retries := inlineRetryCount(w.probeCompletion)
+	delay := inlineRetryDelay(w.probeCompletion)
+	before := snapshotKnownForProbe(enriched, p.Name())
+
+	var lastRes probes.ProbeResult
+	for attempt := 0; attempt <= retries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				lastRes.Error = ctx.Err().Error()
+				return enriched, lastRes
+			case <-time.After(delay):
+			}
+		}
+		start := time.Now()
+		out, err := p.Probe(ctx, enriched)
+		dur := time.Since(start).Milliseconds()
+		res := probes.ProbeResult{ProbeName: p.Name(), DurationMs: dur}
+
+		if errors.Is(err, probes.ErrSkippedEmptyCreator) {
+			res.Success = false
+			res.SkipReason = "skipped_empty_creator"
+			w.logger.Debug("market_probe_noop",
+				"probe", p.Name(),
+				"event_id", evt.EventID,
+				"skip_reason", res.SkipReason,
+			)
+			return enriched, res
+		}
+		if err != nil {
+			res.Success = false
+			res.Error = err.Error()
+			lastRes = res
+			if attempt < retries {
+				continue
+			}
+			w.logger.Warn("market_probe_failed",
+				"probe", p.Name(),
+				"event_id", evt.EventID,
+				"trace_id", evt.TraceID,
+				"version_id", evt.VersionID,
+				"error", err,
+				"attempts", attempt+1,
+			)
+			return enriched, res
+		}
+
+		enriched = out
+		if probeKnownImproved(before, enriched, p.Name()) || dur > 0 {
+			res.Success = true
+			return enriched, res
+		}
+		res.Success = false
+		res.SkipReason = "no_known_change"
+		lastRes = res
+		if attempt < retries {
+			continue
+		}
+		return enriched, res
+	}
+	return enriched, lastRes
+}
+
+func snapshotKnownForProbe(md contracts.MarketDataDTO, probeName string) knownSnapshot {
+	switch probeName {
+	case "solana_metadata":
+		return knownSnapshot{social: md.SocialLinksKnown}
+	case "solana_creator_reputation":
+		return knownSnapshot{creator: md.CreatorPrevTokenCountKnown}
+	case "solana_pumpfun_lp":
+		return knownSnapshot{supply: md.TotalSupplyKnown, lp: md.LpStatsKnown}
+	case "solana_holder_dist":
+		return knownSnapshot{holder: md.HolderDistKnown}
+	case "solana_authorities":
+		return knownSnapshot{authorities: md.SolanaAuthoritiesKnown}
+	default:
+		return knownSnapshot{}
+	}
+}
+
+type knownSnapshot struct {
+	social      bool
+	creator     bool
+	supply      bool
+	lp          bool
+	holder      bool
+	authorities bool
+}
+
+func probeKnownImproved(before knownSnapshot, after contracts.MarketDataDTO, probeName string) bool {
+	switch probeName {
+	case "solana_metadata":
+		return !before.social && after.SocialLinksKnown
+	case "solana_creator_reputation":
+		return !before.creator && after.CreatorPrevTokenCountKnown
+	case "solana_pumpfun_lp":
+		return (!before.supply && after.TotalSupplyKnown) || (!before.lp && after.LpStatsKnown)
+	case "solana_holder_dist":
+		return !before.holder && after.HolderDistKnown
+	case "solana_authorities":
+		return !before.authorities && after.SolanaAuthoritiesKnown
+	default:
+		return true
+	}
 }
 
 func (w *MarketProbesWorker) hydrateEnrichedFromLatest(ctx context.Context, md *contracts.MarketDataDTO) {

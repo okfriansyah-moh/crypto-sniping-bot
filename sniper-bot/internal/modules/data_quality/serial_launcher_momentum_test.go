@@ -51,7 +51,7 @@ func TestEffectiveSerialLauncherProfile_ShadowPipelineProof(t *testing.T) {
 		SerialLauncherMinHolderCount:      25,
 		ShadowPipelineProof:               true,
 	}
-	got := effectiveSerialLauncherProfile(profile)
+	got := effectiveSerialLauncherProfile(profile, true)
 	if got.SerialLauncherRequiresSocialLinks {
 		t.Error("shadow_pipeline_proof should disable social links requirement")
 	}

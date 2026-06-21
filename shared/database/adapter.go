@@ -90,6 +90,9 @@ type Adapter interface {
 	// ExpireStaleProbePending marks rows older than ttlHours as expired.
 	ExpireStaleProbePending(ctx context.Context, ttlHours int) (int64, error)
 
+	// ExpireStaleProbePendingRows marks stale rows expired and returns them for fair-chance re-emission.
+	ExpireStaleProbePendingRows(ctx context.Context, ttlHours int) ([]ProbePendingRow, error)
+
 	// GetProbePendingStats returns queue depth metrics for the operator dashboard.
 	GetProbePendingStats(ctx context.Context) (*ProbePendingStats, error)
 
@@ -748,6 +751,11 @@ type DQBreakdown struct {
 	SkipCount        int64
 	PassRatePct      float64
 	TopRejectReasons []DQRejectReasonCount
+	SocialLinksKnownPct  float64
+	TotalSupplyKnownPct  float64
+	CreatorCountKnownPct float64
+	HolderDistKnownPct   float64
+	FairChanceSkipCount  int64
 }
 
 // CapRecentEventsLimit bounds operator activity feed page size (§7.6 security).

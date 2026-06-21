@@ -42,6 +42,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -53,6 +54,9 @@ import (
 
 	"crypto-sniping-bot/shared/contracts"
 )
+
+// ErrSkippedEmptyCreator signals the creator probe was a no-op (empty creator).
+var ErrSkippedEmptyCreator = errors.New("probes/creator_reputation: skipped_empty_creator")
 
 const (
 	// defaultCreatorBaseURL is the pump.fun public creator API (v3 subdomain).
@@ -299,7 +303,7 @@ func (p *SolanaCreatorReputationProbe) Probe(
 		return in, nil
 	}
 	if in.CreatorAddress == "" {
-		return in, nil
+		return in, ErrSkippedEmptyCreator
 	}
 
 	if err := p.validateBaseURL(p.cfg.BaseURL); err != nil {

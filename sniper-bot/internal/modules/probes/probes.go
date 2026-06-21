@@ -59,4 +59,5 @@ type ProbeResult struct {
 	Success    bool
 	DurationMs int64
 	Error      string
+	SkipReason string // non-empty when probe was a no-op (not a real fetch)
 }

@@ -60,8 +60,11 @@ func BatchAccountRequestFor(in contracts.MarketDataDTO, authoritiesEnabled, pump
 	if authoritiesEnabled && !in.SolanaAuthoritiesKnown {
 		req.Mint = strings.TrimSpace(in.TokenAddress)
 	}
+	if pumpfunLpEnabled && isPumpfunAMMMarket(in.Market) && !in.TotalSupplyKnown && req.Mint == "" {
+		req.Mint = strings.TrimSpace(in.TokenAddress)
+	}
 	if pumpfunLpEnabled &&
-		strings.HasPrefix(strings.ToLower(in.Market), "solana-pumpfun") &&
+		isPumpfunBondingCurveMarket(in.Market) &&
 		!in.LpStatsKnown {
 		req.Pool = strings.TrimSpace(in.PoolAddress)
 	}
@@ -116,12 +119,42 @@ func ApplyBatchAccounts(ctx context.Context, in contracts.MarketDataDTO, res *Ba
 			out = enriched
 		}
 	}
-	if pumpfunLpEnabled && res.Pool != nil {
+	if pumpfunLpEnabled && res.Pool != nil && isPumpfunBondingCurveMarket(in.Market) {
 		if enriched, ok := enrichPumpfunLpFromAccount(ctx, out, res.Pool, solUsd); ok {
 			out = enriched
 		}
 	}
+	if pumpfunLpEnabled && isPumpfunAMMMarket(in.Market) && !out.TotalSupplyKnown && res.Mint != nil {
+		if enriched, ok := enrichAMMSupplyFromMint(out, res.Mint); ok {
+			out = enriched
+		}
+	}
 	return out
+}
+
+func enrichAMMSupplyFromMint(in contracts.MarketDataDTO, acc *SolanaAccountData) (contracts.MarketDataDTO, bool) {
+	if acc == nil {
+		return in, false
+	}
+	raw, err := base64.StdEncoding.DecodeString(acc.DataB64)
+	if err != nil {
+		return in, false
+	}
+	state, err := DecodeSPLMint(raw)
+	if err != nil || state.Supply == 0 {
+		return in, false
+	}
+	divisor := pumpfunTokenDecimals
+	if state.Decimals > 0 {
+		divisor = 1.0
+		for i := 0; i < int(state.Decimals); i++ {
+			divisor *= 10
+		}
+	}
+	out := in
+	out.TotalSupply = float64(state.Supply) / divisor
+	out.TotalSupplyKnown = true
+	return out, true
 }
 
 func enrichAuthoritiesFromAccount(in contracts.MarketDataDTO, acc *SolanaAccountData) (contracts.MarketDataDTO, bool) {

@@ -39,15 +39,20 @@ func BuildDQBreakdown(
 	}
 
 	return &contracts.DQBreakdownResponseDTO{
-		WindowHours:      raw.WindowHours,
-		Chain:            raw.Chain,
-		TotalDecisions:   raw.TotalDecisions,
-		PassCount:        raw.PassCount,
-		RiskyPassCount:   raw.RiskyPassCount,
-		RejectCount:      raw.RejectCount,
-		SkipCount:        raw.SkipCount,
-		PassRatePct:      raw.PassRatePct,
-		TopRejectReasons: reasons,
+		WindowHours:          raw.WindowHours,
+		Chain:                raw.Chain,
+		TotalDecisions:       raw.TotalDecisions,
+		PassCount:            raw.PassCount,
+		RiskyPassCount:       raw.RiskyPassCount,
+		RejectCount:          raw.RejectCount,
+		SkipCount:            raw.SkipCount,
+		PassRatePct:          raw.PassRatePct,
+		TopRejectReasons:     reasons,
+		SocialLinksKnownPct:  raw.SocialLinksKnownPct,
+		TotalSupplyKnownPct:  raw.TotalSupplyKnownPct,
+		CreatorCountKnownPct: raw.CreatorCountKnownPct,
+		HolderDistKnownPct:   raw.HolderDistKnownPct,
+		FairChanceSkipCount:  raw.FairChanceSkipCount,
 	}, nil
 }
 

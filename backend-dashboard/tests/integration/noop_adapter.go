@@ -57,6 +57,9 @@ func (s *noopAdapter) FailProbePending(_ context.Context, _, _ string, _ int) er
 func (s *noopAdapter) ExpireStaleProbePending(_ context.Context, _ int) (int64, error) {
 	return 0, nil
 }
+func (s *noopAdapter) ExpireStaleProbePendingRows(_ context.Context, _ int) ([]database.ProbePendingRow, error) {
+	return nil, nil
+}
 func (s *noopAdapter) GetProbePendingStats(_ context.Context) (*database.ProbePendingStats, error) {
 	return &database.ProbePendingStats{}, nil
 }

@@ -157,6 +157,12 @@ type DQBreakdownResponseDTO struct {
 	SkipCount        int64               `json:"skip_count"`
 	PassRatePct      float64             `json:"pass_rate_pct"`
 	TopRejectReasons []DQRejectReasonDTO `json:"top_reject_reasons"`
+	// Probe completeness (% of market_data rows with Known flags set).
+	SocialLinksKnownPct   float64 `json:"social_links_known_pct,omitempty"`
+	TotalSupplyKnownPct   float64 `json:"total_supply_known_pct,omitempty"`
+	CreatorCountKnownPct  float64 `json:"creator_count_known_pct,omitempty"`
+	HolderDistKnownPct    float64 `json:"holder_dist_known_pct,omitempty"`
+	FairChanceSkipCount   int64   `json:"fair_chance_skip_count,omitempty"`
 }
 
 // DQRejectReasonDTO is one row in the DQ top-reject-reasons list.

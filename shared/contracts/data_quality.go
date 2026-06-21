@@ -41,7 +41,19 @@ const (
 	FlagSerialLauncherSkippedNoSocial      = "serial_launcher_skipped:no_social"
 	FlagSerialLauncherSkippedLowHolders    = "serial_launcher_skipped:low_holders"
 	FlagSerialLauncherSkippedHolderUnknown = "serial_launcher_skipped:holder_unknown"
+	FlagSerialLauncherSkippedCreatorUnknown = "serial_launcher_skipped:creator_unknown"
 	FlagSerialLauncherSkippedRisk          = "serial_launcher_skipped:risk"
+
+	// Probe partial flags — DQ SKIP + rescan when mandatory Known fields are still false.
+	FlagProbePartialSocial   = "probe_partial:social"
+	FlagProbePartialCreator  = "probe_partial:creator"
+	FlagProbePartialHolder   = "probe_partial:holder"
+	FlagProbePartialSupply   = "probe_partial:supply"
+	FlagProbePartialMonitored = "probe_partial_monitored"
+	FlagProbeExhausted       = "probe_exhausted"
+
+	// NoSocialMonitored — confirmed absence of social links with other Known signals OK.
+	FlagNoSocialMonitored = "no_social_monitored"
 )
 
 // DataQualityDTO carries the pass/reject decision with risk attribution.

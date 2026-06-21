@@ -53,10 +53,20 @@ func RunProbePendingWorker(
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if expired, err := adapter.ExpireStaleProbePending(ctx, ttlHours); err != nil {
+			expiredRows, err := adapter.ExpireStaleProbePendingRows(ctx, ttlHours)
+			if err != nil {
 				logger.Warn("probe_pending_expire_failed", "error", err)
-			} else if expired > 0 {
-				logger.Info("probe_pending_expired", "count", expired)
+			} else if len(expiredRows) > 0 {
+				logger.Info("probe_pending_expired", "count", len(expiredRows))
+				for _, row := range expiredRows {
+					if err := emitProbeFairChanceRetry(ctx, adapter, row, "probe_exhausted_retry", logger); err != nil {
+						logger.Warn("probe_pending_fair_chance_emit_failed",
+							"pending_id", row.PendingID,
+							"token", row.TokenAddress,
+							"error", err,
+						)
+					}
+				}
 			}
 
 			rows, err := adapter.ClaimDueProbePending(ctx, batchSize)
@@ -65,7 +75,7 @@ func RunProbePendingWorker(
 				continue
 			}
 			for _, row := range rows {
-				if err := emitProbePendingRetry(ctx, adapter, row, logger); err != nil {
+				if err := emitProbeFairChanceRetry(ctx, adapter, row, "probe_pending_retry", logger); err != nil {
 					attempts := row.AttemptCount + 1
 					_ = adapter.FailProbePending(ctx, row.PendingID, err.Error(), maxAttempts)
 					if attempts >= maxAttempts {
@@ -74,6 +84,7 @@ func RunProbePendingWorker(
 							"token", row.TokenAddress,
 							"error", err,
 						)
+						_ = emitProbeFairChanceRetry(ctx, adapter, row, "probe_exhausted_retry", logger)
 					}
 				} else {
 					_ = adapter.CompleteProbePending(ctx, row.PendingID)
@@ -83,10 +94,11 @@ func RunProbePendingWorker(
 	}
 }
 
-func emitProbePendingRetry(
+func emitProbeFairChanceRetry(
 	ctx context.Context,
 	adapter database.Adapter,
 	row database.ProbePendingRow,
+	transport string,
 	logger *slog.Logger,
 ) error {
 	md := row.Payload
@@ -101,7 +113,7 @@ func emitProbePendingRetry(
 		md = *latest
 	}
 
-	newEventID := contracts.ContentIDFromString("probe_pending:" + row.PendingID)
+	newEventID := contracts.ContentIDFromString(transport + ":" + row.PendingID)
 	traceID := md.TraceID
 	if traceID == "" {
 		traceID = contracts.ContentIDFromString("probe-pending-trace:" + row.PendingID)
@@ -111,7 +123,7 @@ func emitProbePendingRetry(
 	md.TraceID = traceID
 	md.CorrelationID = traceID
 	md.CausationID = row.SourceEventID
-	md.Transport = "probe_pending_retry"
+	md.Transport = transport
 	md.IngestedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
 	if err := adapter.InsertMarketData(ctx, md); err != nil {
@@ -139,6 +151,7 @@ func emitProbePendingRetry(
 		"pending_id", row.PendingID,
 		"token", row.TokenAddress,
 		"market", row.Market,
+		"transport", transport,
 	)
 	return nil
 }

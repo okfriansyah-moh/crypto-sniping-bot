@@ -109,7 +109,13 @@ func (p *SolanaPumpfunLpProbe) Probe(ctx context.Context, in contracts.MarketDat
 	if !strings.EqualFold(in.Chain, "solana") {
 		return in, nil
 	}
-	if !strings.HasPrefix(strings.ToLower(in.Market), "solana-pumpfun") {
+	if !isPumpfunFamilyMarket(in.Market) {
+		return in, nil
+	}
+	if isPumpfunAMMMarket(in.Market) {
+		return p.probeAMM(ctx, in)
+	}
+	if !isPumpfunBondingCurveMarket(in.Market) {
 		return in, nil
 	}
 	pool := strings.TrimSpace(in.PoolAddress)
@@ -201,5 +207,54 @@ func (p *SolanaPumpfunLpProbe) Probe(ctx context.Context, in contracts.MarketDat
 		out.TotalSupply = float64(state.TokenTotalSupply) / pumpfunTokenDecimals
 		out.TotalSupplyKnown = true
 	}
+	return out, nil
+}
+
+// probeAMM fetches SPL total supply for graduated pump.fun AMM pools.
+// AMM pool accounts are NOT bonding curves — decoding them produces false supply.
+func (p *SolanaPumpfunLpProbe) probeAMM(ctx context.Context, in contracts.MarketDataDTO) (contracts.MarketDataDTO, error) {
+	mint := strings.TrimSpace(in.TokenAddress)
+	if mint == "" {
+		return in, errors.New("probes/pumpfun_lp: empty token mint for amm")
+	}
+	if p.rpc == nil {
+		return in, errors.New("probes/pumpfun_lp: nil rpc client")
+	}
+
+	timeout := time.Duration(p.cfg.TimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 300 * time.Millisecond
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type supplyClient interface {
+		GetTokenSupply(ctx context.Context, mint, commitment string) (supply uint64, decimals int, err error)
+	}
+	sc, ok := p.rpc.(supplyClient)
+	if !ok {
+		return in, errors.New("probes/pumpfun_lp: rpc does not support getTokenSupply")
+	}
+
+	rawSupply, decimals, err := sc.GetTokenSupply(cctx, mint, p.cfg.Commitment)
+	if err != nil {
+		return in, fmt.Errorf("probes/pumpfun_lp: amm get_token_supply: %w", err)
+	}
+	if rawSupply == 0 {
+		return in, fmt.Errorf("probes/pumpfun_lp: amm zero supply for mint %s", mint)
+	}
+
+	divisor := pumpfunTokenDecimals
+	if decimals > 0 {
+		divisor = 1.0
+		for i := 0; i < decimals; i++ {
+			divisor *= 10
+		}
+	}
+
+	out := in
+	out.TotalSupply = float64(rawSupply) / divisor
+	out.TotalSupplyKnown = true
+	// LP reserves for AMM are not bonding-curve layout; leave LpStatsKnown as ingestion set it.
 	return out, nil
 }

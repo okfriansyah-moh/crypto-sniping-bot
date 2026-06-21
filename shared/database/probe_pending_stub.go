@@ -26,6 +26,9 @@ func (ProbePendingQueueStub) FailProbePending(_ context.Context, _, _ string, _ 
 func (ProbePendingQueueStub) ExpireStaleProbePending(_ context.Context, _ int) (int64, error) {
 	return 0, nil
 }
+func (ProbePendingQueueStub) ExpireStaleProbePendingRows(_ context.Context, _ int) ([]ProbePendingRow, error) {
+	return nil, nil
+}
 func (ProbePendingQueueStub) GetProbePendingStats(_ context.Context) (*ProbePendingStats, error) {
 	return &ProbePendingStats{}, nil
 }

@@ -101,6 +101,18 @@ type DataQualityModeProfile struct {
 	// SerialLauncherMomentumOverride allows RISKY_PASS when on-chain momentum
 	// is strong even without social links. Disabled by default.
 	SerialLauncherMomentumOverride SerialLauncherMomentumOverride `yaml:"serial_launcher_momentum_override"`
+
+	// NoSocialMonitoring allows confirmed-no-social RISKY_PASS in EXPLORATION+
+	// when all other mandatory Known checks pass.
+	NoSocialMonitoring NoSocialMonitoringConfig `yaml:"no_social_monitoring"`
+}
+
+// NoSocialMonitoringConfig gates RISKY_PASS for tokens with confirmed absent social links.
+type NoSocialMonitoringConfig struct {
+	Enabled                         bool    `yaml:"enabled"`
+	RequireAllOtherMandatoryKnown   bool    `yaml:"require_all_other_mandatory_known"`
+	MaxTotalSupply                  float64 `yaml:"max_total_supply"`
+	MinHolderCount                  int32   `yaml:"min_holder_count"`
 }
 
 // SerialLauncherMomentumOverride gates the momentum profit path for serial launchers.
