@@ -253,7 +253,7 @@ func MonitorExposureAlerts(
 ```
 ❌ Computing exposure AFTER allocation (gate must run before AllocationDTO is produced)
 ❌ Using entry value instead of current market value (underestimates winning positions)
-❌ Hardcoding limits (all limits must come from config/pipeline.yaml)
+❌ Hardcoding limits (all limits must come from shared/config/pipeline.yaml)
 ❌ Blocking entirely when warning threshold hit (warn + monitor; only block at hard limit)
 ❌ Skipping exposure check for "small" allocations (1 basis point can push you over the limit)
 ❌ Not emitting system_event on limit violations (operators must be alerted)
@@ -261,7 +261,7 @@ func MonitorExposureAlerts(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 exposure_monitor:
@@ -292,4 +292,4 @@ exposure_monitor:
 - `docs/archive/architecture-context/9_capital_engine.md` — Allocation sizing
 - `.github/skills/capital-sizing/SKILL.md` — Kelly-adjacent sizing
 - `.github/skills/drawdown-protection/SKILL.md` — HWM + drawdown tiers
-- `contracts/allocation.go` — `AllocationDTO`, `rejected`, `reject_reason` fields
+- `shared/contracts/allocation.go` — `AllocationDTO`, `rejected`, `reject_reason` fields

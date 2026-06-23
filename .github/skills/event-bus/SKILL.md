@@ -27,7 +27,7 @@ deletes events.
 ### Events Table (Canonical Schema)
 
 ```sql
--- database/migrations/20240001000001_create_events.sql
+-- shared/database/migrations/20240001000001_create_events.sql
 CREATE TABLE IF NOT EXISTS events (
     id          BIGSERIAL PRIMARY KEY,
     event_id    TEXT UNIQUE NOT NULL,          -- SHA256(event_type+payload_hash+created_at)[:16]
@@ -282,4 +282,4 @@ FOR UPDATE SKIP LOCKED
 - Architecture context: `docs/archive/architecture-context/2_system_backbone.md`
 - DB spec: `docs/reference/db_adapter_spec.md` § 6.1 (events table)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 0 §0.6
-- Config: `config/pipeline.yaml` → `worker.poll_interval_ms`, `worker.error_delay_ms`
+- Config: `shared/config/pipeline.yaml` → `worker.poll_interval_ms`, `worker.error_delay_ms`

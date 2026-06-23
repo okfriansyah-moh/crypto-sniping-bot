@@ -41,7 +41,7 @@ Profit = Edge × Probability × Execution × Capital × DataQuality × Adaptatio
 ### Thresholds (Config-Driven)
 
 ```go
-// All in config/pipeline.yaml — never hardcode.
+// All in shared/config/pipeline.yaml — never hardcode.
 type MomentumConfig struct {
     MinTrendStrength     float64 // default: 0.3
     MinVolumeRatio       float64 // default: 1.5 (crypto), higher for low-liquidity pools
@@ -260,7 +260,7 @@ func DetectMomentum(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 momentum:
@@ -293,5 +293,5 @@ momentum:
 - `docs/archive/architecture-context/5_sniper_mode.md` — NEW_LAUNCH_EDGE definition
 - `.github/skills/edge-detection/SKILL.md` — Gate sequence for EdgeDTO production
 - `.github/skills/liquidity-event-detector/SKILL.md` — Volume spike and cascade flags
-- `contracts/edge.go` — `EdgeDTO` fields
-- `config/pipeline.yaml` — All momentum thresholds
+- `shared/contracts/edge.go` — `EdgeDTO` fields
+- `shared/config/pipeline.yaml` — All momentum thresholds

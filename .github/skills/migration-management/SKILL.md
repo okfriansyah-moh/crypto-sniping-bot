@@ -18,7 +18,7 @@ Enforce safe database migration practices. Ensure all schema changes are version
 2. **Append-only** — never modify existing migration files after they're committed
 3. **Each migration is atomic** — one logical schema change per file
 4. **Up and down** — every migration must have a reversible down migration
-5. **Migrations live in `database/migrations/`** — no ad-hoc ALTER TABLE elsewhere
+5. **Migrations live in `shared/database/migrations/`** — no ad-hoc ALTER TABLE elsewhere
 
 ### SQL Portability
 
@@ -42,7 +42,7 @@ Enforce safe database migration practices. Ensure all schema changes are version
 ### Migration Workflow
 
 ```
-1. Create migration file: database/migrations/YYYYMMDD000NNN_description.sql
+1. Create migration file: shared/database/migrations/YYYYMMDD000NNN_description.sql
 2. Write UP migration (create table, add column, etc.)
 3. Write DOWN migration (reverse the UP — drop table, remove column)
 4. Test: apply UP, verify schema, apply DOWN, verify clean state

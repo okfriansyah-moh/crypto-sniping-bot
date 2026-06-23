@@ -1,0 +1,70 @@
+execution:
+  # Concurrency
+  concurrency_limit: 10 # global semaphore for in-flight transactions
+  concurrency_min: 5
+  concurrency_max: 20
+
+  # Wallet sharding
+  wallet_shard_count: 4 # number of wallet shards (hash(token_addr) % n)
+
+  # Fee policy
+  fee_bump_delta_pct: 15 # percentage increase on stuck tx fee bumps
+  fee_bump_max_attempts: 3 # max fee bump retries per tx
+  base_fee_multiplier: 1.2 # multiply latest base fee for max_fee_per_gas
+  priority_fee_gwei: 2 # priority fee tip in gwei
+
+  # Submission
+  tx_timeout_seconds: 30 # max time to wait for tx confirmation
+  tx_poll_interval_seconds: 3 # polling interval while waiting for receipt
+  mempool_route: public # public | private_flashbots | private_beaverbuild
+
+  # Gas
+  gas_limit: 300000 # gas limit for swap transactions (override per-chain if needed)
+
+  # Slippage
+  default_max_slippage_bps: 100 # 1% default max slippage
+
+  # ETH price approximation (used to convert USD allocation to wei).
+  # This is a static fallback used when no real price feed is available.
+  # Update this value when ETH price moves significantly.
+  eth_price_usd: 3500.0
+
+  # Idempotency
+  duplicate_window_seconds: 300 # dedup window for execution_id checks
+
+  # Phase 7: Solana execution parameters.
+  solana:
+    slippage_cap_bps: 200
+    confirm_timeout_ms: 15000
+    receipt_poll_interval_ms: 400
+    max_send_attempts: 3
+    wallet_key_paths:
+      - "${SOLANA_WALLET_KEY_1}"
+
+  # Phase 10 (Reference-Repo Improvements / Task C) — adaptive priority
+  # fee. mode="static" leaves the RPC-suggested fee unchanged.
+  # mode="adaptive" scales by (1 + observed_latency_err_pct), clamped to
+  # [min_multiplier, max_multiplier]. Bounded per learning-engine rules
+  # (max_multiplier <= 3.0 caps single-cycle fee growth).
+  priority_fee:
+    mode: static
+    min_multiplier: 1.0
+    max_multiplier: 2.0
+    compute_unit_limit_buffer: 20000
+    priority_fee_lamports: 5000
+
+  # P5: Jito bundle submission — route Solana transactions through the Jito
+  # block-engine for MEV protection and priority inclusion.
+  # enabled: false — shadow mode only; no real bundles submitted until manually enabled.
+  # shadow_mode: true — emit Telegram alerts for every bundle attempt without submitting.
+  # Bundle endpoint and tip account are read from env vars at runtime:
+  #   JITO_BUNDLE_URL (e.g. https://mainnet.block-engine.jito.labs.io/api/v1/bundles)
+  #   JITO_TIP_ACCOUNT (one of the Jito tip accounts for the chosen region)
+  jito:
+    enabled: false
+    shadow_mode: true
+    tip_lamports: 1000
+    tip_lamports_balanced: 2000
+    tip_lamports_exploration: 3500
+    max_bundle_size: 5
+    submit_timeout_ms: 2000

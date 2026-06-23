@@ -21,7 +21,7 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-s -w -linkmode external -extldflags '-static'" \
     -o /build/crypto-sniping-bot \
-    ./cmd/
+    ./sniper-bot/cmd/
 
 # Build a minimal static healthcheck binary.
 # distroless/static has no shell or wget — a native Go binary is required.
@@ -47,10 +47,10 @@ COPY --from=builder /build/crypto-sniping-bot /app/crypto-sniping-bot
 COPY --from=builder /build/healthcheck /app/healthcheck
 
 # YAML configuration files (parameters only — no secrets, those come via env vars).
-COPY config/ /app/config/
+COPY shared/config/ /app/config/
 
 # SQL migration files — required by the migrate command at runtime.
-COPY database/migrations/ /build/database/migrations/
+COPY shared/database/migrations/ /build/shared/database/migrations/
 
 EXPOSE 8080
 

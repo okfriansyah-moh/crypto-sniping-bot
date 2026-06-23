@@ -1300,9 +1300,9 @@ If this layer fails, the entire pipeline starves. No downstream layer may bypass
 
 ### 3.0.2 Event Sources (Explicit)
 
-Per-chain configuration defines factory contracts and supported event types. All addresses and endpoints **MUST** be loaded from `config/` YAML — never hardcoded.
+Per-chain configuration defines factory contracts and supported event types. All addresses and endpoints **MUST** be loaded from `shared/config/` YAML — never hardcoded.
 
-**Example configuration (`config/chains.yaml`):**
+**Example configuration (`shared/config/chains.yaml`):**
 
 ```yaml
 chains:
@@ -1352,7 +1352,7 @@ Swap(address,uint256,uint256,uint256,uint256,address)
 
 1. `topic0` MUST match the event signature hash exactly — no wildcards on `topic0`
 2. Contract address filtering is applied per-chain at the subscription level
-3. Topic hashes MUST be stored in `config/` — never recomputed at runtime
+3. Topic hashes MUST be stored in `shared/config/` — never recomputed at runtime
 4. Any log not matching a configured topic is silently dropped at the RPC layer
 
 ---
@@ -1748,8 +1748,8 @@ Examples: `"rescan_15m"`, `"rescan_8h"`, `"rescan_48h"`. Used by log-reviewer an
 - **No new DTOs** — uses `contracts.MarketDataDTO` exactly as Layer 0 produces it
 - **No RPC calls** — pure SQL read from existing `market_data` table
 - **No module coupling** — worker in `internal/workers/run_rescan.go`; no imports from `internal/modules/`
-- **Fully generic** — iterates `cfg.Rescan.Bands` at runtime; add/remove bands via `config/pipeline.yaml` only, no code changes required
-- **Configured in:** `config/pipeline.yaml` → `rescan:` block; defaults in `internal/app/config/rescan_config.go`
+- **Fully generic** — iterates `cfg.Rescan.Bands` at runtime; add/remove bands via `shared/config/pipeline.yaml` only, no code changes required
+- **Configured in:** `shared/config/pipeline.yaml` → `rescan:` block; defaults in `internal/app/config/rescan_config.go`
 - **Full design:** `docs/plans/2026-05-10-rescan-plan.md`
 
 ---
@@ -2139,7 +2139,7 @@ A token must have at least one **profile-level** social link:
 - `no_social_links` — `SocialLinksKnown=true` AND `HasSocialLinks=false` (probe ran, confirmed absent)
 - `unknown_social_links` — `SocialLinksKnown=false` (metadata probe timed out or failed — fail-closed)
 
-**Config**: `reject_no_social_links: true`, `reject_unknown_social_links: true` in `config/data_quality.yaml`. Neither flag may be disabled in production.
+**Config**: `reject_no_social_links: true`, `reject_unknown_social_links: true` in `shared/config/data_quality.yaml`. Neither flag may be disabled in production.
 
 #### 3.1.11.2 Excessive Total Supply
 
@@ -2150,7 +2150,7 @@ Tokens with total supply exceeding `max_total_supply` (canonical: 1,000,000,000 
 - `high_total_supply` — `TotalSupplyKnown=true` AND `TotalSupply > max_total_supply`
 - `unknown_total_supply` — `TotalSupplyKnown=false` (LP probe timed out or failed — fail-closed)
 
-**Config**: `max_total_supply: 1000000000`, `reject_unknown_total_supply: true` in `config/data_quality.yaml`.
+**Config**: `max_total_supply: 1000000000`, `reject_unknown_total_supply: true` in `shared/config/data_quality.yaml`.
 
 #### 3.1.11.3 Serial Launcher Developer
 
@@ -2161,7 +2161,7 @@ Any creator wallet that has previously launched tokens (≥ `max_creator_prev_to
 - `serial_launcher` — `CreatorPrevTokenCountKnown=true` AND `count >= max_creator_prev_token_count`
 - `unknown_creator_count` — `CreatorPrevTokenCountKnown=false` (creator reputation probe timed out or API error — fail-closed)
 
-**Config**: `max_creator_prev_token_count: 1`, `reject_unknown_creator_count: true` in `config/data_quality.yaml`.
+**Config**: `max_creator_prev_token_count: 1`, `reject_unknown_creator_count: true` in `shared/config/data_quality.yaml`.
 
 #### 3.1.11.4 Fail-Closed Enforcement Rule
 
@@ -4179,7 +4179,7 @@ gas_limit      = eth_estimateGas(calldata) × gas_limit_safety_margin   // e.g. 
 max_fee        = base_fee × max_fee_multiplier + priority_fee          // e.g. base×2 + tip
 ```
 
-All multipliers, percentiles, and safety margins MUST live in `config/gas.yaml` — never hardcoded.
+All multipliers, percentiles, and safety margins MUST live in `shared/config/gas.yaml` — never hardcoded.
 
 **Priority fee adjustment (adaptive):**
 
@@ -4352,7 +4352,7 @@ type ExecutionResultDTO struct {
 | Sandwich attack   | Large unexpected slippage                             | Slippage cap in calldata reverts safely; consider private RPC          |
 | RPC endpoint down | All endpoints return error                            | Circuit breaker halts submissions; emit `[ALERT]`                      |
 
-All thresholds and caps MUST be loaded from `config/execution.yaml`.
+All thresholds and caps MUST be loaded from `shared/config/execution.yaml`.
 
 ---
 
@@ -4845,7 +4845,7 @@ Each market owns:
 | Ingestion engine (Layer 0) | One module per market family — `ingestion/` (EVM), `ingestion_solana/` (SVM)     |
 | Execution engine (Layer 8) | One module per market family — `execution/` (EVM), `execution_solana/` (SVM)     |
 | RPC client pool            | Independent per market — separate endpoints, circuit breakers, budgets           |
-| Configuration              | Independent YAML keys — `config/chains.yaml::ethereum`, `…::solana`              |
+| Configuration              | Independent YAML keys — `shared/config/chains.yaml::ethereum`, `…::solana`              |
 | Wallet pool                | Independent — EVM uses secp256k1 + nonce; Solana uses ed25519 + recent blockhash |
 | Worker groups              | Optional `chain` filter on `ClaimNextEvent`; partitioning is additive            |
 
@@ -4950,7 +4950,7 @@ Both forms collapse into the same canonical `EventID` rule: a content hash over 
 Explicit non-goals — preserved invariants:
 
 - Layers 1–7, 9, 10 unchanged (zero diff to Phase 2–5 module code).
-- `contracts/*.go` schemas unchanged (only `Chain` enumeration is widened — additive value).
+- `shared/contracts/*.go` schemas unchanged (only `Chain` enumeration is widened — additive value).
 - `database.Adapter` interface unchanged. `AllocateNonce` / `ReconcileNonce` remain EVM-only by design (callers gate on `chain ∈ {eth, bsc}`).
 - Event bus schema unchanged. No new event types are required for Phase 7 — Solana ingestion emits `market_data_event` and Solana execution emits `execution_event`, identical to EVM.
 - Operational modes (STRICT / BALANCED / EXPLORATION / VERY_EXPLORATION) apply uniformly across markets.
@@ -5336,7 +5336,11 @@ ingestion_dropped_events_total  (swap drops due to backpressure)
 
 - real-time, accessible anywhere, low friction, ideal for alerts + control
 
-### 4.4.5 Anti-Pattern (avoid)
+### 4.4.5 Operator Dashboard Topology
+
+The operator UI runs as **three deploy units** sharing Postgres: `sniper-bot` (trading hot path, `:8080`), `backend-dashboard` (read-only REST, `:8090`), and `frontend-dashboard` (static UI, `:3000`). Process boundaries, route tables, and Docker wiring are specified in [`docs/plans/2026-06-13-operator-dashboard-plan.md`](../plans/2026-06-13-operator-dashboard-plan.md) (§7.10). **Sniper HTTP is health-only:** `GET /health` returns liveness plus the `shadow_gate` JSON block; all `GET /api/v1/*` routes live on `backend-dashboard` only.
+
+### 4.4.6 Anti-Pattern (avoid)
 
 - pushing state directly from modules (bypasses event bus) → breaks auditability
 - only a **Telegram dispatcher service** reads from event bus → sends messages
@@ -5567,7 +5571,7 @@ TokenLifecycleID    string      // links this DTO to the lifecycle record
 1. A DTO whose `State` does not match the expected target state for its producing layer is **malformed** and MUST be rejected at the event bus write
 2. The orchestrator validates the transition `(current_state → DTO.State)` against § 4.7.3 before applying
 3. `TokenLifecycleID` is set once at Layer 0 (`SHA256(chain+token_address+first_detected_block)[:16]`) and propagates unchanged through all subsequent DTOs
-4. DTOs without these three fields are rejected at the `contracts/` validation boundary
+4. DTOs without these three fields are rejected at the `shared/contracts/` validation boundary
 
 **Layer → State mapping (producer contract):**
 
@@ -5624,7 +5628,7 @@ Action:
        mark token_lifecycle.terminal = TRUE, terminal_reason = "quarantined:state_violation"
 ```
 
-**Stuck tokens:** tokens that remain in a non-terminal state past `state_timeout_seconds` (config, per-state) are transitioned to `FAILED` with `terminal_reason = "timeout:" + state_name`. Timeouts per state MUST live in `config/` — never hardcoded.
+**Stuck tokens:** tokens that remain in a non-terminal state past `state_timeout_seconds` (config, per-state) are transitioned to `FAILED` with `terminal_reason = "timeout:" + state_name`. Timeouts per state MUST live in `shared/config/` — never hardcoded.
 
 **Quarantine policy:** Quarantined tokens are never retried by the live system. They remain in the database for replay analysis and debugging.
 
@@ -5893,7 +5897,7 @@ priority = PRIORITY_BASE[event_type]
          + 0.3 × Liquidity_score     // larger pools rank higher
 ```
 
-Constants and weights live in `config/priority.yaml`.
+Constants and weights live in `shared/config/priority.yaml`.
 
 **PRIORITY_BASE (event type base priorities):**
 

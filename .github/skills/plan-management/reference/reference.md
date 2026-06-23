@@ -104,8 +104,8 @@ what problem it solves. Reference the source spec or PRODUCTION_GATE_ANALYSIS se
 | Layer  | Module path                      | Change type                          |
 | ------ | -------------------------------- | ------------------------------------ |
 | L1     | `internal/modules/data_quality/` | New mode-aware threshold logic       |
-| Config | `config/data_quality.yaml`       | New per-mode fields added            |
-| DTO    | `contracts/data_quality.go`      | New `SKIP` decision value (additive) |
+| Config | `shared/config/data_quality.yaml`       | New per-mode fields added            |
+| DTO    | `shared/contracts/data_quality.go`      | New `SKIP` decision value (additive) |
 
 ### DTO Flow (before → after)
 ```
@@ -141,10 +141,10 @@ This plan maintains the following architecture invariants:
 - [x] **Profit invariant**: `Profit = Edge × Probability × Execution × Capital × DataQuality × AdaptationQuality` — all 6 factors preserved
 - [x] **Determinism**: same input + same config = identical output — no randomness introduced
 - [x] **Idempotency**: content-addressable IDs, `ON CONFLICT DO NOTHING`
-- [x] **Module isolation**: no cross-module imports; all comms via `contracts/` DTOs
+- [x] **Module isolation**: no cross-module imports; all comms via `shared/contracts/` DTOs
 - [x] **No direct DB access from modules**: adapter-only pattern preserved
 - [x] **DTO additive-only**: no existing fields renamed, removed, or type-changed
-- [x] **Config-driven**: all new thresholds in `config/` YAML, not hardcoded in Go
+- [x] **Config-driven**: all new thresholds in `shared/config/` YAML, not hardcoded in Go
 - [x] **Event bus backbone**: all state transitions flow through PostgreSQL `events` table
 - [x] **Security invariants**: HTTPS-only URLs, API keys via `os.Getenv`, bounded HTTP bodies
 - [x] **Layer-1 hard rejects intact**: serial launcher (STRICT/BALANCED), no-social-links, high-supply
@@ -188,7 +188,7 @@ Task 7 (Tests + build validation + PROGRESS_REPORT.md)
 **Ordering rules:**
 
 1. Migrations before any code that depends on new schema
-2. `contracts/` changes before any module that produces/consumes the new fields
+2. `shared/contracts/` changes before any module that produces/consumes the new fields
 3. `internal/app/config/` struct changes before YAML and module changes
 4. YAML changes before module changes that read new config fields
 5. Lower pipeline layers (L1 before L2, L2 before L3, …) for multi-layer plans
@@ -250,10 +250,10 @@ Task 7 (Tests + build validation + PROGRESS_REPORT.md)
 
 | Task | Name                     | Files                                                    | Depends On | Est. Complexity |
 | ---- | ------------------------ | -------------------------------------------------------- | ---------- | --------------- |
-| 1    | DB Migration             | `database/migrations/20260101000NNN_*.sql`               | —          | Low             |
-| 2    | DTO Contract Change      | `contracts/data_quality.go`                              | Task 1     | Low             |
+| 1    | DB Migration             | `shared/database/migrations/20260101000NNN_*.sql`               | —          | Low             |
+| 2    | DTO Contract Change      | `shared/contracts/data_quality.go`                              | Task 1     | Low             |
 | 3    | Config Struct Extension  | `internal/app/config/data_quality_runtime_config.go`     | Task 2     | Low             |
-| 4    | YAML Threshold Addition  | `config/data_quality.yaml`                               | Task 3     | Low             |
+| 4    | YAML Threshold Addition  | `shared/config/data_quality.yaml`                               | Task 3     | Low             |
 | 5    | Module Logic Replacement | `internal/modules/data_quality/data_quality.go`          | Task 4     | High            |
 | 6    | Fallback Profile Update  | `internal/modules/data_quality/decision.go`              | Task 5     | Medium          |
 | 7    | Tests + Validation       | `tests/modules/data_quality/`, `docs/ops/PROGRESS_REPORT.md` | Task 6     | Medium          |
@@ -303,9 +303,9 @@ mid-session.
 
 | §7.N | Content to include                                                               |
 | ---- | -------------------------------------------------------------------------------- |
-| 7.1  | Relevant DTO fields (from `contracts/*.go` and `docs/reference/dto_contracts.md`)          |
+| 7.1  | Relevant DTO fields (from `shared/contracts/*.go` and `docs/reference/dto_contracts.md`)          |
 | 7.2  | Config struct fields affected (from `internal/app/config/`)                      |
-| 7.3  | YAML config paths and current values (from `config/*.yaml`)                      |
+| 7.3  | YAML config paths and current values (from `shared/config/*.yaml`)                      |
 | 7.4  | Operational mode behavior (if plan is mode-aware)                                |
 | 7.5  | Event bus emit/consume pattern (if plan touches the backbone)                    |
 | 7.6  | Security rules relevant to this plan                                             |
@@ -330,7 +330,7 @@ needed by each task session. Include the specific §7.N sub-sections listed unde
 
 ### 7.1 Relevant DTO Fields
 
-{Paste the relevant struct definition from `contracts/` verbatim. Mark new fields.}
+{Paste the relevant struct definition from `shared/contracts/` verbatim. Mark new fields.}
 
 ### 7.2 Config Struct Fields
 
@@ -338,7 +338,7 @@ needed by each task session. Include the specific §7.N sub-sections listed unde
 
 ### 7.3 YAML Config Paths
 
-{Show the relevant YAML block from `config/` verbatim, with current values.}
+{Show the relevant YAML block from `shared/config/` verbatim, with current values.}
 
 ### 7.4 Operational Mode Behavior
 
@@ -462,10 +462,10 @@ These rules apply to every task in every plan. A plan is not valid if any task v
 | Rule                                        | Why it matters                                                                      |
 | ------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Modules never import other modules          | Ensures pure function composition; prevents hidden coupling                         |
-| All DB access via `database/adapter.*`      | Single abstraction boundary; switching DB engines requires only `database/` changes |
+| All DB access via `shared/database/adapter.*`      | Single abstraction boundary; switching DB engines requires only `shared/database/` changes |
 | DTO changes additive-only                   | Deployed consumers must never break; zero-value defaults = backward compat          |
 | All IDs = `SHA256(content)[:16]`            | Determinism and idempotency in the event bus                                        |
-| All thresholds from `config/*.yaml`         | Enables hot-reload, A/B testing, and versioned config snapshots                     |
+| All thresholds from `shared/config/*.yaml`         | Enables hot-reload, A/B testing, and versioned config snapshots                     |
 | HTTPS-only for external endpoints           | Prevents credential interception in transit                                         |
 | API keys via `os.Getenv` only               | Never leak keys in logs, version control, or config files                           |
 | Bounded HTTP responses                      | Prevents OOM from adversarial responses                                             |

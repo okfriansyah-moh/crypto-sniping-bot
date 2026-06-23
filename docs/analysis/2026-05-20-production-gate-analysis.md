@@ -145,10 +145,10 @@ The bot has a probe system that checks each token's quality before deciding to t
 Each check costs Helius credits (small amounts — 1-10 credits per call). To avoid
 spending too many credits, the bot limits how many tokens it can fully check per minute.
 
-The current limit is set in `config/pipeline.yaml`:
+The current limit is set in `shared/config/pipeline.yaml`:
 
 ```yaml
-# config/pipeline.yaml, around line 506
+# shared/config/pipeline.yaml, around line 506
 probes:
   rate_limit_per_min: 30
 ```
@@ -187,10 +187,10 @@ The pump.fun factory has launched tens of thousands of tokens. When the bot quer
 "how many prior tokens has this creator launched?", the answer comes back as **49**
 (the query limit cap) for every single pump.fun token.
 
-The bot's quality threshold is set in `config/data_quality.yaml`:
+The bot's quality threshold is set in `shared/config/data_quality.yaml`:
 
 ```yaml
-# config/data_quality.yaml, around line 90
+# shared/config/data_quality.yaml, around line 90
 thresholds:
   max_creator_prev_token_count: 1
 ```
@@ -252,7 +252,7 @@ The "Enhanced Transactions at 100 credits" refers to Helius's proprietary
 There is also a **wrong comment** in the codebase that needs fixing:
 
 ```yaml
-# config/chains.yaml (around line 163 — INCORRECT COMMENT):
+# shared/config/chains.yaml (around line 163 — INCORRECT COMMENT):
 # Credit cost is minimal: ≤300 getTransaction calls/day × 100 credits = 900k credits/month
 ```
 
@@ -289,7 +289,7 @@ ones you care about.
 Helius charges **2 credits for every 0.1 MB of data received** over the WebSocket
 connection. The data flows in whether your code uses it or not.
 
-The bot subscribes to these programs (from `config/chains.yaml`):
+The bot subscribes to these programs (from `shared/config/chains.yaml`):
 
 ```yaml
 programs:
@@ -375,12 +375,12 @@ from streaming costs alone.
 
 #### Step-by-Step Implementation
 
-**File to edit**: `config/chains.yaml`
+**File to edit**: `shared/config/chains.yaml`
 
 **Step 1**: Open the file and find the `programs:` section under `solana:`
 
 ```yaml
-# Around line 120 in config/chains.yaml
+# Around line 120 in shared/config/chains.yaml
 solana:
   ...
   programs:
@@ -411,7 +411,7 @@ config system may need the entry to exist):
 **Step 3**: Check if the ingestion code reads a `disabled` flag. Search the codebase:
 
 ```bash
-grep -rn "disabled" internal/modules/ingestion_solana/ config/chains.yaml
+grep -rn "disabled" internal/modules/ingestion_solana/ shared/config/chains.yaml
 ```
 
 If the ingestion code does not respect a `disabled` field, an alternative approach is
@@ -467,6 +467,8 @@ old before they can even be approved. Being 0.5 seconds later on detection means
 
 **Step 3**: Configure the webhook:
 
+> **Operator runbook (current implementation):** see [`docs/guides/HELIUS_WEBHOOK_SETUP.md`](../guides/HELIUS_WEBHOOK_SETUP.md) for ngrok, Cloudflare Tunnel, and Caddy exposure. Handler: `POST /webhooks/helius` on sniper `:8080`.
+
 - **Webhook URL**: `https://your-server.com/webhooks/helius` (your bot's HTTP endpoint)
 - **Transaction Type**: Select "Program Activity"
 - **Program ID**: `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8` (Raydium V4)
@@ -498,7 +500,7 @@ mux.HandleFunc("/webhooks/helius", webhookReceiver.HandleHelisWebhook)
 **Phase C — Disable the Raydium V4 WebSocket Subscription**
 
 **Step 7**: Once the webhook is receiving events and they are appearing in the event bus,
-disable the Raydium V4 WebSocket subscription from `config/chains.yaml`:
+disable the Raydium V4 WebSocket subscription from `shared/config/chains.yaml`:
 
 ```yaml
 - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
@@ -586,11 +588,11 @@ filters to only pool-creation transactions.
 
 ---
 
-### Option 4 — Fix the Wrong Comment in `config/chains.yaml`
+### Option 4 — Fix the Wrong Comment in `shared/config/chains.yaml`
 
 This is a documentation fix, not a functional fix, but it prevents future confusion.
 
-**File**: `config/chains.yaml`
+**File**: `shared/config/chains.yaml`
 
 Find this comment and correct it:
 
@@ -895,10 +897,10 @@ Once at least one token has successfully traced through Layers 2–10 end-to-end
 execution to shadow mode. The bot will generate buy/sell signals but not submit
 transactions.
 
-**File to edit**: `config/pipeline.yaml`
+**File to edit**: `shared/config/pipeline.yaml`
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 execution:
   mode: "shadow" # change from "live" to "shadow"
 ```
@@ -910,7 +912,7 @@ live trading if the paper-trade expectancy is positive over at least 30 complete
 
 #### P2-B: Review `min_token_age_seconds` for the Graduation Market
 
-**File**: `config/data_quality.yaml`
+**File**: `shared/config/data_quality.yaml`
 
 ```yaml
 thresholds:
@@ -960,7 +962,7 @@ pump.fun. Every single one was correctly rejected. The system spent credits and 
 budget to arrive at the same conclusion it could have predicted in advance.
 
 **The action**: Disable the pump.fun bonding-curve program subscription in
-`config/chains.yaml`. This is already described in Section 5, Option 1.
+`shared/config/chains.yaml`. This is already described in Section 5, Option 1.
 
 **The reason this is safe**: The pump.fun-AMM subscription (graduation tokens) is
 separate and should remain. What you are removing is the raw bonding-curve feed, not
@@ -996,7 +998,7 @@ exclusive to pump.fun to being tradeable on open Raydium markets.
 the thousands launched. This is a manageable volume that the probe system can handle
 at 100% coverage without any rate-limit issues.
 
-**Is pumpfun-amm already in the config?** Yes. Looking at `config/chains.yaml`:
+**Is pumpfun-amm already in the config?** Yes. Looking at `shared/config/chains.yaml`:
 
 ```yaml
 - program_id: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
@@ -1111,7 +1113,7 @@ a real profitable trade.
 
 **Week 3 — Shadow Trading**
 
-10. Enable shadow mode: `execution.mode: "shadow"` in `config/pipeline.yaml`
+10. Enable shadow mode: `execution.mode: "shadow"` in `shared/config/pipeline.yaml`
 11. Let the bot run for 2 weeks in shadow mode
 12. Monitor paper P&L in the database:
 
@@ -1160,7 +1162,7 @@ If you had to summarize in a single paragraph:
 
 ### Why the Current Single Threshold Falls Short
 
-The current setting `max_creator_prev_token_count: 1` in `config/data_quality.yaml` is
+The current setting `max_creator_prev_token_count: 1` in `shared/config/data_quality.yaml` is
 a global threshold applied identically across all four operational modes (STRICT,
 BALANCED, EXPLORATION, VERY_EXPLORATION).
 
@@ -1335,7 +1337,7 @@ type DataQualityModeProfile struct {
 
 #### Step 2 — Update YAML mode profiles
 
-**File**: `config/data_quality.yaml`, `mode_profiles` section
+**File**: `shared/config/data_quality.yaml`, `mode_profiles` section
 
 ```yaml
 mode_profiles:
@@ -1427,7 +1429,7 @@ if effectiveMaxCreator > 0 {
 
 > **Note on `buildSkipResult`**: A new helper that returns a `DataQualityDTO` with
 > `Decision: "SKIP"` and the provided flags. `"SKIP"` must be added as a valid decision
-> value alongside `"PASS"`, `"RISKY_PASS"`, and `"REJECT"` in `contracts/data_quality.go`.
+> value alongside `"PASS"`, `"RISKY_PASS"`, and `"REJECT"` in `shared/contracts/data_quality.go`.
 > Callers of `ProcessForMode()` must handle `SKIP` by silently dropping the token
 > without emitting a rejection event.
 
@@ -1627,7 +1629,7 @@ assembles the DTO before `ProcessForMode()` runs (see note on architecture below
 
 #### Change 2 — Add fields to `MarketDataDTO`
 
-**File**: `contracts/market_data.go`
+**File**: `shared/contracts/market_data.go`
 
 Add four new fields alongside the existing `LiquidityUsd`:
 
@@ -1650,7 +1652,7 @@ not reference fields they do not already use.
 
 #### Change 3 — Add thresholds and structural reject logic
 
-**File**: `config/data_quality.yaml`, add to `thresholds` section:
+**File**: `shared/config/data_quality.yaml`, add to `thresholds` section:
 
 ```yaml
 thresholds:
@@ -1771,20 +1773,20 @@ reduces streaming credits by 99%+ and brings total monthly consumption well with
 
 | What to change                          | File                       | Key field                                               |
 | --------------------------------------- | -------------------------- | ------------------------------------------------------- |
-| Disable/enable program subscriptions    | `config/chains.yaml`       | `solana.programs[].disabled`                            |
-| Probe rate limit per minute             | `config/pipeline.yaml`     | `probes.rate_limit_per_min`                             |
-| Creator launch count threshold (global) | `config/data_quality.yaml` | `thresholds.max_creator_prev_token_count`               |
-| Creator count per mode (exploration)    | `config/data_quality.yaml` | `mode_profiles.<mode>.max_creator_prev_token_count`     |
-| Serial launcher quality gate (risk)     | `config/data_quality.yaml` | `mode_profiles.<mode>.serial_launcher_max_risk_score`   |
-| Serial launcher quality gate (holders)  | `config/data_quality.yaml` | `mode_profiles.<mode>.serial_launcher_min_holder_count` |
-| Minimum token age to qualify            | `config/data_quality.yaml` | `thresholds.min_token_age_seconds`                      |
-| Market cap minimum filter               | `config/data_quality.yaml` | `thresholds.min_market_cap_usd`                         |
-| Market cap maximum filter               | `config/data_quality.yaml` | `thresholds.max_market_cap_usd`                         |
-| Volume floor (1h)                       | `config/data_quality.yaml` | `thresholds.min_volume_usd_1h`                          |
-| Helius RPC HTTP rate limit              | `config/chains.yaml`       | `solana.get_transaction_rps`                            |
-| Trading mode (live/shadow)              | `config/pipeline.yaml`     | `execution.mode`                                        |
-| Max open positions                      | `config/pipeline.yaml`     | `selection.max_open_positions`                          |
-| Fixed entry size                        | `config/pipeline.yaml`     | `capital.fixed_entry_size_usd`                          |
+| Disable/enable program subscriptions    | `shared/config/chains.yaml`       | `solana.programs[].disabled`                            |
+| Probe rate limit per minute             | `shared/config/pipeline.yaml`     | `probes.rate_limit_per_min`                             |
+| Creator launch count threshold (global) | `shared/config/data_quality.yaml` | `thresholds.max_creator_prev_token_count`               |
+| Creator count per mode (exploration)    | `shared/config/data_quality.yaml` | `mode_profiles.<mode>.max_creator_prev_token_count`     |
+| Serial launcher quality gate (risk)     | `shared/config/data_quality.yaml` | `mode_profiles.<mode>.serial_launcher_max_risk_score`   |
+| Serial launcher quality gate (holders)  | `shared/config/data_quality.yaml` | `mode_profiles.<mode>.serial_launcher_min_holder_count` |
+| Minimum token age to qualify            | `shared/config/data_quality.yaml` | `thresholds.min_token_age_seconds`                      |
+| Market cap minimum filter               | `shared/config/data_quality.yaml` | `thresholds.min_market_cap_usd`                         |
+| Market cap maximum filter               | `shared/config/data_quality.yaml` | `thresholds.max_market_cap_usd`                         |
+| Volume floor (1h)                       | `shared/config/data_quality.yaml` | `thresholds.min_volume_usd_1h`                          |
+| Helius RPC HTTP rate limit              | `shared/config/chains.yaml`       | `solana.get_transaction_rps`                            |
+| Trading mode (live/shadow)              | `shared/config/pipeline.yaml`     | `execution.mode`                                        |
+| Max open positions                      | `shared/config/pipeline.yaml`     | `selection.max_open_positions`                          |
+| Fixed entry size                        | `shared/config/pipeline.yaml`     | `capital.fixed_entry_size_usd`                          |
 
 ---
 

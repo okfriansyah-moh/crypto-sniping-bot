@@ -80,6 +80,11 @@ type Config struct {
 	// shadow execution fills. Maps to price_oracle: in config/pipeline.yaml.
 	PriceOracle PriceOracleConfig `yaml:"price_oracle"`
 
+	// Dashboard holds operator-dashboard API settings from config/dashboard.yaml.
+	// Populated only when backend-dashboard calls LoadDashboardConfig; sniper-bot
+	// Config.Load() does not merge dashboard.yaml.
+	Dashboard DashboardConfig `yaml:"dashboard"`
+
 	// SchemaVersion is set from pipeline.schema_version.
 	SchemaVersion string
 }
@@ -229,6 +234,12 @@ type EdgeConfig struct {
 	// observations and emits BottomDetectionScore on EdgeDTO.
 	// ShadowMode: compute + log the score but do not use it as a gate.
 	BottomDetection BottomDetectionConfig `yaml:"bottom_detection"`
+
+	// Fortress graduation lane (June 2026): PumpFunAMMCreatePool events.
+	MinGraduationLiquidityUsd float64 `yaml:"min_graduation_liquidity_usd"`
+	GraduationWeightLiquidity float64 `yaml:"graduation_weight_liquidity"`
+	GraduationWeightSafety    float64 `yaml:"graduation_weight_safety"`
+	GraduationWeightHolders   float64 `yaml:"graduation_weight_holders"`
 }
 
 // BottomDetectionConfig configures the P7 V-shape bottom detector.
@@ -354,6 +365,14 @@ type CapitalConfig struct {
 	DefaultMaxSlippageBps int32  `yaml:"default_max_slippage_bps"`
 	WalletShardCount      int    `yaml:"wallet_shard_count"`
 	DefaultCohortID       string `yaml:"default_cohort_id"`
+	MacroRegime           CapitalMacroRegimeConfig `yaml:"macro_regime"`
+}
+
+// CapitalMacroRegimeConfig optional capital throttle when MACRO_REGIME=risk_off.
+type CapitalMacroRegimeConfig struct {
+	Enabled              bool    `yaml:"enabled"`
+	MaxSizeMultiplier    float64 `yaml:"max_size_multiplier"`    // e.g. 0.5 halves max position
+	ExplorationCapScale  float64 `yaml:"exploration_cap_scale"`  // optional scale on exploration cap
 }
 
 // PositionConfig holds Phase 2 position management parameters.
@@ -431,7 +450,9 @@ type SolanaExecutionConfig struct {
 type JitoConfig struct {
 	Enabled         bool  `yaml:"enabled"`
 	ShadowMode      bool  `yaml:"shadow_mode"`
-	TipLamports     int64 `yaml:"tip_lamports"`
+	TipLamports              int64 `yaml:"tip_lamports"`
+	TipLamportsBalanced      int64 `yaml:"tip_lamports_balanced"`
+	TipLamportsExploration   int64 `yaml:"tip_lamports_exploration"`
 	MaxBundleSize   int   `yaml:"max_bundle_size"`
 	SubmitTimeoutMs int   `yaml:"submit_timeout_ms"`
 }
@@ -789,16 +810,16 @@ func Load(paths ...string) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("config: get working directory: %w", err)
 		}
-		paths = []string{filepath.Join(cwd, "config", "pipeline.yaml")}
-		chainsPath := filepath.Join(cwd, "config", "chains.yaml")
+		paths = []string{JoinConfigFile(cwd, "pipeline.yaml")}
+		chainsPath := JoinConfigFile(cwd, "chains.yaml")
 		if _, statErr := os.Stat(chainsPath); statErr == nil {
 			paths = append(paths, chainsPath)
 		}
-		budgetsPath := filepath.Join(cwd, "config", "budgets.yaml")
+		budgetsPath := JoinConfigFile(cwd, "budgets.yaml")
 		if _, statErr := os.Stat(budgetsPath); statErr == nil {
 			paths = append(paths, budgetsPath)
 		}
-		executionPath := filepath.Join(cwd, "config", "execution.yaml")
+		executionPath := JoinConfigFile(cwd, "execution.yaml")
 		if _, statErr := os.Stat(executionPath); statErr == nil {
 			paths = append(paths, executionPath)
 		}
@@ -807,7 +828,7 @@ func Load(paths ...string) (*Config, error) {
 			"priority.yaml",
 			"data_quality.yaml", "feature.yaml", "probability.yaml", "capital.yaml",
 		} {
-			p := filepath.Join(cwd, "config", name)
+			p := JoinConfigFile(cwd, name)
 			if _, statErr := os.Stat(p); statErr == nil {
 				paths = append(paths, p)
 			}
@@ -840,6 +861,7 @@ func Load(paths ...string) (*Config, error) {
 
 	// Apply rescan defaults (Phase 10) before validation.
 	applyRescanDefaults(&cfg.Rescan)
+	applyProbesDefaults(&cfg.Probes)
 
 	// Apply operational-mode threshold defaults (docs/plans/2026-06-10-profit-restoration-plan.md Task 1).
 	applyPriorityDefaults(&cfg.Priority)

@@ -27,7 +27,7 @@
 ## 1. Overview
 
 This framework supports parallel development of pipeline phases. Most phases own isolated
-modules under `internal/modules/` and communicate only through immutable DTOs in `contracts/`.
+modules under `internal/modules/` and communicate only through immutable DTOs in `shared/contracts/`.
 This isolation enables parallel development — multiple phases implemented at the same time
 by independent AI agents.
 
@@ -281,25 +281,25 @@ Phases MUST run one at a time in order. Each phase is a strict prerequisite for 
 
 | #   | Subsection                      | Purpose                                                                       | Key File(s)                              |
 | --- | ------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------- |
-| 0.1 | Priority Layers                 | P0/P1/P1.5/P2 tier definitions                                                | `config/priority.yaml`                   |
+| 0.1 | Priority Layers                 | P0/P1/P1.5/P2 tier definitions                                                | `shared/config/priority.yaml`                   |
 | 0.2 | Module Layout Pattern           | `internal/modules/<name>/` skeleton; `run_<name>.go` worker convention        | `internal/modules/`, `internal/workers/` |
-| 0.3 | Traceability Contract           | TraceID/CorrelationID/CausationID/VersionID enforced at adapter boundary      | `contracts/trace.go`                     |
-| 0.4 | Idempotency Contract            | `EventID = SHA256(payload)[:16]`; all inserts `ON CONFLICT DO NOTHING`        | `database/engines/postgres/events.go`    |
-| 0.5 | Config-Driven Thresholds        | All numeric constants in `config/*.yaml`; hardcoding forbidden in modules     | `config/*.yaml`                          |
+| 0.3 | Traceability Contract           | TraceID/CorrelationID/CausationID/VersionID enforced at adapter boundary      | `shared/contracts/trace.go`                     |
+| 0.4 | Idempotency Contract            | `EventID = SHA256(payload)[:16]`; all inserts `ON CONFLICT DO NOTHING`        | `shared/database/engines/postgres/events.go`    |
+| 0.5 | Config-Driven Thresholds        | All numeric constants in `shared/config/*.yaml`; hardcoding forbidden in modules     | `shared/config/*.yaml`                          |
 | 0.6 | Global Event→Worker Routing     | Authoritative event-type → consumer-group mapping table                       | `internal/orchestrator/registry.go`      |
-| 0.7 | Canonical Lifecycle CAS Pattern | READ → VALIDATE → CAS write-skew guard; `TransitionState` with version column | `database/adapter.go`                    |
+| 0.7 | Canonical Lifecycle CAS Pattern | READ → VALIDATE → CAS write-skew guard; `TransitionState` with version column | `shared/database/adapter.go`                    |
 
 Sub-sections:
 
-- **0.1 Priority Layers** — `config/priority.yaml`; P0 / P1 / P1.5 / P2 tier definitions
+- **0.1 Priority Layers** — `shared/config/priority.yaml`; P0 / P1 / P1.5 / P2 tier definitions
 - **0.2 Module Layout Pattern** — `internal/modules/<name>/` skeleton; `internal/workers/run_<name>.go` convention
 - **0.3 Traceability Contract** — TraceID / CorrelationID / CausationID / VersionID propagation rules enforced at adapter boundary
 - **0.4 Idempotency Contract** — `EventID = SHA256(payload)[:16]`; all inserts use `ON CONFLICT DO NOTHING`
-- **0.5 Config-Driven Thresholds** — All numeric constants in `config/*.yaml`; hardcoded values forbidden in modules
+- **0.5 Config-Driven Thresholds** — All numeric constants in `shared/config/*.yaml`; hardcoded values forbidden in modules
 - **0.6 Global Event→Worker Routing** — Authoritative event-type → consumer-group mapping table
 - **0.7 Canonical Lifecycle CAS Pattern** — READ → VALIDATE → CAS write-skew guard; `TransitionState` with version column
 
-Files introduced: `database/adapter.go`, `database/errors.go`, `database/migrations.go`, `database/engines/postgres/` (postgres.go, events.go, runs.go, versions.go), `database/migrations/20260101000001_initial_schema.sql`, `internal/orchestrator/` (orchestrator.go, worker.go, registry.go, checkpoint.go), `internal/app/config/config.go`, `internal/app/logging/logger.go`, `contracts/trace.go`, `contracts/event_envelope.go`, `cmd/root.go`, `cmd/server.go`, `cmd/migrate.go`, `config/pipeline.yaml`, `config/chains.yaml`, `config/execution.yaml`, `config/gas.yaml`, `config/priority.yaml`
+Files introduced: `shared/database/adapter.go`, `shared/database/errors.go`, `shared/database/migrations.go`, `shared/database/engines/postgres/` (postgres.go, events.go, runs.go, versions.go), `shared/database/migrations/20260101000001_initial_schema.sql`, `internal/orchestrator/` (orchestrator.go, worker.go, registry.go, checkpoint.go), `internal/app/config/config.go`, `internal/app/logging/logger.go`, `shared/contracts/trace.go`, `shared/contracts/event_envelope.go`, `cmd/root.go`, `cmd/server.go`, `cmd/migrate.go`, `shared/config/pipeline.yaml`, `shared/config/chains.yaml`, `shared/config/execution.yaml`, `shared/config/gas.yaml`, `shared/config/priority.yaml`
 
 Exit gate: `sniper migrate` idempotent, `SELECT … FOR UPDATE SKIP LOCKED` verified, `StrategyVersion` pin at startup, `go test ./database/... ./internal/orchestrator/...` passes.
 
@@ -333,7 +333,7 @@ Sub-sections:
 - **Reorg Detection** — Confirmation-depth check; `MarketDataDTO.Reorged = true` flag; re-emits on confirmed block
 - **Topics Registry** — `(PairCreated, Mint, Swap, Burn)` canonical topic-hash registry per DEX family
 
-Files introduced: `contracts/market_data.go` (MarketDataDTO), `internal/modules/ingestion/` (ingestion.go, normalize.go, subscribe.go, poll.go, heartbeat.go, reconnect.go, gap_recovery.go, reorg.go, topics.go), `internal/workers/run_ingestion.go`, `database/migrations/20260101000002_ingestion_tables.sql`
+Files introduced: `shared/contracts/market_data.go` (MarketDataDTO), `internal/modules/ingestion/` (ingestion.go, normalize.go, subscribe.go, poll.go, heartbeat.go, reconnect.go, gap_recovery.go, reorg.go, topics.go), `internal/workers/run_ingestion.go`, `shared/database/migrations/20260101000002_ingestion_tables.sql`
 
 Exit gate: live WebSocket on Uniswap V2/V3 + PancakeSwap, deterministic `EventID` per block+logIndex, gap recovery verified on synthetic gap, zero SQL in `internal/modules/ingestion/`.
 
@@ -371,7 +371,7 @@ Sub-sections:
 - **2.10 Migration** — `20260101000003_trading_tables.sql`: wallet_nonce_state, executions, positions, tokens tables
 - **2.11 Exit Criteria / Testing (FIRST TRADE GATE)** — At least 1 real on-chain swap on testnet; full causal chain observable in events table; replay determinism; full trace IDs on every DTO; zero SQL in `internal/modules/`
 
-Files introduced: `contracts/` (data_quality.go, feature.go, edge.go, validated_edge.go, selection.go, allocation.go, execution.go, position.go), `internal/modules/data_quality/` (data_quality.go, honeypot.go, fake_liquidity.go, tax_reject.go, simulation.go), `internal/modules/features/` (features.go, normalize.go, liquidity.go, tx_velocity.go, holder_count.go, contract_flags.go), `internal/modules/edge/` (edge.go, new_launch_rule.go), `internal/modules/validation/` (validation.go, ev_gate.go), `internal/modules/selection/` (selection.go, concurrency_gate.go), `internal/modules/capital/` (capital.go, envelope.go), `internal/modules/execution/` (execution.go, nonce.go, gas.go, build_calldata.go, submit.go, wait_receipt.go, abi.go), `internal/modules/position/` (position.go, tp_sl.go, time_exit.go, sell_tx.go), `internal/workers/` (run_data_quality.go, run_features.go, run_edge.go, run_validation.go, run_selection.go, run_capital.go, run_execution.go, run_position_open.go, run_position_poll.go)
+Files introduced: `shared/contracts/` (data_quality.go, feature.go, edge.go, validated_edge.go, selection.go, allocation.go, execution.go, position.go), `internal/modules/data_quality/` (data_quality.go, honeypot.go, fake_liquidity.go, tax_reject.go, simulation.go), `internal/modules/features/` (features.go, normalize.go, liquidity.go, tx_velocity.go, holder_count.go, contract_flags.go), `internal/modules/edge/` (edge.go, new_launch_rule.go), `internal/modules/validation/` (validation.go, ev_gate.go), `internal/modules/selection/` (selection.go, concurrency_gate.go), `internal/modules/capital/` (capital.go, envelope.go), `internal/modules/execution/` (execution.go, nonce.go, gas.go, build_calldata.go, submit.go, wait_receipt.go, abi.go), `internal/modules/position/` (position.go, tp_sl.go, time_exit.go, sell_tx.go), `internal/workers/` (run_data_quality.go, run_features.go, run_edge.go, run_validation.go, run_selection.go, run_capital.go, run_execution.go, run_position_open.go, run_position_poll.go)
 
 Exit gate: **FIRST TRADE GATE** — live swap confirmed on testnet, complete event chain in DB, replay deterministic, `go test ./internal/modules/...` passes.
 
@@ -409,7 +409,7 @@ Sub-sections:
 - **Telegram Dispatcher** — All user-facing events routed via `telegram_event` on the bus; `internal/telegram/dispatcher.go`; operator commands: `/status`, `/pnl`, `/positions`, `/kill`, `/resume`, `/version`
 - **3.1 Evaluation Engine (Layer 10 pre-learning gate)** — Consumes `position_event (Status=exited)`; computes `PredictionError`, `FalsePositive`, `FalseNegative`, `ExecutionError`, `Expectancy`; emits `evaluation_event`; `EvaluationDTO`; worker `run_evaluation.go`
 
-Files introduced: `internal/modules/state_machine/` (state_machine.go, transitions.go, quarantine.go, state_machine_test.go), `internal/modules/traceability/` (validator.go, validator_test.go), `internal/modules/execution/` additions (replacement.go, retry.go, circuit_breaker.go), `internal/telegram/` (dispatcher.go, commands.go, bot.go), `contracts/evaluation.go` (EvaluationDTO), `internal/modules/evaluation/` (evaluation.go, evaluation_test.go), `internal/workers/run_evaluation.go`, `database/migrations/20260101000004_state_machine.sql`
+Files introduced: `internal/modules/state_machine/` (state_machine.go, transitions.go, quarantine.go, state_machine_test.go), `internal/modules/traceability/` (validator.go, validator_test.go), `internal/modules/execution/` additions (replacement.go, retry.go, circuit_breaker.go), `internal/telegram/` (dispatcher.go, commands.go, bot.go), `shared/contracts/evaluation.go` (EvaluationDTO), `internal/modules/evaluation/` (evaluation.go, evaluation_test.go), `internal/workers/run_evaluation.go`, `shared/database/migrations/20260101000004_state_machine.sql`
 
 Exit gate: CAS rejection observable in `token_state_violation`, `orphan_event_count = 0`, tx replacement tested on testnet, Telegram `/kill` functional, replay determinism with evaluation events.
 
@@ -441,7 +441,7 @@ Sub-sections:
 - **Validation Worker Update** — Joins probability + slippage + latency outputs before EV gate; replaces Phase 2 fixed priors; `model_join_timeout` fallback to priors
 - **Private RPC Routing** — Flashbots + Beaverbuild client pool (`internal/modules/execution/private_rpc.go`); route selection by size threshold
 
-Files introduced: `contracts/` (probability.go, slippage.go, latency.go), `internal/modules/data_quality/` additions (wash_trading.go, rug_risk.go, tax_anomaly.go, risk_score.go), `internal/modules/features/` additions (holder_distribution.go, wallet_entropy.go, drift_detector.go), `internal/modules/edge/` additions (momentum.go, adaptive_threshold.go, new_pool_gate.go), `internal/modules/models/` (probability.go, probability_fit.go, slippage.go, latency.go, models_test.go), `internal/workers/` (run_probability.go, run_slippage.go, run_latency.go), `internal/modules/execution/private_rpc.go`
+Files introduced: `shared/contracts/` (probability.go, slippage.go, latency.go), `internal/modules/data_quality/` additions (wash_trading.go, rug_risk.go, tax_anomaly.go, risk_score.go), `internal/modules/features/` additions (holder_distribution.go, wallet_entropy.go, drift_detector.go), `internal/modules/edge/` additions (momentum.go, adaptive_threshold.go, new_pool_gate.go), `internal/modules/models/` (probability.go, probability_fit.go, slippage.go, latency.go, models_test.go), `internal/workers/` (run_probability.go, run_slippage.go, run_latency.go), `internal/modules/execution/private_rpc.go`
 
 Exit gate: Brier score `< 0.25`, slippage p95 error `< 30%`, `pass_rate ∈ [0.5%, 5%]`, private RPC routing active, feature drift detector fires on synthetic drift.
 
@@ -477,7 +477,7 @@ Sub-sections:
 - **Safe Learning / Shadow Staging** — Extended `StrategyVersion.Status`: `draft → shadow → active → deactivated | rolled_back`; new version runs paper-trades only until A/B gate passes
 - **Shadow Execution Mode (Paper Trading)** — `config.execution.mode = shadow | live`; `ProcessShadow()` in `internal/modules/execution/paper.go`; no RPC submission; `ExecutionResultDTO.Simulated = true`; shadow results feed `LearningRecordDTO` with `shadow=true, simulated=true`
 
-Files introduced: `contracts/learning_record.go` (LearningRecordDTO), `internal/modules/learning/` (recorder.go, shadow_recorder.go, shadow_observer.go, fp_fn_classifier.go, evaluator.go, cohort.go, updater.go, ab_promoter.go, opportunity_monitor.go, learning_test.go), `internal/modules/execution/paper.go`, `internal/workers/` (run_learning_record.go, run_shadow_recorder.go, run_shadow_observer.go, run_evaluator.go, run_rollback_watchdog.go, run_updater.go), `database/migrations/20260101000005_learning_tables.sql`
+Files introduced: `shared/contracts/learning_record.go` (LearningRecordDTO), `internal/modules/learning/` (recorder.go, shadow_recorder.go, shadow_observer.go, fp_fn_classifier.go, evaluator.go, cohort.go, updater.go, ab_promoter.go, opportunity_monitor.go, learning_test.go), `internal/modules/execution/paper.go`, `internal/workers/` (run_learning_record.go, run_shadow_recorder.go, run_shadow_observer.go, run_evaluator.go, run_rollback_watchdog.go, run_updater.go), `shared/database/migrations/20260101000005_learning_tables.sql`
 
 Exit gate: every exit → exactly 1 `learning_record_event` (shadow=false), every rejection → exactly 1 shadow record, evaluator fires on schedule, updater touches exactly 1 parameter family per cycle, A/B promotion deterministic, rollback watchdog fires on synthetic degradation.
 
@@ -504,7 +504,7 @@ Must run after all Group B phases are merged, validated, and their exit criteria
 | Wallet Sharding              | `hash(TokenAddress) % n` deterministic routing; strict nonce per shard                   | `modules/execution/wallet_shard.go`                  |
 | Execution Semaphore          | Global concurrency [5, 20]; adaptive on failure rate                                     | `modules/execution/concurrency.go`                   |
 | Priority Ordering (full)     | Exit ≥ 900, replacement ≥ 900, entries ≤ 500; exits NEVER dropped                        | `internal/orchestrator/`                             |
-| Event Bus Partitioning       | `PARTITION BY LIST (chain)`; per-chain worker pools; horizontal scale                    | migration `000006`, `database/engines/postgres/`     |
+| Event Bus Partitioning       | `PARTITION BY LIST (chain)`; per-chain worker pools; horizontal scale                    | migration `000006`, `shared/database/engines/postgres/`     |
 | Data Retention & Archival    | Hot 7d / Warm 30d / Cold archive partition; audit tables retained forever                | `run_archive.go`                                     |
 | MEV-Aware Routing            | Flashbots/Beaverbuild/Eden selection; slippage guard at sign-time                        | `modules/execution/mev.go`                           |
 
@@ -523,7 +523,7 @@ Sub-sections:
 - **Data Retention & Archival** — Hot (7 d) / Warm (30 d) / Cold (archive partition); `run_archive.go` periodic; `token_lifecycle`, `executions`, `positions`, `strategy_versions`, `learning_records` retained forever (never archived)
 - **MEV-Aware Routing** — Flashbots / Beaverbuild / Eden route selection by size + front-run detection; gas escalation formula; slippage guard at sign-time (`amountOutMin`); `ExecutionResultDTO.MEVProtected`, `.ExecutionPath`; `internal/modules/execution/mev.go`
 
-Files introduced: `internal/resource_control/` (rpc_budget.go, gas_budget.go, compute_budget.go, priority.go, backpressure.go, halt.go, resource_control_test.go), `internal/modules/execution/` additions (wallet_shard.go, concurrency.go, mev.go), `internal/workers/` (run_risk_controller.go, run_archive.go), `config/priority.yaml`, `config/budgets.yaml`, `database/migrations/20260101000006_event_partitioning.sql`
+Files introduced: `internal/resource_control/` (rpc_budget.go, gas_budget.go, compute_budget.go, priority.go, backpressure.go, halt.go, resource_control_test.go), `internal/modules/execution/` additions (wallet_shard.go, concurrency.go, mev.go), `internal/workers/` (run_risk_controller.go, run_archive.go), `shared/config/priority.yaml`, `shared/config/budgets.yaml`, `shared/database/migrations/20260101000006_event_partitioning.sql`
 
 Exit gate: 10× Phase 2 baseline throughput without unbounded queue growth, p95 latency `< 1500 ms`, exit always processed under full queue (10k+ pending entries synthetic test), wallet sharding deterministic (same token → same wallet), kill switch fires on drawdown threshold, cost dashboards show `cost_per_trade_usd` / `rpc_usage_rps` / `gas_spend_daily_usd`.
 
@@ -547,13 +547,13 @@ Adds an additional `(ingestion + execution)` market without touching shared laye
 | Solana Workers            | Source ingestion worker + execution router rewire                                               | `internal/workers/run_ingestion_solana.go`, `run_execution.go` (rewired only) |
 | Solana RPC Endpoint State | Per-endpoint circuit breaker for Solana RPCs; isolated from EVM endpoint state                  | migration `000007`, adapter additions                                         |
 | Solana Signature Tracking | Idempotent recording of submitted signatures + confirmation status                              | migration `000007`, adapter additions                                         |
-| Config                    | Additive `chains.yaml::solana` and `execution.yaml::solana` blocks                              | `config/chains.yaml`, `config/execution.yaml`                                 |
+| Config                    | Additive `chains.yaml::solana` and `execution.yaml::solana` blocks                              | `shared/config/chains.yaml`, `shared/config/execution.yaml`                                 |
 
-**Files introduced:** `internal/modules/ingestion_solana/` (full module), `internal/modules/execution_solana/` (full module), `internal/modules/execution/router.go` (new), `internal/workers/run_ingestion_solana.go` (new), `database/migrations/20260101000007_solana_tables.sql` (new), additive blocks in `config/chains.yaml` and `config/execution.yaml`.
+**Files introduced:** `internal/modules/ingestion_solana/` (full module), `internal/modules/execution_solana/` (full module), `internal/modules/execution/router.go` (new), `internal/workers/run_ingestion_solana.go` (new), `shared/database/migrations/20260101000007_solana_tables.sql` (new), additive blocks in `shared/config/chains.yaml` and `shared/config/execution.yaml`.
 
 **Files MODIFIED (minimal, scoped):** `internal/workers/run_execution.go` (rewired to call router only — no logic change to EVM path).
 
-**Files NEVER touched by Phase 7:** `contracts/` (DTO schemas), `internal/modules/ingestion/` (EVM ingestion), `internal/modules/data_quality/`, `internal/modules/feature/`, `internal/modules/edge/`, `internal/modules/probability/`, `internal/modules/slippage/`, `internal/modules/selection/`, `internal/modules/capital/`, `internal/modules/position/`, `internal/modules/evaluation/`, `internal/modules/learning/`, EVM execution code paths in `internal/modules/execution/` (Phase 2/6 files), the `database.Adapter` interface (additive methods only).
+**Files NEVER touched by Phase 7:** `shared/contracts/` (DTO schemas), `internal/modules/ingestion/` (EVM ingestion), `internal/modules/data_quality/`, `internal/modules/feature/`, `internal/modules/edge/`, `internal/modules/probability/`, `internal/modules/slippage/`, `internal/modules/selection/`, `internal/modules/capital/`, `internal/modules/position/`, `internal/modules/evaluation/`, `internal/modules/learning/`, EVM execution code paths in `internal/modules/execution/` (Phase 2/6 files), the `database.Adapter` interface (additive methods only).
 
 **Exit gate:** ≥ 10 Solana **devnet** swaps confirmed end-to-end, replay determinism for Solana fixtures, zero EVM regression on full Phase 2 testnet replay, zero cross-market imports (verified by import-graph guard), `AllocateNonce` never invoked when `chain="solana"`. Full criteria in [docs/reference/implementation_roadmap.md § Phase 7 Exit Criteria](implementation_roadmap.md#phase-7--solana-market-extension-p2).
 
@@ -564,19 +564,19 @@ Adds an additional `(ingestion + execution)` market without touching shared laye
 - Group A (Phase 0–2) MUST complete sequentially before any Group B phase starts
 - Group B (Phase 3–5) MAY run in parallel — they own separate `internal/modules/` subdirs
 - Group C (Phase 6) MUST run after all Group B phases are merged and validated
-- Group D (Phase 7) MUST run after Phase 6 is merged and validated; MUST NOT touch EVM ingestion (`internal/modules/ingestion/`), EVM execution code paths (Phase 2/6 files in `internal/modules/execution/`), `contracts/*.go` schemas, or the `database.Adapter` interface (additive methods only)
+- Group D (Phase 7) MUST run after Phase 6 is merged and validated; MUST NOT touch EVM ingestion (`internal/modules/ingestion/`), EVM execution code paths (Phase 2/6 files in `internal/modules/execution/`), `shared/contracts/*.go` schemas, or the `database.Adapter` interface (additive methods only)
 - Group D (Phase 7) production-grade hardening (per [docs/reference/architecture.md § 3.11.10](architecture.md#31110-solana-ingestion--execution-guarantees-production-grade)) is mandatory: deterministic replay, `EventID` PK dedup, monotonic ingestion watermark, bounded retries (≤ 5), multi-RPC failover with health scoring, latency-aware execution gate, and the full `FailureCategory` enum on every non-confirmed Solana `ExecutionResultDTO` — these are exit criteria, not optional polish
-- No phase modifies `contracts/` or `database/` without going through the DTO guardian
+- No phase modifies `shared/contracts/` or `shared/database/` without going through the DTO guardian
 - `internal/orchestrator/` is a SHARED file — requires merge validation before any edit
 
 ### File Ownership Matrix
 
 | Path                                 | Owner                  | Rule                                                                                                                    |
 | ------------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `contracts/`                         | LOCKED — additive only | No field removal, no rename                                                                                             |
-| `database/`                          | LOCKED — Phase 0 only  | Schema changes via migrations only                                                                                      |
+| `shared/contracts/`                         | LOCKED — additive only | No field removal, no rename                                                                                             |
+| `shared/database/`                          | LOCKED — Phase 0 only  | Schema changes via migrations only                                                                                      |
 | `docs/`                              | READ-ONLY              | No agent may modify                                                                                                     |
-| `config/`                            | ADDITIVE only          | New keys allowed; existing keys never removed                                                                           |
+| `shared/config/`                            | ADDITIVE only          | New keys allowed; existing keys never removed                                                                           |
 | `internal/modules/dex_ingest/`       | Phase 1                | Exclusive ownership                                                                                                     |
 | `internal/modules/data_quality/`     | Phase 2+4              | Phase 2 skeleton, Phase 4 expands                                                                                       |
 | `internal/modules/feature/`          | Phase 2+4              | Phase 2 basic, Phase 4 full                                                                                             |
@@ -714,7 +714,7 @@ phase-builder (up to 5 retries)
 
 #### DTO Guardian (STRICT)
 
-- **Execute:** Copilot `dto-guardian` agent validates `contracts/`
+- **Execute:** Copilot `dto-guardian` agent validates `shared/contracts/`
 - **Validate:** All DTOs immutable, no missing/extra fields, no mutable defaults
 - **Fix:** `dto-guardian` agent fixes DTO issues
 - **On failure:** Rollback to checkpoint
@@ -772,9 +772,9 @@ Recommended checks to implement in the hook:
 4. **SQL check** — No database driver imports in `internal/modules/`
 5. **Cross-module check** — No cross-module imports between `internal/modules/` packages
 6. **Console check** — No unstructured console output in `internal/modules/`
-7. **DTO validation** — All DTOs in `contracts/` are immutable
+7. **DTO validation** — All DTOs in `shared/contracts/` are immutable
 8. **Orchestrator integrity** — No database imports in `internal/modules/`
-9. **Protected files** — Warns if `contracts/`, `database/`, or `docs/` were modified
+9. **Protected files** — Warns if `shared/contracts/`, `shared/database/`, or `docs/` were modified
 10. **Deterministic ordering** — No unordered iteration of collections without explicit sorting
 
 Gates 1–8 are **blocking** (cause failure). Gates 9–10 are **advisory**.
@@ -996,9 +996,9 @@ Any violation corrupts pipeline state and cannot be recovered by retry alone.
 
 | #   | Invariant                                                                                         | Allowed                                                               | Forbidden                                                                                | Enforcement                                                                    |
 | --- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| A   | **DTO Immutability** — `contracts/` is additive-only                                              | Add new fields; add new DTO types                                     | Remove / rename fields; change field type; make immutable field mutable                  | `dto-guardian` after every `phase-builder`; violation aborts phase immediately |
-| B   | **Adapter Interface Immutability** — `database/adapter.go` does not change during parallel phases | Add a new adapter method                                              | Rename / change signature of existing method; remove a method                            | Compile error detected by `integration` agent                                  |
-| C   | **Module Isolation** — each module is a pure function                                             | Accept DTO in, return DTO out; import from `contracts/` only          | Import another module; import from `database/`; manage own state; call Telegram directly | `integration` agent cross-module import check                                  |
+| A   | **DTO Immutability** — `shared/contracts/` is additive-only                                              | Add new fields; add new DTO types                                     | Remove / rename fields; change field type; make immutable field mutable                  | `dto-guardian` after every `phase-builder`; violation aborts phase immediately |
+| B   | **Adapter Interface Immutability** — `shared/database/adapter.go` does not change during parallel phases | Add a new adapter method                                              | Rename / change signature of existing method; remove a method                            | Compile error detected by `integration` agent                                  |
+| C   | **Module Isolation** — each module is a pure function                                             | Accept DTO in, return DTO out; import from `shared/contracts/` only          | Import another module; import from `shared/database/`; manage own state; call Telegram directly | `integration` agent cross-module import check                                  |
 | D   | **Event Contract Immutability** — event type strings are immutable once published                 | Add a new event type                                                  | Rename existing event type; change payload schema without versioning                     | `integration` agent event-type registry check                                  |
 | E   | **Lifecycle Consistency** — all state transitions use READ → VALIDATE → CAS                       | `TransitionState` with `ExpectedStateVersion`; `SKIP LOCKED` claiming | Optimistic update without CAS; two workers reading same event without SKIP LOCKED        | `quality-gates.sh` CAS pattern check                                           |
 | F   | **Event Bus Safety** — one primary consumer per event type                                        | Fan-out by publishing new events from consumer                        | Two workers both reading the same event type; consumer mutating past events              | `integration` agent consumer-group registry                                    |
@@ -1093,11 +1093,11 @@ detection method and resolution path.
 
 | Failure Mode                         | Description                                                                                                                                                                                                                   | Detection                                                                                                                                                               | Resolution                                                                                                          |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --- | --------- | --- | ------------------------------------------------------------------------------------------------- |
-| **DTO Drift**                        | A module uses fields not in `contracts/` or uses stale types                                                                                                                                                                  | `dto-guardian` reports mismatches                                                                                                                                       | Agent fixes contract or module; additive only                                                                       |
+| **DTO Drift**                        | A module uses fields not in `shared/contracts/` or uses stale types                                                                                                                                                                  | `dto-guardian` reports mismatches                                                                                                                                       | Agent fixes contract or module; additive only                                                                       |
 | **Module Collision**                 | Two parallel phases write to the same `internal/modules/<name>/` file                                                                                                                                                         | Git merge conflict on merge                                                                                                                                             | `conflict-resolver` agent + union merge strategy                                                                    |
 | **Lifecycle Race**                   | Two workers transition a token simultaneously without CAS                                                                                                                                                                     | Duplicate processing in logs or corrupted position state                                                                                                                | Fix transition to use CAS + SKIP LOCKED; replay from event log                                                      |
 | **Merge Corruption**                 | A phase's module silently breaks an earlier phase after union merge                                                                                                                                                           | Global validation quality gates fail post-merge                                                                                                                         | `refactor` agent with full quality gate context; re-run gates                                                       |
-| **Adapter Signature Break**          | A phase changes `database/adapter.go` interface during parallel work                                                                                                                                                          | Compile error in other phases                                                                                                                                           | Sequential fix: finish and merge the changing phase before others                                                   |
+| **Adapter Signature Break**          | A phase changes `shared/database/adapter.go` interface during parallel work                                                                                                                                                          | Compile error in other phases                                                                                                                                           | Sequential fix: finish and merge the changing phase before others                                                   |
 | **Event Type Rename**                | An event type string is renamed in one branch                                                                                                                                                                                 | Consumer worker silently stops processing in merged code                                                                                                                | `integration` agent detects; revert rename, use additive versioning                                                 |
 | **Orchestrator Conflict**            | Two phases both modify `internal/orchestrator/orchestrator.go`                                                                                                                                                                | Git merge conflict                                                                                                                                                      | `conflict-resolver` agent; union merge preserves all stage registrations                                            |
 | **Cross-Market Contamination**       | Solana logic leaks into EVM code path (or vice versa) — e.g. Solana module imports `internal/modules/ingestion/`, or EVM execution invokes Solana RPC                                                                         | Import-graph guard via `dependency-analysis` skill; integration test counter for `AllocateNonce` calls when `chain="solana"`                                            | Phase 7 rollback; refactor to relocate logic into the chain-specific module under `internal/modules/*_solana/`      |
@@ -1108,8 +1108,8 @@ detection method and resolution path.
 
 Run these in sequence before proceeding to global validation:
 
-1. **DTO compatibility** — `dto-guardian` re-validates all `contracts/`; additive check only
-2. **Adapter interface** — Verify `database/adapter.go` matches all call sites in orchestrator
+1. **DTO compatibility** — `dto-guardian` re-validates all `shared/contracts/`; additive check only
+2. **Adapter interface** — Verify `shared/database/adapter.go` matches all call sites in orchestrator
 3. **Event type registry** — Verify all event type strings in workers match emissions in modules
 4. **Worker registration** — Verify all workers are registered in `internal/orchestrator/orchestrator.go`
 5. **Orchestrator wiring** — Verify stage sequence matches canonical pipeline order (Layer 0–10)

@@ -34,7 +34,7 @@ Negative = unhealthy. Positive = healthy.
 
 ```go
 // Crypto DEX thresholds are more aggressive than traditional markets.
-// All thresholds live in config/pipeline.yaml.
+// All thresholds live in shared/config/pipeline.yaml.
 type VolumeSpikeConfig struct {
     SpikeMultiplierCrypto float64 // default: 3.0×
     BaselineWindowBars    int     // default: 20 bars
@@ -276,7 +276,7 @@ func EnrichDQWithLiquidity(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 liquidity:
@@ -298,7 +298,7 @@ liquidity:
 - [ ] Cascade detection requires both price drop AND volume spike (AND, not OR)
 - [ ] `FAKE_LIQUIDITY_CASCADE` flag always set on cascade detection
 - [ ] Liquidity score feeds into DataQualityDTO risk aggregation (not a standalone gate)
-- [ ] All thresholds in `config/pipeline.yaml`, none hardcoded
+- [ ] All thresholds in `shared/config/pipeline.yaml`, none hardcoded
 
 ---
 
@@ -308,4 +308,4 @@ liquidity:
 - `docs/archive/architecture-context/3_data_quality_engine.md` — Detector algorithms
 - `.github/skills/anti-manipulation/SKILL.md` — Risk score aggregation (this feeds into it)
 - `.github/skills/data-quality-engine/SKILL.md` — Full DQ module architecture
-- `contracts/data_quality.go` — `DataQualityDTO` field definitions
+- `shared/contracts/data_quality.go` — `DataQualityDTO` field definitions

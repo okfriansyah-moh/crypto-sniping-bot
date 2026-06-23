@@ -415,7 +415,7 @@ for _, f := range flags {
 [ ] Shannon entropy computed for wash trading (not just wallet count)
 [ ] Privilege weights configurable: mint/setTax/blacklist/pause/upgrade
 [ ] LP lock strength: [0,1] scale (0=unlocked, 1=burned)
-[ ] All weights and thresholds loaded from config/data_quality.yaml
+[ ] All weights and thresholds loaded from shared/config/data_quality.yaml
 [ ] Adaptive controller bounded: Δthreshold ≤ MaxDeltaPct per cycle
 [ ] FP and FN signals both tracked (requires shadow observer for FN)
 [ ] Three-outcome decision: "pass" | "risky-pass" | "reject"
@@ -433,5 +433,5 @@ for _, f := range flags {
 - Architecture: `docs/reference/architecture.md` § 3.1 (Data Quality Engine)
 - DTO spec: `docs/reference/dto_contracts.md` § 3.2 (DataQualityDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.1
-- Config: `config/data_quality.yaml`
+- Config: `shared/config/data_quality.yaml`
 - `.github/skills/liquidity-event-detector/SKILL.md` — Full cascade + imbalance algorithms

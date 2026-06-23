@@ -7,7 +7,7 @@ description: "DTO interpretation and validation. Use when creating, modifying, r
 
 ## Purpose
 
-Enforce immutable DTO contracts across the entire codebase. Ensures all cross-module data exchange uses typed, immutable DTOs defined in `contracts/`.
+Enforce immutable DTO contracts across the entire codebase. Ensures all cross-module data exchange uses typed, immutable DTOs defined in `shared/contracts/`.
 
 ## Rules
 
@@ -33,12 +33,12 @@ Enforce immutable DTO contracts across the entire codebase. Ensures all cross-mo
 
 ## Inputs
 
-- `contracts/` directory — immutable DTO definitions
+- `shared/contracts/` directory — immutable DTO definitions
 - `docs/reference/dto_contracts.md` — DTO registry with fields, types, constraints
 
 ## Outputs
 
-- Validated DTOs in `contracts/` with correct structure
+- Validated DTOs in `shared/contracts/` with correct structure
 - Compatibility report listing any DTO mismatches
 
 ## DTO Registry Pattern
@@ -47,8 +47,8 @@ Each project defines its DTOs in `docs/reference/dto_contracts.md`. The registry
 
 | DTO             | File                     | Producer | Consumers          | Key Constraints           |
 | --------------- | ------------------------ | -------- | ------------------ | ------------------------- |
-| `EntityResult`  | `contracts/entity.py`    | module_a | module_b, module_c | `entity_id`: 16 hex chars |
-| `ProcessedData` | `contracts/processed.py` | module_b | module_d           | all scores in [0.0–1.0]   |
+| `EntityResult`  | `shared/contracts/entity.py`    | module_a | module_b, module_c | `entity_id`: 16 hex chars |
+| `ProcessedData` | `shared/contracts/processed.py` | module_b | module_d           | all scores in [0.0–1.0]   |
 
 Populate this table from your project's `docs/reference/dto_contracts.md`.
 

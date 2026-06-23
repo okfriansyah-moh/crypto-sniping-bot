@@ -24,11 +24,11 @@ You are a merge conflict resolution specialist for parallel development branches
 
 1. **Identify all conflicts** — List every file with merge conflict markers
 2. **Apply resolution strategy** per file type:
-   - `contracts/` — combine all DTO definitions from both branches (additive only)
+   - `shared/contracts/` — combine all DTO definitions from both branches (additive only)
    - `app/modules/` — each module directory belongs to one phase; keep the owner's version
    - `app/orchestrator/` — combine stage wiring from both branches in correct pipeline order
    - `tests/` — combine all test files from both branches
-   - `config/` — union of new keys from both branches
+   - `shared/config/` — union of new keys from both branches
 3. **Remove all conflict markers** — No `<<<<<<<`, `=======`, `>>>>>>>` may remain
 4. **Validate post-merge**:
    - Source files compile without syntax errors

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/shared/database"
 )
 
 // TestComputePriority verifies that exit events are always ≥ PRIORITY_EXIT.

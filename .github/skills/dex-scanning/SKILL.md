@@ -71,7 +71,7 @@ Pool is "new" when:
 Config-driven thresholds (never hardcode):
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 ingestion:
   new_pool_window_blocks: 50 # ~10 min on ETH
   new_pool_max_age_seconds: 600 # 10 minutes
@@ -191,4 +191,4 @@ dto := contracts.MarketDataDTO{
 - Architecture: `docs/reference/architecture.md` § 3.0 (Detection & Ingestion)
 - DTO spec: `docs/reference/dto_contracts.md` § 3.1 (MarketDataDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 1
-- Config: `config/pipeline.yaml` → `ingestion` section
+- Config: `shared/config/pipeline.yaml` → `ingestion` section

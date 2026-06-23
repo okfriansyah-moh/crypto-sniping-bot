@@ -3,7 +3,7 @@
 > **Version:** 1.0
 > **Date:** 2026-06-13
 > **Author:** Plan Management (from `docs/specs/2026-06-10-operator-dashboard-design.md` + mockup `docs/mockups/operator-dashboard.html`)
-> **Status:** Ready for Implementation
+> **Status:** Completed (2026-06-14)
 > **Source of Truth:** `docs/specs/2026-06-10-operator-dashboard-design.md` · UI artifact: `docs/mockups/operator-dashboard.html`
 > **Pipeline Layers Affected:** Platform (operator UX, HTTP API, deploy topology) — **no L0–L10 pipeline logic changes in Phases 1–3**
 > **Profit Factors Affected:** None directly (infra/operator UX) — indirect: faster incident response preserves Execution + AdaptationQuality
@@ -16,13 +16,13 @@ Split the repository into three deployable units — `frontend-dashboard/`, `bac
 
 **Phased delivery:**
 
-| Phase | Scope | Sniper impact |
-| ----- | ----- | ------------- |
-| **1 — Extract** | Shared `internal/operator/` query layer; Telegram rewired to use it | Zero behavior change |
-| **2 — API** | `backend-dashboard` process: read-only REST on port 8090 | Sniper still serves `/health` on 8080 |
-| **3 — UI** | `frontend-dashboard` SPA polling backend API | None |
-| **4 — Split** | Physical folder move to `sniper-bot/`; Docker Compose 3 services | `serve` entry moves path only |
-| **5 — Control** | Operator commands via event bus (mode/kill/resume) | New consumer worker in sniper |
+| Phase           | Scope                                                               | Sniper impact                         |
+| --------------- | ------------------------------------------------------------------- | ------------------------------------- |
+| **1 — Extract** | Shared `internal/operator/` query layer; Telegram rewired to use it | Zero behavior change                  |
+| **2 — API**     | `backend-dashboard` process: read-only REST on port 8090            | Sniper still serves `/health` on 8080 |
+| **3 — UI**      | `frontend-dashboard` SPA polling backend API                        | None                                  |
+| **4 — Split**   | Physical folder move to `sniper-bot/`; Docker Compose 3 services    | `serve` entry moves path only         |
+| **5 — Control** | Operator commands via event bus (mode/kill/resume)                  | New consumer worker in sniper         |
 
 **Why:** Operators today depend on Telegram (`/status`, `/pnl`, `/pipeline`, `/dq`) and shell scripts (`gate_review_collect.sh`). A unified dashboard reduces operational blind spots without coupling UI to the hot trading path.
 
@@ -33,7 +33,7 @@ Split the repository into three deployable units — `frontend-dashboard/`, `bac
 1. **Strangler fig** — add `backend-dashboard` and `frontend-dashboard` alongside the monolith; do not rewrite the pipeline.
 2. **Extract before move** — create `internal/operator/` and prove Telegram parity **before** moving files into `sniper-bot/`.
 3. **Read-only first** — no dashboard write path until Tasks 1–21 are green and operators sign off on read parity.
-4. **Single database** — both processes use the same PostgreSQL DSN; migrations remain centralized in `database/migrations/`.
+4. **Single database** — both processes use the same PostgreSQL DSN; migrations remain centralized in `shared/database/migrations/`.
 5. **Sniper owns hot path** — private keys, RPC, execution, ingestion stay in `sniper-bot` only.
 6. **Commands via event bus** — dashboard writes emit `operator_command_event`; sniper consumes — same audit model as Telegram.
 7. **Rollback = stop dashboard** — disabling `backend-dashboard` and `frontend-dashboard` containers leaves trading unaffected.
@@ -43,36 +43,18 @@ Split the repository into three deployable units — `frontend-dashboard/`, `bac
 
 ```
 crypto-sniping-bot/                    # monorepo root; go.mod stays here (v1)
-├── contracts/                         # SHARED — immutable DTOs
-├── database/                          # SHARED — adapter + migrations
-├── config/                            # SHARED — sniper source of truth
-├── internal/
-│   └── operator/                      # SHARED — read queries + formatters
-├── sniper-bot/
-│   ├── cmd/
-│   │   ├── serve.go                   # was cmd/server.go (pipeline daemon)
-│   │   ├── migrate.go
-│   │   └── hydrate.go
-│   └── internal/                      # moved: orchestrator, workers, modules, rpc, telegram, ai
-├── backend-dashboard/
-│   ├── cmd/
-│   │   └── serve.go                   # dashboard API only (:8090)
-│   └── internal/
-│       ├── api/                       # HTTP handlers (vertical slices)
-│       ├── auth/                      # API key + CORS middleware
-│       └── gate/                      # gate evidence reader (wraps script logic)
-├── frontend-dashboard/
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── src/
-│       ├── views/                     # overview, pipeline, positions, …
-│       └── api/                       # typed fetch client
+├── sniper-bot/                        # deploy unit — pipeline + workers + telegram
+├── backend-dashboard/                 # deploy unit — operator REST API :8090
+├── frontend-dashboard/                # deploy unit — operator SPA
+├── shared/
+│   ├── contracts/                     # immutable DTOs
+│   ├── database/                      # adapter + migrations
+│   └── config/                        # YAML — sniper source of truth
+├── internal/                          # cross-app Go (operator, bootstrap, health)
 ├── docs/
-│   ├── OPERATOR_DASHBOARD_PLAN.md     # this file
-│   ├── specs/2026-06-10-operator-dashboard-design.md
-│   └── mockups/operator-dashboard.html
-├── docker-compose.yml                 # 3 services: sniper, dashboard-api, dashboard-ui
-└── go.mod                             # module crypto-sniping-bot (unchanged)
+├── scripts/
+├── docker-compose.yml
+└── go.mod
 ```
 
 ---
@@ -81,21 +63,21 @@ crypto-sniping-bot/                    # monorepo root; go.mod stays here (v1)
 
 ### Affected Pipeline Layers
 
-| Layer / Area | Path | Change type |
-| ------------ | ---- | ----------- |
-| Platform | `internal/operator/` | **Create** — shared read-query layer |
-| Platform | `backend-dashboard/` | **Create** — new HTTP API process |
-| Platform | `frontend-dashboard/` | **Create** — new SPA |
-| Platform | `sniper-bot/cmd/serve.go` | **Move** from `cmd/server.go` — no logic change in Phase 4 |
-| Platform | `cmd/telegram.go` | **Modify** — delegate to `internal/operator/` |
-| Contracts | `contracts/operator_api.go` | **Create** — additive API response DTOs |
-| Contracts | `contracts/operator_command.go` | **Create** (Phase 5) — command event payload |
-| DB | `database/migrations/20260613000001_operator_commands.sql` | **Create** (Phase 5) — optional command audit table |
-| Config | `config/dashboard.yaml` | **Create** — API port, CORS, poll hints, auth |
-| Config | `internal/app/config/dashboard_config.go` | **Create** — Go struct for dashboard.yaml |
-| L0–L10 | `internal/modules/*` | **No change** in Phases 1–3 |
-| Event bus | `events` table | **Consume** (Phase 5) — `operator_command_event` |
-| Telegram | `internal/telegram/` | **Unchanged** through Phase 3; optional deprecation in Phase 5 |
+| Layer / Area | Path                                                       | Change type                                                    |
+| ------------ | ---------------------------------------------------------- | -------------------------------------------------------------- |
+| Platform     | `internal/operator/`                                       | **Create** — shared read-query layer                           |
+| Platform     | `backend-dashboard/`                                       | **Create** — new HTTP API process                              |
+| Platform     | `frontend-dashboard/`                                      | **Create** — new SPA                                           |
+| Platform     | `sniper-bot/cmd/serve.go`                                  | **Move** from `cmd/server.go` — no logic change in Phase 4     |
+| Platform     | `cmd/telegram.go`                                          | **Modify** — delegate to `internal/operator/`                  |
+| Contracts    | `shared/contracts/operator_api.go`                                | **Create** — additive API response DTOs                        |
+| Contracts    | `shared/contracts/operator_command.go`                            | **Create** (Phase 5) — command event payload                   |
+| DB           | `shared/database/migrations/20260613000001_operator_commands.sql` | **Create** (Phase 5) — optional command audit table            |
+| Config       | `shared/config/dashboard.yaml`                                    | **Create** — API port, CORS, poll hints, auth                  |
+| Config       | `internal/app/config/dashboard_config.go`                  | **Create** — Go struct for dashboard.yaml                      |
+| L0–L10       | `internal/modules/*`                                       | **No change** in Phases 1–3                                    |
+| Event bus    | `events` table                                             | **Consume** (Phase 5) — `operator_command_event`               |
+| Telegram     | `internal/telegram/`                                       | **Unchanged** through Phase 3; optional deprecation in Phase 5 |
 
 ### DTO Flow (before → after)
 
@@ -115,31 +97,31 @@ After Phase 5 (write path):
 
 ### Key Decisions
 
-| Decision | Rationale |
-| -------- | --------- |
-| **Monorepo, single `go.mod`** | Avoids import-path churn during migration; `sniper-bot/` and `backend-dashboard/` are deploy boundaries, not separate Go modules (v1). |
-| **`internal/operator/` shared package** | One query implementation for Telegram + REST — prevents drift; lives outside `internal/modules/` (not a pipeline stage). |
-| **Separate `backend-dashboard` process** | Isolates API load, auth surface, and restart cycles from the trading hot path. |
-| **Read-only v1 (Approach A)** | Matches approved design spec; no new write paths until read parity proven. |
-| **Commands via event bus (Phase 5)** | Preserves audit trail, bounded mode transitions, and fail-closed destructive-action rules from Telegram. |
-| **Poll every 30s (no WebSocket v1)** | Design spec YAGNI; sufficient for operator monitoring. |
-| **Sniper keeps `/health` on :8080** | Existing Docker healthcheck (`Dockerfile` line 57–58) unchanged until explicitly migrated. |
-| **Gate review: read latest `gate_evidence_*.json` + live DB metrics** | Mirrors `scripts/gate_review_collect.sh` output; script remains source for batch collection. |
-| **Physical folder move last (Phase 4)** | Minimizes simultaneous breakage — extract + API + UI work in current paths first. |
+| Decision                                                              | Rationale                                                                                                                              |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Monorepo, single `go.mod`**                                         | Avoids import-path churn during migration; `sniper-bot/` and `backend-dashboard/` are deploy boundaries, not separate Go modules (v1). |
+| **`internal/operator/` shared package**                               | One query implementation for Telegram + REST — prevents drift; lives outside `internal/modules/` (not a pipeline stage).               |
+| **Separate `backend-dashboard` process**                              | Isolates API load, auth surface, and restart cycles from the trading hot path.                                                         |
+| **Read-only v1 (Approach A)**                                         | Matches approved design spec; no new write paths until read parity proven.                                                             |
+| **Commands via event bus (Phase 5)**                                  | Preserves audit trail, bounded mode transitions, and fail-closed destructive-action rules from Telegram.                               |
+| **Poll every 30s (no WebSocket v1)**                                  | Design spec YAGNI; sufficient for operator monitoring.                                                                                 |
+| **Sniper keeps `/health` on :8080**                                   | Existing Docker healthcheck (`Dockerfile` line 57–58) unchanged until explicitly migrated.                                             |
+| **Gate review: read latest `gate_evidence_*.json` + live DB metrics** | Mirrors `scripts/gate_review_collect.sh` output; script remains source for batch collection.                                           |
+| **Physical folder move last (Phase 4)**                               | Minimizes simultaneous breakage — extract + API + UI work in current paths first.                                                      |
 
 ### Mockup View → API Mapping
 
-| Mockup `data-view` | REST endpoint (v1) | Operator query / adapter source |
-| ------------------ | ------------------ | ------------------------------- |
-| `overview` | `GET /api/v1/overview?chain=&market=` | `GetSystemState`, shadow gate, PnL summary, exposure |
-| `pipeline` | `GET /api/v1/pipeline?window_hours=24&chain=` | `GetPipelineStats`, rescan stats (type-assert) |
-| `positions` | `GET /api/v1/positions?chain=` | `GetOpenPositions` |
-| `activity` | `GET /api/v1/activity?limit=50&chain=` | New: `ListRecentEvents` adapter method |
-| `dq` | `GET /api/v1/dq?window_hours=24&chain=` | DQ breakdown from lifecycle + decision logs |
-| `gate` | `GET /api/v1/gate/evidence` | Latest `output/logs/gate_evidence_*.json` + live throughput counters |
-| `mode` | `GET /api/v1/mode` (read); `POST /api/v1/commands` (Phase 5) | `GetSystemState` |
-| `safety` | `GET /api/v1/safety` (read); `POST /api/v1/commands` (Phase 5) | `IsSystemHalted`, kill/resume via command bus |
-| `configs` | `GET /api/v1/configs` | Read-only manifest of `config/*.yaml` (secrets redacted) |
+| Mockup `data-view` | REST endpoint (v1)                                             | Operator query / adapter source                                      |
+| ------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `overview`         | `GET /api/v1/overview?chain=&market=`                          | `GetSystemState`, shadow gate, PnL summary, exposure                 |
+| `pipeline`         | `GET /api/v1/pipeline?window_hours=24&chain=`                  | `GetPipelineStats`, rescan stats (type-assert)                       |
+| `positions`        | `GET /api/v1/positions?chain=`                                 | `GetOpenPositions`                                                   |
+| `activity`         | `GET /api/v1/activity?limit=50&chain=`                         | New: `ListRecentEvents` adapter method                               |
+| `dq`               | `GET /api/v1/dq?window_hours=24&chain=`                        | DQ breakdown from lifecycle + decision logs                          |
+| `gate`             | `GET /api/v1/gate/evidence`                                    | Latest `output/logs/gate_evidence_*.json` + live throughput counters |
+| `mode`             | `GET /api/v1/mode` (read); `POST /api/v1/commands` (Phase 5)   | `GetSystemState`                                                     |
+| `safety`           | `GET /api/v1/safety` (read); `POST /api/v1/commands` (Phase 5) | `IsSystemHalted`, kill/resume via command bus                        |
+| `configs`          | `GET /api/v1/configs`                                          | Read-only manifest of `shared/config/*.yaml` (secrets redacted)             |
 
 ---
 
@@ -152,8 +134,8 @@ This plan maintains the following architecture invariants:
 - [x] **Idempotency**: command events use content-addressable `EventID = SHA256(content)[:16]`; `ON CONFLICT DO NOTHING`
 - [x] **Module isolation**: no new cross-module imports in `internal/modules/`; `internal/operator/` is platform code, not a pipeline stage
 - [x] **No direct DB access from modules**: `backend-dashboard` uses `database.Adapter` only (same as orchestrator/Telegram today)
-- [x] **DTO additive-only**: new files `contracts/operator_api.go`, `contracts/operator_command.go` — no existing DTO field changes
-- [x] **Config-driven**: dashboard port, CORS origins, poll interval in `config/dashboard.yaml`
+- [x] **DTO additive-only**: new files `shared/contracts/operator_api.go`, `shared/contracts/operator_command.go` — no existing DTO field changes
+- [x] **Config-driven**: dashboard port, CORS origins, poll interval in `shared/config/dashboard.yaml`
 - [x] **Event bus backbone**: Phase 5 commands flow through `events` table
 - [x] **Security invariants**: API key via `DASHBOARD_API_KEY` env; HTTPS in prod; bounded response bodies; no keys in YAML
 - [x] **Layer-1 hard rejects intact**: dashboard never bypasses DQ — read-only display only
@@ -166,104 +148,149 @@ This plan maintains the following architecture invariants:
 
 ## 4. Implementation Tasks
 
+### 4.1 Monorepo layout & process boundary → task map
+
+> **End-state layout** (§1.2): one git repo, **three deployable units**, **four shared roots** (`shared/contracts/`, `shared/database/`, `shared/config/`, `internal/operator/`). v1 uses a **single root `go.mod`** (`crypto-sniping-bot`); `go.work` is deferred until a future multi-module split.
+
+| Layer / process                 | Boundary rule                                                         | Refactored in task(s)                                                                                 | What appears on disk                                     |
+| ------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **SHARED** `shared/contracts/`         | Immutable DTOs; no process imports modules                            | **1** (API DTOs), **21** (command DTO)                                                                | Stays at repo root — never moved                         |
+| **SHARED** `shared/database/`          | Adapter + migrations; both processes read                             | **2** (read queries), **21** (command migration)                                                      | Stays at repo root                                       |
+| **SHARED** `internal/operator/` | Read queries + formatters; not a pipeline stage                       | **3–5** (queries), **6** (Telegram parity)                                                            | Stays at repo root                                       |
+| **SHARED** `shared/config/`            | Sniper = source of truth; dashboard gets own YAML                     | **7** (`dashboard.yaml`)                                                                              | `shared/config/dashboard.yaml` additive                         |
+| **`backend-dashboard`**         | REST `:8090`; adapter reads; **no keys, no workers, no orchestrator** | **8** (process skeleton), **9** (auth/CORS), **10–12** (read API), **22** (POST commands → event bus) | **Task 8** creates `backend-dashboard/`                  |
+| **`frontend-dashboard`**        | SPA; poll API only; **no DB, no secrets, no sniper URL**              | **13** (scaffold), **14** (layout), **15–17** (read views), **24** (control UI)                       | **Task 13** creates `frontend-dashboard/`                |
+| **`sniper-bot`**                | Hot path only: orchestrator, L0–L10, keys, RPC, Telegram              | **18** (physical move), **20** (`/health` only on `:8080`), **23** (command consumer)                 | **Task 18** creates `sniper-bot/` and moves trading code |
+| **Deploy topology**             | Three containers + shared Postgres                                    | **19** (`docker-compose.yml`)                                                                         | Runtime boundary enforcement                             |
+| **Command path**                | Dashboard writes **never** touch sniper state directly                | **21** (DTO + event type), **22** (backend inserts event), **23** (sniper consumes)                   | Event bus audit trail                                    |
+
+**When each top-level folder is created** (do not move sniper code earlier):
+
+| Milestone                              | Task   | New / moved path                                                                                                        |
+| -------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Shared extraction (no new deploy dirs) | 1–6    | `internal/operator/` at repo root                                                                                       |
+| Backend deploy unit                    | **8**  | `backend-dashboard/cmd/serve.go` + `internal/`                                                                          |
+| Frontend deploy unit                   | **13** | `frontend-dashboard/` (Vite + React)                                                                                    |
+| Sniper deploy unit (physical split)    | **18** | `sniper-bot/cmd/`, `sniper-bot/internal/` ← move from `cmd/`, `internal/{modules,workers,orchestrator,rpc,telegram,ai}` |
+| Three-service runtime                  | **19** | `docker-compose.yml`                                                                                                    |
+
+**Process boundary diagram** (matches §1.2 and `docs/specs/2026-06-10-operator-dashboard-design.md`):
+
+```
+frontend-dashboard  ◄──REST/poll──►  backend-dashboard (:8090)
+                                              │ read (adapter)
+                                              │ write (Phase 5: operator_command_event)
+                                              ▼
+                                        PostgreSQL
+                                              ▲
+                                              │ write (hot path)
+                                        sniper-bot (:8080 /health)
+```
+
+**Command path (Phase 5 — Tasks 21–24):** `POST /api/v1/commands` → `operator_command_event` on event bus → sniper-bot worker applies mode/kill/resume (same safety model as Telegram). Backend-dashboard **must not** call adapter write methods for operator control.
+
+---
+
 ### Dependency Graph
 
 ```
-── Phase 1: Extract (zero deploy change) ──
+── Phase 1: Extract shared layers (zero deploy change; no new top-level dirs) ──
 
-Task 1 (Contracts: operator API response DTOs)
+Task 1 ✅ (Contracts: operator API response DTOs)          [SHARED: contracts/]
     │
     ▼
-Task 2 (Adapter: ListRecentEvents + DQ breakdown query)
+Task 2 ✅ (Adapter: ListRecentEvents + DQ breakdown query)  [SHARED: database/]
     │
     ▼
-Task 3 (internal/operator: overview + pnl + status queries)
+Task 3 ✅ (internal/operator: overview + pnl + status)      [SHARED: internal/operator/]
     │
     ▼
-Task 4 (internal/operator: pipeline + positions + dq queries)
+Task 4 ✅ (internal/operator: pipeline + positions + dq)      [SHARED: internal/operator/]
     │
     ▼
-Task 5 (internal/operator: gate evidence + activity + config manifest)
+Task 5 ✅ (internal/operator: gate + activity + configs)    [SHARED: internal/operator/]
     │
     ▼
-Task 6 (cmd/telegram.go: rewire to internal/operator — parity tests)
+Task 6 ✅ (cmd/telegram.go → internal/operator parity)      [SHARED: parity gate]
 
-── Phase 2: Backend API (new process, read-only) ──
+── Phase 2: backend-dashboard deploy unit (new process, read-only) ──
 
-Task 7 (config/dashboard.yaml + DashboardConfig struct)
+Task 7 ✅ (shared/config/dashboard.yaml + DashboardConfig)           [SHARED: config/]
     │
     ▼
-Task 8 (backend-dashboard/cmd/serve.go skeleton + DB init)
+Task 8 ✅ (backend-dashboard/cmd/serve.go skeleton)           [BOUNDARY: create backend-dashboard/]
     │
     ▼
-Task 9 (Auth middleware: API key + CORS + security headers)
+Task 9 ✅ (Auth middleware: API key + CORS)                 [BOUNDARY: backend-dashboard/]
     │
     ▼
-Task 10 (GET /api/v1/overview + /api/v1/health)
+Task 10 ✅ (GET /api/v1/overview + /api/v1/health)          [BOUNDARY: backend-dashboard/]
     │
     ▼
-Task 11 (GET /api/v1/pipeline + /positions + /pnl)
+Task 11 ✅ (GET /api/v1/pipeline + /positions + /pnl)       [BOUNDARY: backend-dashboard/]
     │
     ▼
-Task 12 (GET /api/v1/dq + /activity + /gate + /configs)
+Task 12 ✅ (GET /api/v1/dq + /activity + /gate + /configs)  [BOUNDARY: backend-dashboard/]
 
-── Phase 3: Frontend (read-only UI) ──
+── Phase 3: frontend-dashboard deploy unit (read-only UI) ──
 
-Task 13 (frontend-dashboard: Vite + React + TS scaffold)
+Task 13 ✅ (frontend-dashboard: Vite + React + TS)          [BOUNDARY: create frontend-dashboard/]
     │
     ▼
-Task 14 (Layout shell: sidebar, chain bar, design tokens from mockup)
+Task 14 ✅ (Layout shell from mockup)                       [BOUNDARY: frontend-dashboard/]
     │
     ▼
-Task 15 (Views: overview + pipeline + positions)
+Task 15 ✅ (Views: overview + pipeline + positions)         [BOUNDARY: frontend-dashboard/]
     │
     ▼
-Task 16 (Views: activity + dq + gate)
+Task 16 ✅ (Views: activity + dq + gate)                    [BOUNDARY: frontend-dashboard/]
     │
     ▼
-Task 17 (Views: mode + safety + configs — read-only placeholders)
+Task 17 ✅ (Views: mode + safety + configs — read-only)     [BOUNDARY: frontend-dashboard/]
 
-── Phase 4: Physical split + deploy ──
+── Phase 4: sniper-bot deploy unit + runtime topology ──
 
-Task 18 (Move sniper code → sniper-bot/; update imports + Makefile)
+Task 18 ✅ (Move trading code → sniper-bot/)                [BOUNDARY: create sniper-bot/ — physical split]
     │
     ▼
-Task 19 (docker-compose.yml: sniper + dashboard-api + dashboard-ui)
+Task 19 (docker-compose.yml: 3 services + Postgres) ✅      [BOUNDARY: deploy topology]
     │
     ▼
-Task 20 (Slim sniper HTTP: /health only; dashboard API fully on :8090)
+Task 20 (Slim sniper HTTP: /health only on :8080) ✅        [BOUNDARY: sniper-bot/]
 
-── Phase 5: Control plane (after read path stable) ──
+── Phase 5: Control plane via event bus (after read path stable) ──
 
-Task 21 (Migration + OperatorCommandDTO + event type)
+Task 21 (OperatorCommandDTO + migration) ✅                 [SHARED: contracts/ + database/]
     │
     ▼
-Task 22 (backend POST /api/v1/commands with confirmation tokens)
+Task 22 (backend POST /api/v1/commands) ✅                    [BOUNDARY: backend-dashboard/ writes event only]
     │
     ▼
-Task 23 (sniper-bot: operator command consumer worker)
+Task 23 (sniper-bot command consumer worker) ✅             [BOUNDARY: sniper-bot/ consumes event]
     │
     ▼
-Task 24 (frontend: mode/safety write UI with confirmation modals)
+Task 24 (frontend: mode/safety write UI) ✅                   [BOUNDARY: frontend-dashboard/]
 
 ── Final validation ──
 
-Task 25 (Integration tests + E2E smoke + PROGRESS_REPORT.md + architecture cross-ref)
+Task 25 (Integration tests + E2E smoke + docs) ✅        [ALL boundaries]
 ```
 
 ### Task Completion Protocol (required for every task)
 
 A task is **not complete** until all validation commands pass **and** `docs/ops/PROGRESS_REPORT.md` is updated in the same session.
 
-| Item | Convention |
-| ---- | ---------- |
-| Commit prefix | `OPERATOR_DASHBOARD Task N — {task name}` |
-| Progress report | Append row to `docs/ops/PROGRESS_REPORT.md` using existing table format |
-| Rollback check | After Tasks 8+, confirm `crypto-sniping-bot serve` still passes `go test ./...` with zero dashboard dependencies required |
+| Item            | Convention                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Commit prefix   | `OPERATOR_DASHBOARD Task N — {task name}`                                                                                 |
+| Progress report | Append row to `docs/ops/PROGRESS_REPORT.md` using existing table format                                                   |
+| Rollback check  | After Tasks 8+, confirm `crypto-sniping-bot serve` still passes `go test ./...` with zero dashboard dependencies required |
 
 ---
 
-### Task 1 — Contracts: Operator API Response DTOs
+### Task 1 — Contracts: Operator API Response DTOs ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Define additive JSON-serializable response shapes for dashboard REST endpoints — decoupled from Telegram HTML formatting.
 
@@ -271,7 +298,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 **Files to create/modify:**
 
-- `contracts/operator_api.go` (create) — response DTOs:
+- `shared/contracts/operator_api.go` (create) — response DTOs:
   - `OverviewResponseDTO` — mode, shadow/live, drawdown, exposure, open positions, PnL today, win rate 7d, shadow gate block, chain status strip
   - `PipelineStatsResponseDTO` — wraps funnel counts + per-layer heartbeat status
   - `PositionRowDTO` — open position summary for table view
@@ -296,7 +323,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 2 — Adapter: ListRecentEvents + DQ Breakdown Queries
+### Task 2 — Adapter: ListRecentEvents + DQ Breakdown Queries ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Add read-only adapter methods needed by the dashboard but not yet exposed via Telegram text commands.
 
@@ -304,12 +333,12 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 **Files to create/modify:**
 
-- `database/adapter.go` (modify) — add interface methods:
+- `shared/database/adapter.go` (modify) — add interface methods:
   - `ListRecentEvents(ctx, chain string, limit int) ([]RecentEventRow, error)`
   - `GetDQBreakdown(ctx, windowHours int, chain string) (*DQBreakdown, error)`
-- `database/engines/postgres/events.go` (create or modify) — `ListRecentEvents` implementation
-- `database/engines/postgres/lifecycle.go` (modify) — `GetDQBreakdown` aggregating reject reasons
-- `database/engines/postgres/events_test.go` (create) — deterministic fixture test
+- `shared/database/engines/postgres/events.go` (create or modify) — `ListRecentEvents` implementation
+- `shared/database/engines/postgres/lifecycle.go` (modify) — `GetDQBreakdown` aggregating reject reasons
+- `shared/database/engines/postgres/events_test.go` (create) — deterministic fixture test
 
 **Invariant check:**
 
@@ -327,7 +356,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 3 — Operator Queries: Overview, Status, PnL
+### Task 3 — Operator Queries: Overview, Status, PnL ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Create `internal/operator/` package with typed queries for overview KPIs — extracted from `cmd/telegram.go` `buildStatusFn` and `buildPnlFn` logic.
 
@@ -355,7 +386,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 4 — Operator Queries: Pipeline, Positions, DQ
+### Task 4 — Operator Queries: Pipeline, Positions, DQ ✅
 
 **Goal:** Extract pipeline funnel, open positions, and DQ breakdown into `internal/operator/`.
 
@@ -381,7 +412,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 5 — Operator Queries: Gate Evidence, Activity, Config Manifest
+### Task 5 — Operator Queries: Gate Evidence, Activity, Config Manifest ✅
 
 **Goal:** Complete the operator query layer for gate review, event activity tail, and read-only config listing.
 
@@ -391,7 +422,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 - `internal/operator/gate.go` (create) — `BuildGateEvidence(ctx, db, evidenceDir)` reads latest `gate_evidence_*.json` from `output/logs/` + merges live DB throughput counters
 - `internal/operator/activity.go` (create) — `BuildActivityFeed(ctx, db, chain, limit)` wrapping `ListRecentEvents`
-- `internal/operator/configs.go` (create) — `BuildConfigManifest(configDir)` lists `config/*.yaml` with redaction (`${ENV_VAR}` placeholders only; never echo env values)
+- `internal/operator/configs.go` (create) — `BuildConfigManifest(configDir)` lists `shared/config/*.yaml` with redaction (`${ENV_VAR}` placeholders only; never echo env values)
 - `internal/operator/gate_test.go` (create) — uses `tests/fixtures/gate_phase2_pass_evidence.json`
 
 **Invariant check:**
@@ -408,7 +439,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 6 — Rewire Telegram to `internal/operator` (Parity Gate)
+### Task 6 — Rewire Telegram to `internal/operator` (Parity Gate) ✅
 
 **Goal:** Replace inline logic in `cmd/telegram.go` with `internal/operator` calls — **zero operator-visible behavior change**. This is the parity gate before any new API work.
 
@@ -435,7 +466,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 7 — Dashboard Config: `config/dashboard.yaml`
+### Task 7 — Dashboard Config: `shared/config/dashboard.yaml` ✅
 
 **Goal:** Add configuration for the dashboard API process — ports, CORS, auth, polling hints.
 
@@ -443,12 +474,12 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 **Files to create/modify:**
 
-- `config/dashboard.yaml` (create):
+- `shared/config/dashboard.yaml` (create):
   ```yaml
   dashboard:
     listen_port: 8090
     cors_allowed_origins:
-      - "http://localhost:5173"   # Vite dev
+      - "http://localhost:5173" # Vite dev
     poll_interval_seconds: 30
     max_events_per_request: 50
     gate_evidence_dir: "output/logs"
@@ -471,7 +502,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 8 — Backend Dashboard: Process Skeleton
+### Task 8 — Backend Dashboard: Process Skeleton ✅
+
+**Boundary:** Creates **`backend-dashboard/`** deploy unit (first new top-level folder). No orchestrator, workers, keys, or RPC.
 
 **Goal:** Create `backend-dashboard/cmd/serve.go` — standalone process connecting to PostgreSQL via existing adapter; no routes yet.
 
@@ -499,7 +532,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 9 — Backend Dashboard: Auth + CORS Middleware
+### Task 9 — Backend Dashboard: Auth + CORS Middleware ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Secure the dashboard API with API-key auth and CORS for the frontend origin.
 
@@ -508,7 +543,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 **Files to create/modify:**
 
 - `backend-dashboard/internal/auth/middleware.go` (create) — `X-Dashboard-Key` header or `Authorization: Bearer`; constant-time compare; reject when `DASHBOARD_API_KEY` unset in non-dev
-- `backend-dashboard/internal/auth/cors.go` (create) — origins from `config/dashboard.yaml`
+- `backend-dashboard/internal/auth/cors.go` (create) — origins from `shared/config/dashboard.yaml`
 - Reuse `internal/app/web/securityHeaders` pattern from existing server (extract to `internal/app/web/headers.go` if needed)
 
 **Invariant check:**
@@ -525,7 +560,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 10 — Backend Dashboard: Overview + Health Endpoints
+### Task 10 — Backend Dashboard: Overview + Health Endpoints ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Implement `GET /api/v1/overview` and `GET /api/v1/health` — first real API surface.
 
@@ -553,7 +590,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 11 — Backend Dashboard: Pipeline, Positions, PnL Endpoints
+### Task 11 — Backend Dashboard: Pipeline, Positions, PnL Endpoints ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Implement core monitoring endpoints matching mockup Monitor section.
 
@@ -574,13 +613,15 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 **Validation:**
 
 - `go test ./backend-dashboard/internal/api/...`: green
-- Response shapes validated against `contracts/operator_api.go`
+- Response shapes validated against `shared/contracts/operator_api.go`
 
 **Prompt context needed:** §7.1, §7.4
 
 ---
 
-### Task 12 — Backend Dashboard: DQ, Activity, Gate, Configs Endpoints
+### Task 12 — Backend Dashboard: DQ, Activity, Gate, Configs Endpoints ✅
+
+**Status:** ✅ Done (2026-06-13)
 
 **Goal:** Complete read-only API surface for all mockup views.
 
@@ -608,7 +649,11 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 13 — Frontend Dashboard: Vite + React + TypeScript Scaffold
+### Task 13 — Frontend Dashboard: Vite + React + TypeScript Scaffold ✅
+
+**Status:** ✅ Done (2026-06-13)
+
+**Boundary:** Creates **`frontend-dashboard/`** deploy unit (second new top-level folder). No DB, no secrets, no sniper URL.
 
 **Goal:** Initialize `frontend-dashboard/` with Vite, React 18, TypeScript, and API client boilerplate.
 
@@ -620,7 +665,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 - `frontend-dashboard/vite.config.ts` (create) — proxy `/api` → `localhost:8090` in dev
 - `frontend-dashboard/tsconfig.json` (create)
 - `frontend-dashboard/src/api/client.ts` (create) — typed fetch with `X-Dashboard-Key` from `VITE_DASHBOARD_API_KEY`
-- `frontend-dashboard/src/api/types.ts` (create) — mirror `contracts/operator_api.go` shapes
+- `frontend-dashboard/src/api/types.ts` (create) — mirror `shared/contracts/operator_api.go` shapes
 - `.gitignore` (modify) — `frontend-dashboard/node_modules/`, `dist/`
 
 **Invariant check:**
@@ -637,7 +682,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 14 — Frontend: Layout Shell from Mockup
+### Task 14 — Frontend: Layout Shell from Mockup ✅
+
+**Status:** ✅ Done (2026-06-14)
 
 **Goal:** Port sidebar, chain bar, collapsible nav, and CSS design tokens from `docs/mockups/operator-dashboard.html`.
 
@@ -665,7 +712,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 15 — Frontend Views: Overview, Pipeline, Positions
+### Task 15 ✅ — Frontend Views: Overview, Pipeline, Positions
 
 **Goal:** Wire Monitor section views to live API with 30s polling.
 
@@ -692,7 +739,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 16 — Frontend Views: Activity, DQ, Gate
+### Task 16 ✅ — Frontend Views: Activity, DQ, Gate
 
 **Goal:** Wire Quality section views.
 
@@ -718,7 +765,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 17 — Frontend Views: Mode, Safety, Configs (Read-Only)
+### Task 17 ✅ — Frontend Views: Mode, Safety, Configs (Read-Only)
 
 **Goal:** Render Control section views in read-only mode — buttons disabled with tooltip "Use Telegram for now" per Approach A.
 
@@ -744,7 +791,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 18 — Physical Move: `sniper-bot/` Folder Split
+### Task 18 ✅ — Physical Move: `sniper-bot/` Folder Split
+
+**Boundary:** Creates **`sniper-bot/`** deploy unit — **physical refactor of trading hot path** (move only; zero logic change). Run only after Tasks 1–17 are green (§4.1).
 
 **Goal:** Move trading code into `sniper-bot/` without changing runtime behavior — the seamless cutover.
 
@@ -763,7 +812,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 **Invariant check:**
 
 - [x] `internal/operator/` stays at repo root (shared)
-- [x] `contracts/`, `database/`, `config/` stay at repo root
+- [x] `shared/contracts/`, `shared/database/`, `shared/config/` stay at repo root
 - [x] Zero logic changes — move only
 
 **Validation:**
@@ -776,7 +825,11 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 19 — Docker Compose: Three-Service Topology
+### Task 19 — Docker Compose: Three-Service Topology ✅
+
+**Status:** ✅ Done (2026-06-14)
+
+**Boundary:** Enforces **runtime** separation — sniper `:8080`, dashboard-api `:8090`, dashboard-ui `:3000`; shared Postgres; dashboard containers get no wallet keys.
 
 **Goal:** Add `docker-compose.yml` with sniper, dashboard-api, and dashboard-ui services sharing Postgres.
 
@@ -807,7 +860,11 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 20 — Slim Sniper HTTP Surface
+### Task 20 — Slim Sniper HTTP Surface ✅
+
+**Status:** ✅ Done (2026-06-14)
+
+**Boundary:** **`sniper-bot/`** exposes only `/health` on `:8080`; all dashboard routes live on `backend-dashboard` `:8090`.
 
 **Goal:** Confirm sniper exposes only `/health` on :8080; all dashboard routes live exclusively on backend-dashboard :8090.
 
@@ -834,7 +891,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 21 — Migration + OperatorCommandDTO (Phase 5 Foundation)
+### Task 21 — Migration + OperatorCommandDTO (Phase 5 Foundation) ✅
+
+**Status:** ✅ Done (2026-06-14)
 
 **Goal:** Add event type and DTO for dashboard-originated operator commands.
 
@@ -842,7 +901,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 **Files to create/modify:**
 
-- `contracts/operator_command.go` (create):
+- `shared/contracts/operator_command.go` (create):
   ```go
   type OperatorCommandDTO struct {
       CommandID   string // SHA256(content)[:16]
@@ -853,7 +912,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
       Timestamp   string
   }
   ```
-- `database/migrations/20260613000001_operator_command_audit.sql` (create) — optional audit table mirroring events (append-only)
+- `shared/database/migrations/20260613000001_operator_command_audit.sql` (create) — optional audit table mirroring events (append-only)
 - `docs/reference/dto_contracts.md` (modify) — register `operator_command_event`
 
 **Invariant check:**
@@ -871,7 +930,11 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 22 — Backend: POST `/api/v1/commands`
+### Task 22 — Backend: POST `/api/v1/commands` ✅
+
+**Status:** ✅ Done (2026-06-14)
+
+**Boundary:** **`backend-dashboard/`** inserts `operator_command_event` only — **must not** call adapter write methods on sniper state directly.
 
 **Goal:** Implement command submission endpoint with confirmation flow for destructive ops.
 
@@ -881,7 +944,7 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 - `backend-dashboard/internal/api/commands/handler.go` (create) — validates command, emits `operator_command_event` via adapter
 - `backend-dashboard/internal/api/commands/confirm.go` (create) — two-step confirm for kill/resume (POST to request token, POST with token to execute)
-- `config/dashboard.yaml` (modify) — `destructive_confirm_ttl_seconds: 60`
+- `shared/config/dashboard.yaml` (modify) — `destructive_confirm_ttl_seconds: 60`
 
 **Invariant check:**
 
@@ -898,7 +961,11 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 23 — Sniper: Operator Command Consumer Worker
+### Task 23 — Sniper: Operator Command Consumer Worker ✅
+
+**Status:** ✅ Done (2026-06-14)
+
+**Boundary:** **`sniper-bot/`** consumes `operator_command_event` and applies mode/kill/resume (same logic as Telegram).
 
 **Goal:** Sniper-bot consumes `operator_command_event` and dispatches to existing mode/kill/resume logic (same code paths as Telegram).
 
@@ -926,7 +993,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 24 — Frontend: Mode & Safety Write UI
+### Task 24 — Frontend: Mode & Safety Write UI ✅
+
+**Status:** ✅ Done (2026-06-14)
 
 **Goal:** Enable Control section buttons wired to `POST /api/v1/commands` with confirmation modals.
 
@@ -952,7 +1021,9 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ---
 
-### Task 25 — Integration Tests, E2E Smoke, PROGRESS_REPORT, Architecture Cross-Ref
+### Task 25 — Integration Tests, E2E Smoke, PROGRESS_REPORT, Architecture Cross-Ref ✅
+
+**Status:** ✅ Done (2026-06-14)
 
 **Goal:** Final validation across all three deployable units; record plan completion.
 
@@ -960,8 +1031,8 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 **Files to create/modify:**
 
-- `tests/integration/dashboard_api_test.go` (create) — read-only endpoint smoke against test DB fixture
-- `tests/integration/operator_command_test.go` (create) — command event round-trip
+- `backend-dashboard/tests/integration/dashboard_api_test.go` (create) — read-only endpoint smoke against test DB fixture
+- `backend-dashboard/tests/integration/operator_command_test.go` (create) — command event round-trip
 - `docs/ops/PROGRESS_REPORT.md` (modify) — append Tasks 1–25 completion rows
 - `docs/plans/2026-06-13-operator-dashboard-plan.md` (modify) — status → Completed
 - `docs/reference/architecture.md` (modify) — § operator dashboard topology (if not done in Task 20)
@@ -986,33 +1057,33 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ## 5. Task Summary
 
-| Task | Name | Primary files | Depends on | Est. complexity |
-| ---- | ---- | ------------- | ---------- | --------------- |
-| 1 | Operator API DTOs | `contracts/operator_api.go` | — | Low |
-| 2 | Adapter read queries | `database/adapter.go`, `postgres/events.go` | — | Medium |
-| 3 | Operator: overview + pnl | `internal/operator/overview.go` | 1, 2 | Medium |
-| 4 | Operator: pipeline + positions + dq | `internal/operator/pipeline.go` | 1, 2 | Medium |
-| 5 | Operator: gate + activity + configs | `internal/operator/gate.go` | 1, 2 | Medium |
-| 6 | Telegram parity rewire | `cmd/telegram.go` | 3, 4, 5 | Medium |
-| 7 | Dashboard config YAML | `config/dashboard.yaml` | — | Low |
-| 8 | Backend process skeleton | `backend-dashboard/cmd/serve.go` | 7 | Low |
-| 9 | Auth + CORS middleware | `backend-dashboard/internal/auth/` | 8 | Medium |
-| 10 | Overview + health API | `backend-dashboard/internal/api/overview/` | 3, 9 | Medium |
-| 11 | Pipeline + positions + pnl API | `backend-dashboard/internal/api/pipeline/` | 4, 9 | Medium |
-| 12 | DQ + activity + gate + configs API | `backend-dashboard/internal/api/dq/` | 5, 9 | Medium |
-| 13 | Frontend scaffold | `frontend-dashboard/package.json` | — | Low |
-| 14 | Layout shell | `frontend-dashboard/src/components/` | 13 | Medium |
-| 15 | Views: overview, pipeline, positions | `frontend-dashboard/src/views/` | 10, 14 | High |
-| 16 | Views: activity, dq, gate | `frontend-dashboard/src/views/` | 12, 14 | High |
-| 17 | Views: mode, safety, configs (read-only) | `frontend-dashboard/src/views/` | 12, 14 | Medium |
-| 18 | Physical sniper-bot move | `sniper-bot/` | 6 | High |
-| 19 | Docker Compose 3-service | `docker-compose.yml` | 8, 13, 18 | Medium |
-| 20 | Slim sniper HTTP | `sniper-bot/cmd/serve.go` | 19 | Low |
-| 21 | OperatorCommand migration + DTO | `contracts/operator_command.go` | 20 | Low |
-| 22 | POST /api/v1/commands | `backend-dashboard/internal/api/commands/` | 21 | High |
-| 23 | Sniper command consumer | `sniper-bot/internal/workers/run_operator_commands.go` | 21, 22 | High |
-| 24 | Frontend control UI | `frontend-dashboard/src/views/ModeView.tsx` | 22, 23 | Medium |
-| 25 | Integration tests + completion | `tests/integration/`, `PROGRESS_REPORT.md` | 24 | Medium |
+| Task | Name                                     | Boundary / unit                                      | Primary files                                          | Depends on | Est. complexity |
+| ---- | ---------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ | ---------- | --------------- |
+| 1 ✅ | Operator API DTOs                        | SHARED `shared/contracts/`                                  | `shared/contracts/operator_api.go`                            | —          | Low             |
+| 2 ✅ | Adapter read queries                     | SHARED `shared/database/`                                   | `shared/database/adapter.go`, `postgres/events.go`            | —          | Medium          |
+| 3 ✅ | Operator: overview + pnl                 | SHARED `internal/operator/`                          | `internal/operator/overview.go`                        | 1, 2       | Medium          |
+| 4 ✅ | Operator: pipeline + positions + dq      | SHARED `internal/operator/`                          | `internal/operator/pipeline.go`                        | 1, 2       | Medium          |
+| 5 ✅ | Operator: gate + activity + configs      | SHARED `internal/operator/`                          | `internal/operator/gate.go`                            | 1, 2       | Medium          |
+| 6 ✅ | Telegram parity rewire                   | SHARED (parity gate before new processes)            | `cmd/telegram.go`                                      | 3, 4, 5    | Medium          |
+| 7 ✅ | Dashboard config YAML                    | SHARED `shared/config/`                                     | `shared/config/dashboard.yaml`                                | —          | Low             |
+| 8 ✅ | Backend process skeleton                 | **`backend-dashboard/`** (creates deploy unit)       | `backend-dashboard/cmd/serve.go`                       | 7          | Low             |
+| 9 ✅ | Auth + CORS middleware                   | `backend-dashboard/`                                 | `backend-dashboard/internal/auth/`                     | 8          | Medium          |
+| 10 ✅ | Overview + health API                    | `backend-dashboard/`                                 | `backend-dashboard/internal/api/overview/`             | 3, 9       | Medium          |
+| 11 ✅ | Pipeline + positions + pnl API           | `backend-dashboard/`                                 | `backend-dashboard/internal/api/pipeline/`             | 4, 9       | Medium          |
+| 12 ✅ | DQ + activity + gate + configs API       | `backend-dashboard/`                                 | `backend-dashboard/internal/api/dq/`                   | 5, 9       | Medium          |
+| 13 ✅ | Frontend scaffold                        | **`frontend-dashboard/`** (creates deploy unit)      | `frontend-dashboard/package.json`                      | —          | Low             |
+| 14 ✅ | Layout shell                             | `frontend-dashboard/`                                | `frontend-dashboard/src/components/`                   | 13         | Medium          |
+| 15 ✅ | Views: overview, pipeline, positions     | `frontend-dashboard/`                                | `frontend-dashboard/src/views/`                        | 10, 14     | High            |
+| 16 ✅ | Views: activity, dq, gate                | `frontend-dashboard/`                                | `frontend-dashboard/src/views/`                        | 12, 14     | High            |
+| 17 ✅ | Views: mode, safety, configs (read-only) | `frontend-dashboard/`                                | `frontend-dashboard/src/views/`                        | 12, 14     | Medium          |
+| 18 ✅ | Physical sniper-bot move                 | **`sniper-bot/`** (creates deploy unit; move only)   | `sniper-bot/cmd/`, `sniper-bot/internal/`              | 6          | High            |
+| 19 ✅ | Docker Compose 3-service                 | Deploy topology (all 3 units + Postgres)             | `docker-compose.yml`                                   | 8, 13, 18  | Medium          |
+| 20 ✅ | Slim sniper HTTP                         | `sniper-bot/` (`:8080` health only)                  | `sniper-bot/cmd/serve.go`                              | 19         | Low             |
+| 21 ✅ | OperatorCommand migration + DTO          | SHARED `shared/contracts/` + `shared/database/`                    | `shared/contracts/operator_command.go`                        | 20         | Low             |
+| 22 ✅ | POST /api/v1/commands                    | `backend-dashboard/` (event bus write, not hot path) | `backend-dashboard/internal/api/commands/`             | 21         | High            |
+| 23 ✅ | Sniper command consumer                  | `sniper-bot/` (consumes `operator_command_event`)    | `sniper-bot/internal/workers/run_operator_commands.go` | 21, 22     | High            |
+| 24 ✅ | Frontend control UI                      | `frontend-dashboard/`                                | `frontend-dashboard/src/views/ModeView.tsx`            | 22, 23     | Medium          |
+| 25 ✅ | Integration tests + completion           | All boundaries                                       | `backend-dashboard/tests/integration/`, `PROGRESS_REPORT.md` | 24         | Medium          |
 
 ---
 
@@ -1030,10 +1101,10 @@ A task is **not complete** until all validation commands pass **and** `docs/ops/
 
 ### Suggested parallel execution (after Task 6)
 
-| Track A | Track B |
-| ------- | ------- |
+| Track A                  | Track B                                  |
+| ------------------------ | ---------------------------------------- |
 | Tasks 7–12 (backend API) | Tasks 13–14 (frontend scaffold + layout) |
-| Task 15–17 after Task 12 | |
+| Task 15–17 after Task 12 |                                          |
 
 Tracks merge at Task 15 (frontend needs live API).
 
@@ -1048,7 +1119,7 @@ Include the specific §7.N sub-sections listed under "Prompt context needed" for
 
 ### 7.1 Operator API DTOs (Task 1)
 
-New file `contracts/operator_api.go` — all additive. Key structs:
+New file `shared/contracts/operator_api.go` — all additive. Key structs:
 
 ```go
 // OverviewResponseDTO — GET /api/v1/overview
@@ -1114,19 +1185,19 @@ type DashboardConfig struct {
 
 Env vars (never in YAML):
 
-| Env var | Used by | Purpose |
-| ------- | ------- | ------- |
-| `DASHBOARD_API_KEY` | backend-dashboard | API authentication |
-| `DASHBOARD_ALLOWED_OPERATORS` | backend-dashboard | Comma-separated operator IDs (mirror Telegram allowlist) |
-| `VITE_DASHBOARD_API_KEY` | frontend-dashboard (dev) | Dev-only API key for Vite proxy |
-| `DATABASE_URL` | both processes | Shared PostgreSQL DSN |
+| Env var                       | Used by                  | Purpose                                                  |
+| ----------------------------- | ------------------------ | -------------------------------------------------------- |
+| `DASHBOARD_API_KEY`           | backend-dashboard        | API authentication                                       |
+| `DASHBOARD_ALLOWED_OPERATORS` | backend-dashboard        | Comma-separated operator IDs (mirror Telegram allowlist) |
+| `VITE_DASHBOARD_API_KEY`      | frontend-dashboard (dev) | Dev-only API key for Vite proxy                          |
+| `DATABASE_URL`                | both processes           | Shared PostgreSQL DSN                                    |
 
 ---
 
 ### 7.3 YAML Config Paths
 
 ```yaml
-# config/dashboard.yaml (new)
+# shared/config/dashboard.yaml (new)
 dashboard:
   listen_port: 8090
   cors_allowed_origins:
@@ -1139,7 +1210,7 @@ dashboard:
   destructive_confirm_ttl_seconds: 60
 ```
 
-Sniper config unchanged — `config/pipeline.yaml`, `config/chains.yaml`, etc. remain loaded only by sniper-bot.
+Sniper config unchanged — `shared/config/pipeline.yaml`, `shared/config/chains.yaml`, etc. remain loaded only by sniper-bot.
 
 ---
 
@@ -1178,7 +1249,7 @@ cmd := contracts.OperatorCommandDTO{
     Args:        map[string]string{"mode": "EXPLORATION"},
     Timestamp:   time.Now().UTC().Format(time.RFC3339),
 }
-// INSERT INTO events (event_id, event_type, payload, ...) 
+// INSERT INTO events (event_id, event_type, payload, ...)
 // event_type = "operator_command_event"
 // ON CONFLICT DO NOTHING
 ```
@@ -1187,7 +1258,7 @@ Consume pattern (sniper-bot worker):
 
 ```go
 // ClaimNextEvents with event_type = "operator_command_event"
-// Dispatch to operator.ExecuteCommand(ctx, db, cmd) 
+// Dispatch to operator.ExecuteCommand(ctx, db, cmd)
 // which calls same logic as Telegram buildModeFn / buildKillFn / buildResumeFn
 ```
 
@@ -1197,14 +1268,14 @@ Reference: `docs/reference/architecture.md` §2.2–2.3, `docs/reference/orchest
 
 ### 7.6 Security Rules
 
-| Rule | Implementation |
-| ---- | -------------- |
-| API key | `os.Getenv("DASHBOARD_API_KEY")` — constant-time compare |
-| No keys in dashboard process | `backend-dashboard` env excludes `SOLANA_*_PRIVATE_KEY`, `JITO_*` |
-| Bounded responses | Events list max 200; gate evidence file max 256 KiB; request body max 4 KiB |
-| CORS | Explicit origin list from YAML — no `*` in production |
-| HTTPS | Production reverse proxy (nginx/Caddy) terminates TLS |
-| Config manifest | Return filenames + top-level keys only — redact values matching `/key|secret|token|password/i` |
+| Rule                         | Implementation                                                              |
+| ---------------------------- | --------------------------------------------------------------------------- | ------ | ----- | ----------- |
+| API key                      | `os.Getenv("DASHBOARD_API_KEY")` — constant-time compare                    |
+| No keys in dashboard process | `backend-dashboard` env excludes `SOLANA_*_PRIVATE_KEY`, `JITO_*`           |
+| Bounded responses            | Events list max 200; gate evidence file max 256 KiB; request body max 4 KiB |
+| CORS                         | Explicit origin list from YAML — no `*` in production                       |
+| HTTPS                        | Production reverse proxy (nginx/Caddy) terminates TLS                       |
+| Config manifest              | Return filenames + top-level keys only — redact values matching `/key       | secret | token | password/i` |
 
 ---
 
@@ -1261,24 +1332,24 @@ Parity test approach (Task 6):
 Shadow gate (`internal/modules/health/shadow_gate.go`):
 
 - Evaluates `GetShadowGateStats` — simulated trades, realized PnL bps aggregate
-- Pass criteria from `config/pipeline.yaml` → `execution.shadow_gate`
+- Pass criteria from `shared/config/pipeline.yaml` → `execution.shadow_gate`
 - Exposed on `/health` today as `shadow_gate` JSON block — reuse in overview API
 
 ---
 
 ### 7.10 Process Boundary Rules
 
-| Concern | Sniper-bot | Backend-dashboard |
-| ------- | ---------- | ----------------- |
-| Orchestrator + workers | ✅ | ❌ |
-| Wallet private keys | ✅ | ❌ |
-| RPC clients | ✅ | ❌ |
-| Telegram poller | ✅ | ❌ |
-| Dashboard REST API | ❌ | ✅ |
-| `database.Adapter` reads | ✅ | ✅ |
-| `database.Adapter` writes (events, state) | ✅ | ✅ (command events only) |
-| Migrations (`migrate` cmd) | ✅ | ❌ (sniper runs migrations) |
-| Port | 8080 | 8090 |
+| Concern                                   | Sniper-bot | Backend-dashboard           |
+| ----------------------------------------- | ---------- | --------------------------- |
+| Orchestrator + workers                    | ✅         | ❌                          |
+| Wallet private keys                       | ✅         | ❌                          |
+| RPC clients                               | ✅         | ❌                          |
+| Telegram poller                           | ✅         | ❌                          |
+| Dashboard REST API                        | ❌         | ✅                          |
+| `database.Adapter` reads                  | ✅         | ✅                          |
+| `database.Adapter` writes (events, state) | ✅         | ✅ (command events only)    |
+| Migrations (`migrate` cmd)                | ✅         | ❌ (sniper runs migrations) |
+| Port                                      | 8080       | 8090                        |
 
 Rollback procedure:
 
@@ -1290,21 +1361,21 @@ Rollback procedure:
 
 ### 7.11 API Route Table (complete v1)
 
-| Method | Path | Phase | Auth |
-| ------ | ---- | ----- | ---- |
-| GET | `/api/v1/health` | 2 | optional |
-| GET | `/api/v1/overview` | 2 | required |
-| GET | `/api/v1/pnl` | 2 | required |
-| GET | `/api/v1/pipeline` | 2 | required |
-| GET | `/api/v1/positions` | 2 | required |
-| GET | `/api/v1/activity` | 2 | required |
-| GET | `/api/v1/dq` | 2 | required |
-| GET | `/api/v1/gate/evidence` | 2 | required |
-| GET | `/api/v1/configs` | 2 | required |
-| GET | `/api/v1/mode` | 2 | required |
-| GET | `/api/v1/safety` | 2 | required |
-| POST | `/api/v1/commands` | 5 | required + allowlist |
-| POST | `/api/v1/commands/confirm` | 5 | required + confirm token |
+| Method | Path                       | Phase | Auth                     |
+| ------ | -------------------------- | ----- | ------------------------ |
+| GET    | `/api/v1/health`           | 2     | optional                 |
+| GET    | `/api/v1/overview`         | 2     | required                 |
+| GET    | `/api/v1/pnl`              | 2     | required                 |
+| GET    | `/api/v1/pipeline`         | 2     | required                 |
+| GET    | `/api/v1/positions`        | 2     | required                 |
+| GET    | `/api/v1/activity`         | 2     | required                 |
+| GET    | `/api/v1/dq`               | 2     | required                 |
+| GET    | `/api/v1/gate/evidence`    | 2     | required                 |
+| GET    | `/api/v1/configs`          | 2     | required                 |
+| GET    | `/api/v1/mode`             | 2     | required                 |
+| GET    | `/api/v1/safety`           | 2     | required                 |
+| POST   | `/api/v1/commands`         | 5     | required + allowlist     |
+| POST   | `/api/v1/commands/confirm` | 5     | required + confirm token |
 
 Query params (common): `chain` (solana|eth|bsc|all), `market` (market id), `window_hours` (default 24).
 
@@ -1314,17 +1385,17 @@ Query params (common): `chain` (solana|eth|bsc|all), `market` (market id), `wind
 
 From `docs/mockups/operator-dashboard.html` nav (lines 709–724):
 
-| `data-view` | Nav section | Phase 1 behavior |
-| ----------- | ----------- | ---------------- |
-| `overview` | Monitor | Live KPIs + drill-down cards |
-| `pipeline` | Monitor | L0–L10 funnel table |
-| `positions` | Monitor | Open positions table |
-| `activity` | Monitor | Event bus tail |
-| `dq` | Quality | DQ decision breakdown |
-| `gate` | Quality | Gate review criteria grid |
-| `mode` | Control | Read-only mode display (Phase 5: interactive) |
-| `safety` | Control | Read-only kill switch status (Phase 5: interactive) |
-| `configs` | Control | YAML manifest table |
+| `data-view` | Nav section | Phase 1 behavior                                    |
+| ----------- | ----------- | --------------------------------------------------- |
+| `overview`  | Monitor     | Live KPIs + drill-down cards                        |
+| `pipeline`  | Monitor     | L0–L10 funnel table                                 |
+| `positions` | Monitor     | Open positions table                                |
+| `activity`  | Monitor     | Event bus tail                                      |
+| `dq`        | Quality     | DQ decision breakdown                               |
+| `gate`      | Quality     | Gate review criteria grid                           |
+| `mode`      | Control     | Read-only mode display (Phase 5: interactive)       |
+| `safety`    | Control     | Read-only kill switch status (Phase 5: interactive) |
+| `configs`   | Control     | YAML manifest table                                 |
 
 Chain filter UI: global `chain-bar` applies to views marked chain-aware in mockup sidebar tip.
 
@@ -1355,12 +1426,12 @@ ORDER BY created_at DESC LIMIT 5;
 
 ## Related Documents
 
-| Document | Relationship |
-| -------- | ------------ |
-| `docs/specs/2026-06-10-operator-dashboard-design.md` | Design source (Approach A, IA, out of scope) |
-| `docs/mockups/operator-dashboard.html` | Visual source of truth |
-| `docs/plans/2026-06-10-profit-restoration-plan.md` | Pipeline profit plan — orthogonal; gate criteria referenced in §7.7 |
-| `docs/plans/2026-05-10-rescan-plan.md` | Precedent for standalone plan documents |
-| `docs/reference/architecture.md` | Update in Task 20/25 with 3-process topology |
-| `docs/reference/db_adapter_spec.md` | Adapter interface rules for new read methods |
-| `docs/ops/PROGRESS_REPORT.md` | Task completion log |
+| Document                                             | Relationship                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------- |
+| `docs/specs/2026-06-10-operator-dashboard-design.md` | Design source (Approach A, IA, out of scope)                        |
+| `docs/mockups/operator-dashboard.html`               | Visual source of truth                                              |
+| `docs/plans/2026-06-10-profit-restoration-plan.md`   | Pipeline profit plan — orthogonal; gate criteria referenced in §7.7 |
+| `docs/plans/2026-05-10-rescan-plan.md`               | Precedent for standalone plan documents                             |
+| `docs/reference/architecture.md`                     | Update in Task 20/25 with 3-process topology                        |
+| `docs/reference/db_adapter_spec.md`                  | Adapter interface rules for new read methods                        |
+| `docs/ops/PROGRESS_REPORT.md`                        | Task completion log                                                 |

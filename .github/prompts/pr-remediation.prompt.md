@@ -19,11 +19,11 @@ You have received a Copilot PR review on this system:
 
 - Deterministic, event-driven crypto sniper
 - Modular monolith — `app/main.go` entry point, modules under `internal/modules/`
-- Strict DTO boundaries — all cross-module data flows through `contracts/`
-- Adapter-only DB access — all queries go through `database/adapter.go`
+- Strict DTO boundaries — all cross-module data flows through `shared/contracts/`
+- Adapter-only DB access — all queries go through `shared/database/adapter.go`
 - Append-only event bus — `events` table is the authoritative state log
 - Worker-based execution — `internal/workers/` using `SELECT … FOR UPDATE SKIP LOCKED`
-- Parallel development — phases isolated per branch, `contracts/` and `database/` are protected
+- Parallel development — phases isolated per branch, `shared/contracts/` and `shared/database/` are protected
 
 ## Pipeline (immutable stage order)
 
@@ -37,17 +37,17 @@ Violations: skipping layers, direct execution from an earlier stage, merging sta
 
 ### DTO Contract
 
-- All cross-module communication uses immutable DTOs from `contracts/`
+- All cross-module communication uses immutable DTOs from `shared/contracts/`
 - Required fields on every DTO: `TraceID`, `CorrelationID`, `CausationID`, `VersionID`
 - Additive-only versioning: new fields allowed (with zero defaults), existing fields never removed or renamed
 - Forbidden: `map[string]interface{}`, raw DB rows, untyped payloads
 
 ### Database Adapter
 
-- `database/adapter.go` is the **sole** DB entry point — no SQL anywhere else
+- `shared/database/adapter.go` is the **sole** DB entry point — no SQL anywhere else
 - All writes must be idempotent (`ON CONFLICT DO NOTHING`)
 - Lifecycle transitions use CAS: `GetLifecycle → validate state → TransitionState`
-- Forbidden: direct state mutation, driver imports in `internal/modules/`, SQL strings outside `database/`
+- Forbidden: direct state mutation, driver imports in `internal/modules/`, SQL strings outside `shared/database/`
 
 ### Lifecycle State Machine
 
@@ -66,7 +66,7 @@ Violations: skipping layers, direct execution from an earlier stage, merging sta
 ### Capital & Risk Control
 
 - Allocation respects max position size, max concurrent positions, and exploration budget
-- Forbidden: unbounded allocation, ignoring portfolio constraints from `config/capital.yaml`
+- Forbidden: unbounded allocation, ignoring portfolio constraints from `shared/config/capital.yaml`
 
 ### Learning & Adaptation Safety
 
@@ -77,10 +77,10 @@ Violations: skipping layers, direct execution from an earlier stage, merging sta
 
 ### Protected Files (parallel dev)
 
-- `contracts/*` — additive only; existing fields immutable
-- `database/migrations/*` — immutable once created; new migrations append-only
+- `shared/contracts/*` — additive only; existing fields immutable
+- `shared/database/migrations/*` — immutable once created; new migrations append-only
 - `docs/*` — read-only except `docs/ops/PROGRESS_REPORT.md`
-- `config/*` — append-only; existing keys never removed
+- `shared/config/*` — append-only; existing keys never removed
 
 ## Your Task
 
@@ -139,14 +139,14 @@ Changes:  (file path + one-line summary, or "none")
 - `TransitionState` receives `StateVersion` for CAS
 - No direct state mutation
 
-**If the PR touches a DTO (`contracts/*.go`):**
+**If the PR touches a DTO (`shared/contracts/*.go`):**
 
 - Change is additive only (new field with zero default)
 - No existing field removed, renamed, or type-changed
 - All four trace fields (`TraceID`, `CorrelationID`, `CausationID`, `VersionID`) present
 - Backward compatibility maintained
 
-**If the PR touches a migration (`database/migrations/*.sql`):**
+**If the PR touches a migration (`shared/database/migrations/*.sql`):**
 
 - File is new (never modifying an existing migration)
 - Wrapped in `BEGIN; … COMMIT;`
@@ -177,7 +177,7 @@ Changes:  (file path + one-line summary, or "none")
 - Mutate DTOs after construction
 - Skip or merge pipeline stages
 - Bypass lifecycle via direct state writes
-- Apply breaking changes to `contracts/` (type changes, field removal)
+- Apply breaking changes to `shared/contracts/` (type changes, field removal)
 - Create duplicate files (e.g. `utils2.go`, `readme2.md`)
 
 ## Testing Requirements

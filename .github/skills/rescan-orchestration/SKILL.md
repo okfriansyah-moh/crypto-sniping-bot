@@ -33,7 +33,7 @@ Source plan: `docs/plans/2026-06-10-profit-restoration-plan.md` (Phase 10 — `r
 
 The worker MUST re-emit `market_data_event` (the existing Layer 0 event
 type). It MUST NOT introduce a new event type, a new DTO, or a new
-contract under `contracts/`. Downstream stages (DQ → Features → Edge →
+contract under `shared/contracts/`. Downstream stages (DQ → Features → Edge →
 …) remain completely unchanged.
 
 ### R2 — Content-addressable EventID
@@ -166,7 +166,7 @@ can distinguish rescan flows from fresh ingestion.
 | `interval_seconds < 10`                           | Ticker storm risk (R7).                                           |
 | Missing `Transport` tag on emitted DTO            | Breaks log-reviewer R4 detectors and analytics (R10).             |
 | Enabled by default in `pipeline.yaml`             | Operators MUST opt in; safe-by-default rule.                      |
-| Editing existing migrations to add rescan columns | `database/migrations/` is immutable; new additive migration only. |
+| Editing existing migrations to add rescan columns | `shared/database/migrations/` is immutable; new additive migration only. |
 
 ---
 
@@ -213,7 +213,7 @@ for _, r := range rows {
        startup (R4).
 4. [ ] Per-token / per-band / per-tick failure isolation in place (R5).
 5. [ ] Worker has zero RPC clients, zero key access, zero direct module
-       imports outside `contracts/`, `database/`, and `internal/app/config`
+       imports outside `shared/contracts/`, `shared/database/`, and `internal/app/config`
        (R6).
 6. [ ] `interval_seconds >= 10` and `MaxPerBandPerTick` cap enforced (R7).
 7. [ ] SQL has explicit `ORDER BY token_address, ingested_at DESC` and

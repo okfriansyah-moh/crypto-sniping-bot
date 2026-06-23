@@ -7,7 +7,7 @@
 > **Last validated:** 2026-06-10  
 > **Canonical runner:** `make battle-test`
 
-This document certifies that the crypto-sniping-bot pipeline has been exercised against a fixed **11-scenario matrix** using production `config/pipeline.yaml` thresholds. Scenarios vary **input quality only** — mandatory DQ guardrails are never relaxed.
+This document certifies that the crypto-sniping-bot pipeline has been exercised against a fixed **11-scenario matrix** using production `shared/config/pipeline.yaml` thresholds. Scenarios vary **input quality only** — mandatory DQ guardrails are never relaxed.
 
 AI agents and operators may treat this repo as **production-architecture proven** for pipeline mechanics, capital-defense behavior, and observability contracts. Real-money deployment still requires live shadow soak and operator sign-off.
 

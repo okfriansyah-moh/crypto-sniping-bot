@@ -15,7 +15,7 @@
 #   DATABASE_URL     — PostgreSQL DSN (required unless built from SNIPER_DB_* below)
 #   SNIPER_DB_USER, SNIPER_DB_PASSWORD, SNIPER_DB_HOST, SNIPER_DB_PORT, SNIPER_DB_NAME
 #   WAIT_SECS        — max seconds to wait for L10 (default: 180)
-#   SVC              — docker compose service (default: bot)
+#   SVC              — docker compose service (default: sniper-bot)
 #
 # Exit 0 when validate_pipeline_proof.sh returns SHADOW_READY.
 
@@ -31,7 +31,7 @@ VALIDATE_SCRIPT="$REPO_ROOT/scripts/validate_pipeline_proof.sh"
 DEFAULT_TOKEN="GateProofMockToken1111111111111111111111"
 DEFAULT_CHAIN="solana"
 WAIT_SECS="${WAIT_SECS:-420}"
-SVC="${SVC:-bot}"
+SVC="${SVC:-sniper-bot}"
 
 log() { echo "[pipeline_proof_mock] $*" >&2; }
 die() { log "FATAL: $*"; exit 1; }

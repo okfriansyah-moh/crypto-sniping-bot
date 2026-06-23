@@ -151,7 +151,7 @@ Replay of the same event stream produces bit-for-bit identical database state.
 
 ## 0.5 Config-Driven Thresholds
 
-Every threshold, weight, cap, percentile, timeout, and bucket lives in YAML under `config/`. Hardcoded numeric constants in module code are forbidden (exceptions: protocol-defined values like EIP-55 address length).
+Every threshold, weight, cap, percentile, timeout, and bucket lives in YAML under `shared/config/`. Hardcoded numeric constants in module code are forbidden (exceptions: protocol-defined values like EIP-55 address length).
 
 ## 0.6 Global Event→Worker Routing
 
@@ -233,7 +233,7 @@ if errors.Is(err, database.ErrInvalidTransition) {
 if err != nil { return err }
 ```
 
-**Adapter SQL (implement only in `database/engines/` — never in modules):**
+**Adapter SQL (implement only in `shared/database/engines/` — never in modules):**
 
 ```sql
 UPDATE token_lifecycle
@@ -246,7 +246,7 @@ UPDATE token_lifecycle
 -- 0 rows updated → adapter returns ErrInvalidTransition
 ```
 
-**`TransitionRequest` fields (declared in `database/adapter.go`):**
+**`TransitionRequest` fields (declared in `shared/database/adapter.go`):**
 
 | Field                  | Type     | Required | Description                                              |
 | ---------------------- | -------- | -------- | -------------------------------------------------------- |
@@ -510,7 +510,7 @@ internal/modules/ingestion/
 internal/workers/
 └── run_ingestion.go                     // Dispatcher (special — no input event; source events)
 
-database/migrations/
+shared/database/migrations/
 └── 20260101000002_ingestion_tables.sql  // ingestion_state, rpc_endpoint_state, tokens
 ```
 
@@ -624,7 +624,7 @@ adapter.GetIngestionWatermark(ctx, chain)           // on boot (resume from last
 adapter.GetActiveStrategyVersion(ctx)               // on worker start (pin VersionID)
 ```
 
-### Config (`config/chains.yaml`)
+### Config (`shared/config/chains.yaml`)
 
 ```yaml
 chains:
@@ -678,7 +678,7 @@ chains:
 - [ ] WebSocket drop test: kill connection for 30s → on reconnect, gap recovery fills missing blocks; `last_processed_block` advances monotonically
 - [ ] p95 ingestion latency `< 500ms` on Ethereum, `< 200ms` on BSC (measured: `ingested_at - block_timestamp`)
 - [ ] Replay test: feed fixture JSON logs → produces bit-for-bit identical `MarketDataDTO` records
-- [ ] Zero `database/` imports anywhere under `internal/modules/ingestion/`
+- [ ] Zero `shared/database/` imports anywhere under `internal/modules/ingestion/`
 - [ ] Zero SQL strings anywhere under `internal/modules/ingestion/`
 
 ---
@@ -828,7 +828,7 @@ if input.ExpiresAt != "" && parseISO(input.ExpiresAt).Before(time.Now().UTC()) {
 }
 ```
 
-**DTO TTL values from `config/pipeline.yaml`:**
+**DTO TTL values from `shared/config/pipeline.yaml`:**
 
 | DTO                | Config Key                   | Default |
 | ------------------ | ---------------------------- | ------- |
@@ -1365,7 +1365,7 @@ internal/modules/execution/
 internal/workers/
 └── run_execution.go
 
-database/migrations/
+shared/database/migrations/
 └── 20260101000003_trading_tables.sql      // wallet_nonce_state, executions, positions, tokens
 ```
 
@@ -1614,12 +1614,12 @@ orch.Run(ctx)
 - [ ] Replay: feed the same Phase 1 fixture → produces bit-for-bit identical DTOs (execution bypassed in replay mode via config flag)
 - [ ] `grep -r 'import.*database' internal/modules/` returns zero matches
 - [ ] `grep -rnE 'INSERT|SELECT|UPDATE|DELETE' internal/modules/` returns zero matches (no SQL in modules)
-- [ ] All thresholds in `config/pipeline.yaml`; no magic numbers in module code
+- [ ] All thresholds in `shared/config/pipeline.yaml`; no magic numbers in module code
 - [ ] `go test ./internal/modules/...` passes
 - [ ] **Section I — Standard Execution Quality Gate:**
   - [ ] Lifecycle transitions: every `TransitionState` call observable in `token_state_transition` audit table; no state skips
   - [ ] Events emitted: `SELECT event_type, COUNT(*) FROM events GROUP BY event_type` shows expected counts matching processed input events
-  - [ ] Adapter calls: all writes go through adapter methods; zero `database/` imports in `internal/modules/`
+  - [ ] Adapter calls: all writes go through adapter methods; zero `shared/database/` imports in `internal/modules/`
   - [ ] Trace propagation: `SELECT * FROM events WHERE trace_id = ? ORDER BY created_at` produces a contiguous causal chain for any token
 
 ---
@@ -1636,7 +1636,7 @@ Harden Phase 2 for production safety: enforce the token lifecycle state machine 
 
 **Phase 2 exit criteria must all be checked before starting Phase 3.**
 
-Specifically: at least 1 real testnet trade confirmed end-to-end, full causal chain observable in `events`, all modules have zero `database/` imports and zero SQL, TTL and minimal capital envelope active, `go test ./internal/modules/...` passes.
+Specifically: at least 1 real testnet trade confirmed end-to-end, full causal chain observable in `events`, all modules have zero `shared/database/` imports and zero SQL, TTL and minimal capital envelope active, `go test ./internal/modules/...` passes.
 
 ### Scope
 
@@ -1662,12 +1662,12 @@ Add to `internal/resource_control/`:
 ```go
 // internal/resource_control/priority.go
 func ComputePriority(eventType string, expiresAt string, now time.Time) int
-// Returns base weight from config/priority.yaml plus urgency bonus:
+// Returns base weight from shared/config/priority.yaml plus urgency bonus:
 //   priority = base_weight + clamp((expires_at - now) / max_ttl, 0, 1) * urgency_coef
 // Exit-path events (position_event exit, execution_replacement) → PRIORITY_EXIT ≥ 900 (never dropped)
 ```
 
-Every emitting worker calls `ComputePriority()` and sets `Event.Priority` before `adapter.InsertEvent()`. Workers that emit exit-path events use `PRIORITY_EXIT` constant from `config/priority.yaml`.
+Every emitting worker calls `ComputePriority()` and sets `Event.Priority` before `adapter.InsertEvent()`. Workers that emit exit-path events use `PRIORITY_EXIT` constant from `shared/config/priority.yaml`.
 
 `adapter.ClaimNextEvent()` ordering updated (adapter-side change only — no module SQL):
 
@@ -1676,7 +1676,7 @@ ORDER BY priority DESC, created_at ASC
 FOR UPDATE SKIP LOCKED LIMIT 1
 ```
 
-**config/priority.yaml base weights:**
+**shared/config/priority.yaml base weights:**
 
 | Event Type              | Base Priority |
 | ----------------------- | ------------- |
@@ -1727,7 +1727,7 @@ internal/telegram/
 ├── commands.go                            // /status, /pnl, /positions, /kill, /resume, /version
 └── bot.go
 
-database/migrations/
+shared/database/migrations/
 └── 20260101000004_state_machine.sql       // token_lifecycle, token_state_transition, token_state_violation
 
 internal/modules/evaluation/
@@ -2463,7 +2463,7 @@ adapter.GetShadowVersion(ctx) (*StrategyVersion, error)
 
 ### Shadow Execution Mode (Paper Trading) (from § 7.7)
 
-`config/execution.yaml` gains `mode: shadow | live`. When `mode=shadow`:
+`shared/config/execution.yaml` gains `mode: shadow | live`. When `mode=shadow`:
 
 ```go
 // internal/modules/execution/paper.go
@@ -2503,7 +2503,7 @@ internal/workers/
 ├── run_rollback_watchdog.go               // Periodic — post-promotion degradation watchdog; may rollback active version
 └── run_updater.go                         // Triggered by evaluation_event; creates candidate StrategyVersion
 
-database/migrations/
+shared/database/migrations/
 └── 20260101000005_learning_tables.sql     // learning_records, evaluations, shadow_trades
 ```
 
@@ -2943,7 +2943,7 @@ Requires `adapter.GetExposureSummary(ctx, token, cohort string)` — O(1) query 
 
 The `events` table gains `PARTITION BY LIST (chain)`. Migration adds one partition child per configured chain. `ClaimNextEvent` gains optional `chain` parameter so a worker pool can be bound to a single partition (one set of workers per market, horizontal scale).
 
-Migration: `database/migrations/20260101000006_event_partitioning.sql` (see spec § 11.4).
+Migration: `shared/database/migrations/20260101000006_event_partitioning.sql` (see spec § 11.4).
 
 Adding a new chain = adding a partition child — no application code change required.
 
@@ -3419,14 +3419,14 @@ Specifically: kill switch verified, capital envelope (4 caps), wallet sharding d
 - Solana ingestion module (`internal/modules/ingestion_solana/`) consuming `logsSubscribe` + `programSubscribe` from Solana RPC, decoding via Borsh, normalizing to `MarketDataDTO` with `Chain="solana"`.
 - Solana execution module (`internal/modules/execution_solana/`) — keypair (ed25519) loader, instruction builder (Raydium / Pump.fun routes), `sendTransaction`, signature-based confirmation tracking.
 - Execution router (`internal/modules/execution/router.go`) that switches on `AllocationDTO.Chain` between EVM (`eth | bsc`) and Solana branches.
-- Configuration extensions in `config/chains.yaml::solana` and `config/execution.yaml::solana`.
+- Configuration extensions in `shared/config/chains.yaml::solana` and `shared/config/execution.yaml::solana`.
 - Migration `20260101000007_solana_tables.sql` for Solana-specific RPC endpoint state and signature tracking.
 
 **Explicitly excluded:**
 
 - Any modification to existing EVM ingestion code (`internal/modules/ingestion/`).
 - Any modification to existing EVM execution code paths (`internal/modules/execution/` Phase 2/6 files).
-- Any change to DTO schemas in `contracts/` — Phase 7 is **strictly chain-agnostic** at the DTO layer.
+- Any change to DTO schemas in `shared/contracts/` — Phase 7 is **strictly chain-agnostic** at the DTO layer.
 - Any change to the database adapter interface — Solana adapters extend, never alter, the existing interface.
 - Cross-market position aggregation logic (Layer 7 already operates chain-agnostically).
 - Solana-specific learning models — Phase 5 learning is re-used as-is; Solana cohorts emerge naturally from existing cohort labels.
@@ -3476,7 +3476,7 @@ internal/workers/
 ├── run_ingestion_solana.go                         # NEW — source worker (no input event)
 └── run_execution.go                                # MODIFIED — calls router.Execute
 
-database/migrations/
+shared/database/migrations/
 └── 20260101000007_solana_tables.sql                # NEW — solana_rpc_endpoint_state, solana_signatures
 ```
 
@@ -3800,7 +3800,7 @@ package execution
 import (
     "context"
     "errors"
-    "crypto-sniping-bot/contracts"
+    "crypto-sniping-bot/shared/contracts"
 )
 
 var ErrUnsupportedChain = errors.New("execution: unsupported chain")
@@ -3975,7 +3975,7 @@ Per RPC call (ingestion subscribe, getSignaturesForAddress, sendTransaction, get
 
 #### 7.7.5 Provider Set Configuration
 
-`config/chains.yaml`:
+`shared/config/chains.yaml`:
 
 ```yaml
 chains:
@@ -4014,7 +4014,7 @@ chains:
 
 ### Config Additions
 
-`config/chains.yaml`:
+`shared/config/chains.yaml`:
 
 ```yaml
 chains:
@@ -4040,7 +4040,7 @@ chains:
       multiplier: 2.0
 ```
 
-`config/execution.yaml`:
+`shared/config/execution.yaml`:
 
 ```yaml
 execution:
@@ -4081,7 +4081,7 @@ execution:
 - [ ] Kill switch (Phase 6) halts Solana entries identically to EVM entries
 - [ ] Capital envelope (Phase 6) caps total exposure across `eth | bsc | solana` simultaneously
 - [ ] `go test ./internal/modules/ingestion_solana/... ./internal/modules/execution_solana/... ./internal/modules/execution/...` passes
-- [ ] Zero `database/` imports anywhere under `internal/modules/ingestion_solana/` or `internal/modules/execution_solana/`
+- [ ] Zero `shared/database/` imports anywhere under `internal/modules/ingestion_solana/` or `internal/modules/execution_solana/`
 - [ ] Zero SQL strings anywhere under `internal/modules/ingestion_solana/` or `internal/modules/execution_solana/`
 
 #### Production-Grade Hardening Exit Criteria (Section G)
@@ -4546,7 +4546,7 @@ dqMod := data_quality.New(cfg.DataQuality, evmSim, solanaSim, cache, logger)
 ### Caching (mandatory)
 
 - LRU keyed by `(chain, token_address, detector_name)`; size bound `dq.cache_max_entries` (default 8192).
-- TTL **per-detector** from `config/data_quality.yaml`, all in the **5–10 minute** band unless detector physics demands otherwise:
+- TTL **per-detector** from `shared/config/data_quality.yaml`, all in the **5–10 minute** band unless detector physics demands otherwise:
   - `honeypot_ttl_sec: 300` (5m)
   - `tax_ttl_sec: 300` (5m)
   - `wash_ttl_sec: 300` (5m)
@@ -4601,7 +4601,7 @@ A `risky-pass` Decision propagates downstream — Selection / Capital observe `D
 - [ ] Honeypot contract from a curated test fixture is rejected at L1 in 100 % of replays
 - [ ] DQ wall-time **p95 ≤ `dq.total_budget_ms` (500 ms)**; per-detector p95 ≤ `dq.detector_timeout_ms` (300 ms)
 - [ ] Cache hit ratio ≥ 60 % over a 24h replay (proves bounded RPC pressure)
-- [ ] Zero new entries in `internal/modules/data_quality/` import `database/` or `internal/rpc/` directly — RPC clients are injected only
+- [ ] Zero new entries in `internal/modules/data_quality/` import `shared/database/` or `internal/rpc/` directly — RPC clients are injected only
 
 ---
 
@@ -4665,7 +4665,7 @@ internal/modules/features/
 
 Input: `DataQualityDTO` on `data_quality_event` (already includes the underlying `MarketDataDTO`'s pool address and reserves). Output: `FeatureDTO` on `feature_event` with all eight numeric features populated and `Confidence` populated per § 9.2 of `docs/reference/dto_contracts.md`.
 
-> **DTO additions:** None. The `FeatureConfidence` struct already exists in `contracts/feature.go` (verified 2026-04-29). Phase 9 only populates fields; no schema change.
+> **DTO additions:** None. The `FeatureConfidence` struct already exists in `shared/contracts/feature.go` (verified 2026-04-29). Phase 9 only populates fields; no schema change.
 
 ### Real-Signal Computation Map
 
@@ -4882,7 +4882,7 @@ size_raw   = base_size_usd × f_kelly × confidence × cohort_multiplier × mode
 size_final = clamp(size_raw, min_size_usd, max_size_usd) // existing Phase 6 envelope still applies AFTER this clamp
 ```
 
-**Mode multiplier table** (`config/capital.yaml mode_multipliers`):
+**Mode multiplier table** (`shared/config/capital.yaml mode_multipliers`):
 
 | Mode          | Multiplier | Notes                                                                |
 | ------------- | ---------- | -------------------------------------------------------------------- |
@@ -5050,7 +5050,7 @@ The factory in `price_oracle_factory.go` resolves the right implementation by ch
 
 ### Hot-Path Performance Constraints
 
-- Polling cadence configurable per-chain (`config/pipeline.yaml position_poll_interval_ms`) — typical 500–1000 ms
+- Polling cadence configurable per-chain (`shared/config/pipeline.yaml position_poll_interval_ms`) — typical 500–1000 ms
 - Price fetch p95 ≤ `price_fetch_timeout_ms` (default 500 ms)
 - Per-cycle wall budget: `max_open_positions × price_fetch_timeout_ms × 1.2` — exceeded → emit `system_event level=warn` and reduce poll concurrency
 
@@ -5241,7 +5241,7 @@ internal/modules/learning/
 
 ### Cohort Grouping (mandatory)
 
-Every `LearningRecord` is bucketed by **all three** axes. Cohort key = `(liquidity_band, tax_band, latency_band)`. Bands defined in `config/pipeline.yaml learning.cohorts`:
+Every `LearningRecord` is bucketed by **all three** axes. Cohort key = `(liquidity_band, tax_band, latency_band)`. Bands defined in `shared/config/pipeline.yaml learning.cohorts`:
 
 | Axis             | Source field                         | Default bands                      |
 | ---------------- | ------------------------------------ | ---------------------------------- |
@@ -5291,7 +5291,7 @@ No new worker. `internal/workers/run_updater.go` continues to operate. Phase 9 c
 
 ### Configuration Tightening
 
-`config/pipeline.yaml learning` adjustments (per `docs/analysis/profitability-gaps.md` § GAP-14):
+`shared/config/pipeline.yaml learning` adjustments (per `docs/analysis/profitability-gaps.md` § GAP-14):
 
 - `min_samples_for_update` raised from current default to `≥ 50`
 - Per-cohort multiplier updates **enabled** in `LearningConfig.UpdateCohortMultipliers=true`
@@ -5536,7 +5536,7 @@ learning_record_event ──► learning  ──► strategy_version_update (sys
 
 ## 9.9 Configuration Additions
 
-Phase 9 adds **four** dedicated config files under `config/`. All thresholds, timeouts, weights, and multipliers live here — never hardcoded in module code. See § 0.5.
+Phase 9 adds **four** dedicated config files under `shared/config/`. All thresholds, timeouts, weights, and multipliers live here — never hardcoded in module code. See § 0.5.
 
 ```
 config/
@@ -5546,7 +5546,7 @@ config/
 └── capital.yaml               // NEW — Kelly cap, mode multipliers, exploration band
 ```
 
-Existing `config/chains.yaml` gains a per-chain `data_quality` block (closes GAP-16 partially) — additive, never removes existing keys.
+Existing `shared/config/chains.yaml` gains a per-chain `data_quality` block (closes GAP-16 partially) — additive, never removes existing keys.
 
 ---
 
@@ -5717,8 +5717,8 @@ if probDTO.Confidence < cfg.MinModelConfidence {
 - [ ] `grep -rnE 'INSERT|SELECT|UPDATE|DELETE' internal/modules/` → **zero matches**
 - [ ] `go test ./...` passes without skips (unit + integration)
 - [ ] `go vet ./...` passes without warnings
-- [ ] All numeric thresholds verified in `config/*.yaml`; `grep -rn '[0-9]\{4,\}' internal/` returns only port numbers and SHA lengths
-- [ ] Security: no private keys in logs (grep `0x[0-9a-fA-F]{64}` in captured stdout/stderr); no credentials in `config/*.yaml`
+- [ ] All numeric thresholds verified in `shared/config/*.yaml`; `grep -rn '[0-9]\{4,\}' internal/` returns only port numbers and SHA lengths
+- [ ] Security: no private keys in logs (grep `0x[0-9a-fA-F]{64}` in captured stdout/stderr); no credentials in `shared/config/*.yaml`
 - [ ] Parameterized queries only: `grep -rn 'fmt.Sprintf.*INSERT\|fmt.Sprintf.*SELECT' database/` → **zero matches**
 - [ ] `sniper migrate` on empty production DB → re-run → no errors both times
 
@@ -5737,7 +5737,7 @@ These invariants apply to **every phase** and are verified in every phase's exit
 | Content-addressable IDs     | `EventID == SHA256(canonical_json(payload))[:16]`                                                                                                                                                                                                                                          |
 | Traceability enforced       | `orphan_event_count` metric stays at 0                                                                                                                                                                                                                                                     |
 | State machine enforced      | `token_state_violation_count` visible + quarantine observable                                                                                                                                                                                                                              |
-| Config-driven parameters    | No magic numbers in module code; all tunables in `config/*.yaml`                                                                                                                                                                                                                           |
+| Config-driven parameters    | No magic numbers in module code; all tunables in `shared/config/*.yaml`                                                                                                                                                                                                                           |
 | Strategy versioning         | Every DTO has non-empty `VersionID`; changing config creates new `StrategyVersion` row                                                                                                                                                                                                     |
 | Event-sourced state         | Dropping all projection tables and replaying events rebuilds state correctly                                                                                                                                                                                                               |
 | Exit-path priority          | Under load test, exit events process before any new entry events                                                                                                                                                                                                                           |

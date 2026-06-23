@@ -245,7 +245,7 @@ func EmitStrategyStateChange(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 strategy_auto_disable:

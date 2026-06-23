@@ -283,7 +283,7 @@ You need up to nine types of credentials:
 9. **Copy-trade alpha wallet addresses** — smart wallet tracking for copy-trade DQ signal (Phase 9, optional)
 
 > **Minimum setup:** To run the bot with only Ethereum or BSC, you only need credentials 1–3.
-> Solana credentials (4–5) are only required when you enable Solana in `config/chains.yaml`.
+> Solana credentials (4–5) are only required when you enable Solana in `shared/config/chains.yaml`.
 > Credentials 6–9 are optional enrichments — the bot runs without them at reduced DQ coverage.
 
 ---
@@ -596,7 +596,7 @@ SNIPER_WALLET_3_KEY=privateKey3WithoutHexPrefix
 ### 3.4 Solana RPC Endpoints (Phase 7)
 
 > **Skip this section if you are not enabling Solana trading.** Solana support is controlled by
-> `config/chains.yaml`. If you leave the Solana block blank or don’t set the env vars, the
+> `shared/config/chains.yaml`. If you leave the Solana block blank or don’t set the env vars, the
 > bot will simply not ingest Solana markets.
 
 Solana RPC endpoints work differently from EVM endpoints:
@@ -760,7 +760,7 @@ QuickNode  10M credits/month:
 **Recommended setup for Jakarta users (use both):**
 
 ```yaml
-# config/chains.yaml — Solana RPC block
+# shared/config/chains.yaml — Solana RPC block
 solana:
   rpc:
     - url: "${SOLANA_RPC_HTTP_1}" # QuickNode Singapore — primary HTTP
@@ -926,7 +926,7 @@ BIRDEYE_API_KEY=your_birdeye_api_key_here
 > **no built-in rate limiter** for BirdEye — when CUs are exhausted or rate-limited (HTTP 429),
 > the provider returns `Degraded: true` and the pipeline continues without the score. In quiet
 > markets this is fine. In busy markets (Solana bull runs, 100+ launches/minute), BirdEye
-> degrades silently — it becomes a no-op. Keep `shadow_mode: true` in `config/data_quality.yaml`
+> degrades silently — it becomes a no-op. Keep `shadow_mode: true` in `shared/config/data_quality.yaml`
 > while validating, and check your CU usage in the BDS Dashboard before disabling shadow mode.
 
 > **Security:** This key is read via `os.Getenv("BIRDEYE_API_KEY")` at startup — it is never
@@ -937,7 +937,7 @@ BIRDEYE_API_KEY=your_birdeye_api_key_here
 ### 3.7 Jito Bundle Credentials (Phase 11 — optional)
 
 > **Skip if:** You are not trading on Solana, or you are in shadow mode.
-> Jito bundle submission is enabled via `execution.solana.jito.enabled: true` in `config/execution.yaml`.
+> Jito bundle submission is enabled via `execution.solana.jito.enabled: true` in `shared/config/execution.yaml`.
 > By default `enabled: false` and `shadow_mode: true` — no bundles are submitted until you explicitly enable it.
 
 Jito is a Solana MEV infrastructure that lets you submit transactions as **bundles** to Jito
@@ -991,7 +991,7 @@ JITO_TIP_ACCOUNT=96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
 > The response body is capped at 64 KiB to prevent unbounded reads.
 
 > **Cost:** Jito charges no subscription fee. You pay a **tip in lamports** per bundle
-> (configured via `execution.solana.jito.tip_lamports: 1000` in `config/execution.yaml`).
+> (configured via `execution.solana.jito.tip_lamports: 1000` in `shared/config/execution.yaml`).
 > At 1000 lamports per bundle, this is $0.000001 per trade — effectively free.
 
 ---
@@ -999,7 +999,7 @@ JITO_TIP_ACCOUNT=96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
 ### 3.8 Solana gRPC Transport Credentials (Phase 11 — optional)
 
 > **Skip if:** You are using the default WebSocket transport (the default `mode: rpc` in
-> `config/chains.yaml`). gRPC is only needed for ultra-low-latency sniping where WebSocket
+> `shared/config/chains.yaml`). gRPC is only needed for ultra-low-latency sniping where WebSocket
 > latency (~50ms per event) is a bottleneck.
 
 The Phase 11 hybrid transport supports **Yellowstone gRPC** (Geyser plugin streaming), which
@@ -1029,7 +1029,7 @@ support this:
 **Set in your `.env` file:**
 
 ```bash
-# The endpoint overrides the value in config/chains.yaml — only needed if using gRPC mode
+# The endpoint overrides the value in shared/config/chains.yaml — only needed if using gRPC mode
 SOLANA_GRPC_ENDPOINT=your-node.rpcpool.com:443
 
 # Auth token — NEVER put this in YAML — env var only
@@ -1039,7 +1039,7 @@ SOLANA_GRPC_TOKEN=your_bearer_token_here
 **Enable gRPC in config:**
 
 ```yaml
-# config/chains.yaml
+# shared/config/chains.yaml
 solana:
   transport:
     mode: grpc # Change from "rpc" to "grpc"
@@ -1291,10 +1291,10 @@ Then just run `loadenv` each time.
 
 ### 5.2 Edit YAML Config Files
 
-The YAML files in `config/` control all trading parameters. You should review and adjust these
+The YAML files in `shared/config/` control all trading parameters. You should review and adjust these
 before running the bot. Below is a beginner-friendly explanation of each important file.
 
-#### `config/chains.yaml` — Which blockchains to scan
+#### `shared/config/chains.yaml` — Which blockchains to scan
 
 Open this file and update the RPC endpoint references to match your env var names:
 
@@ -1341,7 +1341,7 @@ start — this is safe and does not affect EVM chains.
 **Solana hybrid transport (Phase 11)** — optional high-performance gRPC stream:
 
 ```yaml
-# config/chains.yaml (Phase 11 addition)
+# shared/config/chains.yaml (Phase 11 addition)
 solana:
   transport:
     mode: rpc # "rpc" (default) or "grpc" (Triton One / Helius Business)
@@ -1353,7 +1353,7 @@ solana:
 > Leave `mode: rpc` unless you have a gRPC Solana provider. The WebSocket transport is
 > production-ready for most use cases.
 
-#### `config/pipeline.yaml` — Core trading parameters
+#### `shared/config/pipeline.yaml` — Core trading parameters
 
 The most important settings for beginners:
 
@@ -1422,7 +1422,7 @@ learning:
 > **Tip for beginners:** Start with `fixed_entry_size_usd: 10.0` and `max_concurrent_positions: 1`
 > until you understand how the bot behaves.
 
-#### `config/execution.yaml` — Transaction settings
+#### `shared/config/execution.yaml` — Transaction settings
 
 ```yaml
 # How many transactions can be in-flight simultaneously (5-20)
@@ -1444,7 +1444,7 @@ solana:
     - "${SOLANA_WALLET_KEY_1}" # File path to keypair JSON
 ```
 
-#### `config/data_quality.yaml` — Scam detection (Phase 9)
+#### `shared/config/data_quality.yaml` — Scam detection (Phase 9)
 
 Controls which scam detectors are active and how much each one contributes to the overall risk
 score. **Default values are safe to use without changes.**
@@ -1470,7 +1470,7 @@ data_quality:
     # dev_reputation weight is applied via serial-launcher risk score (see data_quality.yaml)
 ```
 
-#### `config/capital.yaml` — Position sizing (Phase 9)
+#### `shared/config/capital.yaml` — Position sizing (Phase 9)
 
 Controls how much money the bot bets per trade. Phase 9 introduced dynamic (Kelly-fraction)
 sizing. **Start with the defaults and adjust after observing live behavior.**
@@ -1496,7 +1496,7 @@ capital:
     fallback_prior_probability: 0.35 # Only used if above is "fallback_prior"
 ```
 
-#### `config/probability.yaml` — Trade probability (Phase 9)
+#### `shared/config/probability.yaml` — Trade probability (Phase 9)
 
 Controls how the bot uses its probability model to score each trade opportunity.
 
@@ -2180,9 +2180,9 @@ cause startup failure if not set.
 | `SNIPER_TELEGRAM_ALLOWED_USERS` | Optional     | —                      | Comma-separated Telegram user IDs permitted to issue commands |
 | `PORT`                          | Optional     | `8080`                 | HTTP server port for health check endpoint                    |
 | `LOG_LEVEL`                     | Optional     | `info`                 | Log verbosity: `debug`, `info`, `warn`, `error`               |
-| `CONFIG_PATH`                   | Optional     | `config/pipeline.yaml` | Override path to main config file                             |
+| `CONFIG_PATH`                   | Optional     | `shared/config/pipeline.yaml` | Override path to main config file                             |
 
-> **‡ Solana variables** are only required when `config/chains.yaml` has a `solana:` block with
+> **‡ Solana variables** are only required when `shared/config/chains.yaml` has a `solana:` block with
 > valid `rpc:` entries. If the env vars are absent, the Solana ingestion and execution workers
 > will not start. EVM (ETH/BSC) workers are unaffected.
 
@@ -2273,9 +2273,9 @@ Migration `20260101000014_pr_fixes.sql` adds:
 
 - Index improvements and minor schema corrections from code review
 
-#### HardeningConfig parameters (in `config/pipeline.yaml`)
+#### HardeningConfig parameters (in `shared/config/pipeline.yaml`)
 
-All Phase 8 parameters have sensible defaults. You can override them in `config/pipeline.yaml`:
+All Phase 8 parameters have sensible defaults. You can override them in `shared/config/pipeline.yaml`:
 
 ```yaml
 hardening:
@@ -2346,10 +2346,10 @@ Phase 9 addresses the four factors that were near-zero before it: **DataQuality*
 
 ---
 
-#### 13.4.1 Real Scam Detection — `config/data_quality.yaml` (Layer 1)
+#### 13.4.1 Real Scam Detection — `shared/config/data_quality.yaml` (Layer 1)
 
 Before Phase 9, the Data Quality Engine checked tokens for scams but used hardcoded weights to
-combine the results. Now every weight comes from `config/data_quality.yaml`.
+combine the results. Now every weight comes from `shared/config/data_quality.yaml`.
 
 **What scam checks does the bot run?**
 
@@ -2365,11 +2365,11 @@ combine the results. Now every weight comes from `config/data_quality.yaml`.
 
 **What you can tune:**
 
-The `risk_weights` section in `config/data_quality.yaml` controls how much each detector
+The `risk_weights` section in `shared/config/data_quality.yaml` controls how much each detector
 contributes to the overall scam risk score (0.0 = ignored, higher = more weight):
 
 ```yaml
-# config/data_quality.yaml
+# shared/config/data_quality.yaml
 data_quality:
   risk_weights:
     honeypot: 0.30 # Honeypot is the most reliable signal — highest weight
@@ -2395,7 +2395,7 @@ thresholds:
 
 ---
 
-#### 13.4.2 Real Feature Signals — `config/feature.yaml` (Layer 2)
+#### 13.4.2 Real Feature Signals — `shared/config/feature.yaml` (Layer 2)
 
 Before Phase 9, five out of eight trading signals returned a hardcoded `0.5` ("neutral") instead
 of computing a real value from on-chain data. This meant the bot could not distinguish a token
@@ -2413,7 +2413,7 @@ Phase 9 wires up the following real signals:
 
 These are the signals the edge detection layer uses to decide _"is this token worth buying right now?"_
 
-**Key config options in `config/feature.yaml`:**
+**Key config options in `shared/config/feature.yaml`:**
 
 ```yaml
 feature:
@@ -2448,7 +2448,7 @@ feature:
 
 ---
 
-#### 13.4.3 Real Probability Scores — `config/probability.yaml` (Layer 4)
+#### 13.4.3 Real Probability Scores — `shared/config/probability.yaml` (Layer 4)
 
 Before Phase 9, the validation layer always used a fixed probability of `0.35` regardless of the
 token. This meant every trade was evaluated as if it had a 35% chance of success — completely
@@ -2462,7 +2462,7 @@ probability score based on historical patterns.
 The bot falls back to the `prior_probability` you configure:
 
 ```yaml
-# config/probability.yaml
+# shared/config/probability.yaml
 probability:
   use_model_output: true # Use model output when available
   prior_probability: 0.35 # Conservative fallback for new tokens
@@ -2485,7 +2485,7 @@ your signal that the probability model is struggling — possibly due to a data 
 
 ---
 
-#### 13.4.4 Dynamic Capital Sizing — `config/capital.yaml` (Layer 7)
+#### 13.4.4 Dynamic Capital Sizing — `shared/config/capital.yaml` (Layer 7)
 
 Before Phase 9, the bot always bet a fixed dollar amount (e.g., `$50`) on every trade regardless
 of how strong or weak the signal was. This is suboptimal — a very strong signal deserves more
@@ -2498,7 +2498,7 @@ the model's probability estimate, and the confidence of the features.
 size = base_size_usd × kelly_fraction × mode_multiplier × cohort_multiplier
 ```
 
-**Key config in `config/capital.yaml`:**
+**Key config in `shared/config/capital.yaml`:**
 
 ```yaml
 capital:
@@ -2537,7 +2537,7 @@ capital:
 
 ---
 
-#### 13.4.5 Real-Time Position Monitoring — `config/pipeline.yaml` (Layer 9)
+#### 13.4.5 Real-Time Position Monitoring — `shared/config/pipeline.yaml` (Layer 9)
 
 Before Phase 9, positions were monitored on a fixed 5-second timer. Phase 9 changes this to
 price-feed-driven monitoring: the position monitor polls whenever a new price event arrives from
@@ -2548,7 +2548,7 @@ This means:
 - **Faster exits**: If a token dumps 15% in 2 seconds, the stop-loss fires in < 1 second instead of up to 5 seconds
 - **No unnecessary polling**: Between price events, the monitor sleeps (saves CPU and RPC calls)
 
-The existing position parameters in `config/pipeline.yaml` still control exit behavior:
+The existing position parameters in `shared/config/pipeline.yaml` still control exit behavior:
 
 ```yaml
 position:
@@ -2571,11 +2571,11 @@ modification — they match what was previously hardcoded:
 
 | Config file                | Key sections                                      | What to tune                   |
 | -------------------------- | ------------------------------------------------- | ------------------------------ |
-| `config/data_quality.yaml` | `risk_weights`, `thresholds`, `detectors`         | Scam detection sensitivity     |
-| `config/feature.yaml`      | `tx_velocity`, `token_age`, `volume_momentum`     | Feature extraction timing      |
-| `config/probability.yaml`  | `prior_probability`, `fallback_alert_pct`         | Probability fallback behavior  |
-| `config/capital.yaml`      | `kelly.cap`, `mode_multipliers`, `failure_policy` | Position sizing aggressiveness |
-| `config/pipeline.yaml`     | `position.*` (unchanged format)                   | Exit parameters                |
+| `shared/config/data_quality.yaml` | `risk_weights`, `thresholds`, `detectors`         | Scam detection sensitivity     |
+| `shared/config/feature.yaml`      | `tx_velocity`, `token_age`, `volume_momentum`     | Feature extraction timing      |
+| `shared/config/probability.yaml`  | `prior_probability`, `fallback_alert_pct`         | Probability fallback behavior  |
+| `shared/config/capital.yaml`      | `kelly.cap`, `mode_multipliers`, `failure_policy` | Position sizing aggressiveness |
+| `shared/config/pipeline.yaml`     | `position.*` (unchanged format)                   | Exit parameters                |
 
 **Nothing is required before your first run.** Review these files after your first 50 live trades
 and tune based on what you observe in the Telegram alerts and database.
@@ -2588,7 +2588,7 @@ Phase 10 is a targeted improvement pass that ports several high-impact technique
 production-grade open-source sniper bots. Each change is individually gated so it can be disabled
 without affecting the rest of the pipeline.
 
-#### 13.5.1 Trailing Stop after TP1 — `config/pipeline.yaml` (Layer 9)
+#### 13.5.1 Trailing Stop after TP1 — `shared/config/pipeline.yaml` (Layer 9)
 
 Before Phase 10, the bot had fixed take-profit levels. After TP1 hit, it would simply wait for
 TP2. If the price reversed sharply after TP1, the open portion could give back all gains.
@@ -2596,7 +2596,7 @@ TP2. If the price reversed sharply after TP1, the open portion could give back a
 Phase 10 adds a **trailing stop** that activates only after TP1 fires:
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 position:
   tp1_bps: 1500 # Still take 50% at +15%
   tp1_filled_pct_bps: 5000 # Sell exactly 50% at TP1
@@ -2608,7 +2608,7 @@ position:
 > let winners run longer, try `800` (8%). If you keep getting stopped out on small pullbacks,
 > try `300` (3%). Set `trailing_stop_bps: 0` to disable entirely (legacy behaviour).
 
-#### 13.5.2 Consecutive-Pass Gate — `config/pipeline.yaml` (Layer 5)
+#### 13.5.2 Consecutive-Pass Gate — `shared/config/pipeline.yaml` (Layer 5)
 
 Phase 10 adds a **debounce filter** to the edge validation layer: a token must pass the EV gate
 on multiple consecutive evaluations within a time window before a position is entered.
@@ -2617,32 +2617,32 @@ This eliminates single-spike false positives where a token scores well on one sn
 the signal is not sustained.
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 validation:
   required_consecutive_passes: 2 # Token must pass the EV gate twice in a row
   consecutive_pass_window_seconds: 30 # Both passes must occur within 30 seconds
   # Set required_consecutive_passes: 1 (or 0) to disable (single-pass, legacy behaviour)
 ```
 
-#### 13.5.3 Bonding Curve Progress Filter — `config/data_quality.yaml` (Layer 1, Solana)
+#### 13.5.3 Bonding Curve Progress Filter — `shared/config/data_quality.yaml` (Layer 1, Solana)
 
 For Solana PumpFun tokens, Phase 10 adds a filter that rejects tokens that have already
 progressed too far along their bonding curve. Tokens near 100% completion are about to migrate
 to Raydium — the sniping window has closed.
 
 ```yaml
-# config/data_quality.yaml
+# shared/config/data_quality.yaml
 thresholds:
   max_bonding_curve_progress_bps: 8000 # Reject if > 80% bonded (0 = disabled)
 ```
 
-#### 13.5.4 Volume-Staleness Time Exit — `config/pipeline.yaml` (Layer 9)
+#### 13.5.4 Volume-Staleness Time Exit — `shared/config/pipeline.yaml` (Layer 9)
 
 Phase 10 adds a time-based exit trigger for positions where the token's trading volume has
 gone stale — the token is still alive but no longer moving.
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 position:
   volume_staleness_seconds: 1800 # Check staleness after 30 min hold
   volume_staleness_min_delta_pct_bps: 200 # Exit if 24h volume grew < 2% (stale)
@@ -2657,13 +2657,13 @@ Phase 11 ports the remaining high-signal techniques from the reference implement
 All six features are independently togglable. The defaults are conservative (most off) to
 preserve legacy behaviour on first deploy.
 
-#### 13.6.1 Creator Hygiene Filters — `config/pipeline.yaml` (Layer 3)
+#### 13.6.1 Creator Hygiene Filters — `shared/config/pipeline.yaml` (Layer 3)
 
 Phase 11 adds three creator-level filters to the edge detection layer. These prevent the bot
 from trading tokens launched by wallets with a history of rugs or suspicious activity.
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 edge:
   max_dev_buy_pct_bps: 2000 # Reject if creator bought > 20% of supply at launch (0 = disabled)
   max_creator_rug_count: 2 # Reject if creator has ≥ 2 confirmed prior rugs (0 = disabled)
@@ -2675,26 +2675,26 @@ edge:
 > the same creator address is evaluated, `max_creator_rug_count` is checked against that count.
 > The threshold is per-chain (ETH rugs don't count against BSC creators).
 
-#### 13.6.2 Per-Creator Position Deduplication — `config/pipeline.yaml` (Layer 6)
+#### 13.6.2 Per-Creator Position Deduplication — `shared/config/pipeline.yaml` (Layer 6)
 
 Phase 11 prevents the bot from holding multiple open positions in tokens launched by the
 same creator wallet simultaneously. This prevents correlated loss if a creator rugs multiple
 tokens at once.
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 selection:
   max_positions_per_creator: 1 # At most 1 open position per creator wallet (0 = disabled)
 ```
 
-#### 13.6.3 Holder Concentration Filter — `config/feature.yaml` (Layer 2)
+#### 13.6.3 Holder Concentration Filter — `shared/config/feature.yaml` (Layer 2)
 
 Phase 11 adds a holder concentration extractor that scores tokens where the top N wallets
 hold an unusually large percentage of the supply. High concentration means a few wallets can
 dump at any time.
 
 ```yaml
-# config/feature.yaml
+# shared/config/feature.yaml
 feature:
   holder_concentration:
     enabled: true
@@ -2707,14 +2707,14 @@ feature:
 > it adds ~1–2 RPC calls per token. On a free-tier plan this is negligible. Enable it for
 > better signal quality.
 
-#### 13.6.4 Social Links Presence — `config/feature.yaml` (Layer 2)
+#### 13.6.4 Social Links Presence — `shared/config/feature.yaml` (Layer 2)
 
 Phase 11 adds a feature that checks whether a token's contract metadata includes social links
 (Twitter, Telegram, website). Tokens with zero social presence are statistically more likely to
 be rug pulls.
 
 ```yaml
-# config/feature.yaml
+# shared/config/feature.yaml
 feature:
   social_links:
     enabled: true
@@ -2724,14 +2724,14 @@ feature:
 > **Note:** This is a soft signal — it contributes to the feature score but does not alone
 > reject a token. Use it in combination with other filters.
 
-#### 13.6.5 Congestion-Aware Slippage — `config/pipeline.yaml` (Layer 4)
+#### 13.6.5 Congestion-Aware Slippage — `shared/config/pipeline.yaml` (Layer 4)
 
 Phase 11 adds a congestion multiplier to the slippage model. When on-chain latency is elevated
 (network is congested), the slippage estimate is scaled up proportionally to ensure the EV
 gate rejects marginal trades that would be unprofitable under actual congestion conditions.
 
 ```yaml
-# config/pipeline.yaml
+# shared/config/pipeline.yaml
 models:
   congestion:
     enabled: false # Disabled by default; enable after baseline latency data is collected
@@ -2743,7 +2743,7 @@ models:
 > data from your RPC provider. The congestion multiplier is derived from real-time RPC latency
 > measurements — once enabled, you do not need to set a fixed value.
 
-#### 13.6.6 Simulation Diff Evaluation — `config/priority.yaml` (Layer 9→10)
+#### 13.6.6 Simulation Diff Evaluation — `shared/config/priority.yaml` (Layer 9→10)
 
 Phase 11 adds a `ComputeExecutionVariance` step to the evaluation layer. After each trade
 completes, it compares the simulated swap output (predicted by the slippage model) against the
@@ -2751,12 +2751,12 @@ realized output (what actually happened on-chain). The variance (in basis points
 the `LearningRecord` and used by the learning engine to improve future slippage estimates.
 
 ```yaml
-# config/priority.yaml
+# shared/config/priority.yaml
 evaluation:
   enable_simulation_diff: false # Set true to record simulated vs realized slippage variance
 ```
 
-#### 13.6.7 Solana Hybrid Transport — `config/chains.yaml`
+#### 13.6.7 Solana Hybrid Transport — `shared/config/chains.yaml`
 
 Phase 11 adds a hybrid transport layer for Solana ingestion. When `mode: grpc` is configured
 (Triton One or Helius gRPC stream), the bot uses gRPC for ultra-low latency log delivery.
@@ -2764,7 +2764,7 @@ If gRPC fails `fallback_error_n` consecutive times, it automatically falls back 
 WebSocket transport without restarting.
 
 ```yaml
-# config/chains.yaml
+# shared/config/chains.yaml
 solana:
   transport:
     mode: rpc # "rpc" (default WebSocket) or "grpc"
@@ -2782,14 +2782,14 @@ solana:
 
 | Config file            | New keys added                                                                    | Purpose                           |
 | ---------------------- | --------------------------------------------------------------------------------- | --------------------------------- |
-| `config/pipeline.yaml` | `edge.max_dev_buy_pct_bps`, `max_creator_rug_count`, `min_dev_wallet_age_seconds` | Creator hygiene gates             |
-| `config/pipeline.yaml` | `selection.max_positions_per_creator`                                             | Per-creator dedup                 |
-| `config/pipeline.yaml` | `models.congestion` block                                                         | Congestion slippage adjustment    |
-| `config/pipeline.yaml` | `learning.creator_blacklist` block                                                | Creator blacklist persistence     |
-| `config/feature.yaml`  | `feature.holder_concentration` block                                              | Top-N holder concentration filter |
-| `config/feature.yaml`  | `feature.social_links` block                                                      | Social presence signal            |
-| `config/chains.yaml`   | `solana.transport` block                                                          | Hybrid gRPC/WebSocket transport   |
-| `config/priority.yaml` | `evaluation.enable_simulation_diff`                                               | Sim-diff variance tracking        |
+| `shared/config/pipeline.yaml` | `edge.max_dev_buy_pct_bps`, `max_creator_rug_count`, `min_dev_wallet_age_seconds` | Creator hygiene gates             |
+| `shared/config/pipeline.yaml` | `selection.max_positions_per_creator`                                             | Per-creator dedup                 |
+| `shared/config/pipeline.yaml` | `models.congestion` block                                                         | Congestion slippage adjustment    |
+| `shared/config/pipeline.yaml` | `learning.creator_blacklist` block                                                | Creator blacklist persistence     |
+| `shared/config/feature.yaml`  | `feature.holder_concentration` block                                              | Top-N holder concentration filter |
+| `shared/config/feature.yaml`  | `feature.social_links` block                                                      | Social presence signal            |
+| `shared/config/chains.yaml`   | `solana.transport` block                                                          | Hybrid gRPC/WebSocket transport   |
+| `shared/config/priority.yaml` | `evaluation.enable_simulation_diff`                                               | Sim-diff variance tracking        |
 
 **All new keys have safe defaults and are independently disableable.** No changes are required
 before your first run. Enable them gradually after validating baseline behaviour.
@@ -3142,9 +3142,9 @@ Manually verify each critical variable:
 - [ ] `SOLANA_RPC_HTTP_1` — real Helius/QuickNode URL (if Solana enabled)
 - [ ] `SOLANA_WS_1` — real WebSocket URL (if Solana enabled)
 
-#### 4.2 — Risk Limits in config/pipeline.yaml
+#### 4.2 — Risk Limits in shared/config/pipeline.yaml
 
-Open `config/pipeline.yaml` and confirm these values are set conservatively for your first
+Open `shared/config/pipeline.yaml` and confirm these values are set conservatively for your first
 live run. Do not go live with the default maximums:
 
 ```yaml
@@ -3242,7 +3242,7 @@ chmod 600 /etc/sniper/keys/solana-wallet-1.json  # if Solana enabled
 
 - [ ] At least 2 HTTP RPC endpoints configured per chain (`ETH_RPC_1` + `ETH_RPC_2`)
 - [ ] WebSocket endpoint configured (`ETH_WS_1`)
-- [ ] RPC circuit breaker is enabled (it is by default — verify in `config/pipeline.yaml` under `rpc`)
+- [ ] RPC circuit breaker is enabled (it is by default — verify in `shared/config/pipeline.yaml` under `rpc`)
 - [ ] RPC latency from VPS tested and acceptable (done in Stage 2 Step 5)
 
 #### 4.7 — Telegram Alerts Working End-to-End
@@ -3344,7 +3344,7 @@ Transfer the minimum canary amount to your trading wallet:
 | BSC    | 0.05–0.1 BNB  | 2–3 trades at $10 entry + gas |
 | Solana | 0.05–0.1 SOL  | 2–3 trades + gas (lamports)   |
 
-Keep `fixed_entry_size_usd: 10.0` in `config/pipeline.yaml`. You should have enough for 1–2 trades
+Keep `fixed_entry_size_usd: 10.0` in `shared/config/pipeline.yaml`. You should have enough for 1–2 trades
 before running out of capital, which limits maximum loss during canary validation.
 
 #### Step 2 — Confirm wallet is funded and ready
@@ -3422,8 +3422,8 @@ max_concurrent_positions: 2
 To apply config changes without downtime:
 
 ```bash
-# Edit config/pipeline.yaml
-nano /opt/crypto-sniping-bot/config/pipeline.yaml
+# Edit shared/config/pipeline.yaml
+nano /opt/crypto-sniping-bot/shared/config/pipeline.yaml
 
 # Restart bot (the DB and positions are preserved — only the bot process restarts)
 docker compose restart bot
@@ -3549,7 +3549,7 @@ with sub-slot latency — critical when you are racing other sniping bots for th
 - At high-frequency (100+ trades/day), budget $20–50/month in bandwidth.
 
 **Env vars:** `SOLANA_GRPC_ENDPOINT` + `SOLANA_GRPC_TOKEN` — token is read via `os.Getenv` only
-(see security constraints in Section 3.8). Never add the token to `config/chains.yaml`.
+(see security constraints in Section 3.8). Never add the token to `shared/config/chains.yaml`.
 
 **When to enable:** When your WebSocket-based ingestion is consistently slower than competing bots
 (you see tokens detected 1–3 slots late vs. the earliest on-chain trade). For initial canary

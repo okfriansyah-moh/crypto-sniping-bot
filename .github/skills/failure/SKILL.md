@@ -44,7 +44,7 @@ failed → queued             (manual retry, max 3 times total)
 
 ## Inputs
 
-- Pipeline execution state from `database/adapter.*`
+- Pipeline execution state from `shared/database/adapter.*`
 - Module processing results (success/failure DTOs)
 
 ## Outputs

@@ -53,7 +53,7 @@ from os import *
 
 ## Inputs
 
-- Source code under `app/`, `contracts/`, `database/`
+- Source code under `app/`, `shared/contracts/`, `shared/database/`
 
 ## Outputs
 

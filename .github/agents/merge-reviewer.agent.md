@@ -72,8 +72,8 @@ You are a post-merge review specialist. Your job is to validate the merged codeb
 
 ### 6. Protected File Policy
 
-- `contracts/` changes are additive only (no removed/renamed fields)
-- `database/` changes are from Phase 0 only
+- `shared/contracts/` changes are additive only (no removed/renamed fields)
+- `shared/database/` changes are from Phase 0 only
 - `docs/` files are unmodified
 
 ## Constraints

@@ -45,12 +45,12 @@ chatbot, NOT a web service. Key facts:
 | Language & runtime | Go 1.25 — module `crypto-sniping-bot`                                            |
 | Architecture       | Modular monolith — single process, single repo, single PostgreSQL database       |
 | Pipeline           | 10-layer sequential — NEVER reorder stages at runtime                            |
-| Module comms       | Immutable DTOs in `contracts/` only — no cross-module imports                    |
+| Module comms       | Immutable DTOs in `shared/contracts/` only — no cross-module imports                    |
 | Event backbone     | PostgreSQL append-only `events` table — `SELECT FOR UPDATE SKIP LOCKED` workers  |
 | State authority    | Database is single source of truth — no in-memory-only state                     |
-| Database access    | `database/adapter.*` only — modules never import DB drivers                      |
+| Database access    | `shared/database/adapter.*` only — modules never import DB drivers                      |
 | Orchestrator       | Only component that calls modules and writes to DB                               |
-| Configuration      | YAML in `config/` — zero hardcoded thresholds, paths, or magic numbers           |
+| Configuration      | YAML in `shared/config/` — zero hardcoded thresholds, paths, or magic numbers           |
 | Security           | HTTPS-only, API keys via env vars, bounded HTTP bodies, no raw RPC error strings |
 | Determinism        | Same input + same config = identical output — no randomness                      |
 | Idempotency        | All IDs = `SHA256(content)[:16]` — `ON CONFLICT DO NOTHING` everywhere           |
@@ -132,7 +132,7 @@ The user provides one or more of:
 3. **Understand the system impact** — identify:
    - Which pipeline layers are affected (L0–L10)?
    - Which modules in `internal/modules/` need changes?
-   - Which DTO contracts in `contracts/` are touched? Are changes additive-only?
+   - Which DTO contracts in `shared/contracts/` are touched? Are changes additive-only?
    - Does this touch the event bus, orchestrator, or database adapter?
    - What security invariants are relevant (HTTPS, env-only keys, bounded responses)?
    - Which of the six profit factors does this change affect?
@@ -152,9 +152,9 @@ The user provides one or more of:
 
 5. **Write Section 8 (Deep Knowledge)** — extract from `docs/reference/architecture.md` and the
    source spec:
-   - DTO fields involved in this plan (from `contracts/` and `docs/reference/dto_contracts.md`)
+   - DTO fields involved in this plan (from `shared/contracts/` and `docs/reference/dto_contracts.md`)
    - Profit invariant rules relevant to this feature
-   - Config fields and YAML paths (from `config/`)
+   - Config fields and YAML paths (from `shared/config/`)
    - Event bus emit/consume patterns (if this plan touches the backbone)
    - Hard rejects that must not be bypassed (if plan touches Layer 1)
    - Security rules relevant to this plan
@@ -197,7 +197,7 @@ The user provides one or more of:
 
 - [ ] DTO changes additive-only (no field renames or removals)
 - [ ] No direct DB access from module (goes through adapter)
-- [ ] No cross-module imports (only `contracts/`)
+- [ ] No cross-module imports (only `shared/contracts/`)
 - [ ] Config values from YAML, not hardcoded
 - [ ] No randomness introduced
 - [ ] Security rules respected (if applicable)
@@ -314,7 +314,7 @@ The user provides:
 - Validate with `go build ./...` + `go vet ./...`
 - Struct changes to `internal/app/config/` always precede feature module tasks that use
   the new fields
-- New YAML fields go in `config/*.yaml` with sensible defaults — disabled by default
+- New YAML fields go in `shared/config/*.yaml` with sensible defaults — disabled by default
   (e.g., commented out) when the feature needs calibration before enabling
 
 ### Module tasks (Go — `internal/modules/`)
@@ -325,7 +325,7 @@ The user provides:
 - Hard rejects in Layer 1 (`data_quality/`) must never be conditionally skipped for
   correctness-critical gates (serial launcher in STRICT/BALANCED, total supply, social links)
 
-### Contracts tasks (Go — `contracts/`)
+### Contracts tasks (Go — `shared/contracts/`)
 
 - Additive-only: new fields with Go zero-value defaults only
 - Must precede ALL module tasks that produce or consume the new fields
@@ -351,4 +351,4 @@ The user provides:
 - Bounded HTTP responses: Jito 64 KiB, DEXScreener 128 KiB, Groq 4 KiB
 - API keys via `os.Getenv` only — never in YAML, never logged
 - RPC error messages truncated to 200 chars before surfacing
-- gRPC auth tokens from env vars only — never in `config/chains.yaml`
+- gRPC auth tokens from env vars only — never in `shared/config/chains.yaml`

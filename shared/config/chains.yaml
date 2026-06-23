@@ -1,0 +1,272 @@
+chains:
+  eth:
+    name: "Ethereum Mainnet"
+    chain_id: 1
+    rpc_endpoints:
+      - "${ETH_RPC_1}"
+      - "${ETH_RPC_2}"
+    ws_endpoints:
+      - "${ETH_WS_1}"
+    confirmation_depth: 2
+    base_tokens:
+      - address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" # WETH
+        symbol: WETH
+      - address: "0xdAC17F958D2ee523a2206206994597C13D831ec7" # USDT
+        symbol: USDT
+      - address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" # USDC
+        symbol: USDC
+    factories:
+      - address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+        protocol: uniswap-v2
+        market: eth-uniswap-v2
+      - address: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        protocol: uniswap-v3
+        market: eth-uniswap-v3
+      # P4: SushiSwap V2 (PairCreated event, same ABI as Uniswap V2)
+      - address: "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"
+        protocol: sushiswap-v2
+        market: eth-sushiswap-v2
+      # P4: SushiSwap V3 (PoolCreated event, same ABI as Uniswap V3)
+      - address: "0xbACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F"
+        protocol: sushiswap-v3
+        market: eth-sushiswap-v3
+    backoff:
+      initial_ms: 500
+      max_ms: 30000
+      multiplier: 2.0
+    poll_interval_ms: 2000
+    heartbeat_interval_ms: 10000
+    heartbeat_timeout_ms: 30000
+
+  bsc:
+    name: "BNB Smart Chain"
+    chain_id: 56
+    rpc_endpoints:
+      - "${BSC_RPC_1}"
+      - "${BSC_RPC_2}"
+    ws_endpoints:
+      - "${BSC_WS_1}"
+    confirmation_depth: 3
+    base_tokens:
+      - address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c" # WBNB
+        symbol: WBNB
+      - address: "0x55d398326f99059fF775485246999027B3197955" # USDT
+        symbol: USDT
+    factories:
+      - address: "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+        protocol: pancakeswap-v2
+        market: bsc-pancake-v2
+      # P4: PancakeSwap V3 (PoolCreated event, same ABI as Uniswap V3)
+      - address: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+        protocol: pancakeswap-v3
+        market: bsc-pancake-v3
+    backoff:
+      initial_ms: 500
+      max_ms: 30000
+      multiplier: 2.0
+    poll_interval_ms: 2000
+    heartbeat_interval_ms: 10000
+    heartbeat_timeout_ms: 30000
+
+# Ingestion backoff and polling defaults (applied per-chain if not overridden).
+# To override for a specific chain, add these keys under chains.<chain>:
+#   backoff: { initial_ms: 500, max_ms: 30000, multiplier: 2.0 }
+#   poll_interval_ms: 2000
+#   heartbeat_interval_ms: 10000
+#   heartbeat_timeout_ms: 30000
+
+# Phase 7: Solana ingestion configuration.
+solana:
+  chain_id: "solana"
+  confirmation_commitment: "confirmed"
+  blockhash_refresh_ms: 2000
+  ws_heartbeat_timeout_ms: 20000
+  gap_recovery_max_slots: 1000
+  publish_buffer_size: 256
+  preferred_region: "us-east"
+  providers_required: 1
+  rpc:
+    # Helius is the primary provider — Enhanced WS supports unlimited concurrent
+    # logsSubscribe connections (all 6 programs), 50 RPS, Staked Connections for
+    # faster tx landing. Set SOLANA_RPC_HTTP_1 and SOLANA_WS_1 to your Helius
+    # endpoint: https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+    #            wss://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+    - url: "${SOLANA_RPC_HTTP_1}"
+      priority: 1
+      kind: http
+      region: us-east
+      provider: helius # primary: Helius
+    - url: "${SOLANA_WS_1}"
+      priority: 1
+      kind: ws
+      region: us-east
+      provider: helius # primary WS: Helius Enhanced WebSocket
+    # QuickNode retained as HTTP fallback (free tier or paid).
+    # Set SOLANA_RPC_HTTP_2 to your QuickNode HTTP endpoint.
+    # QuickNode WS is NOT used — free tier blocks concurrent logsSubscribe.
+    - url: "${SOLANA_RPC_HTTP_2}"
+      priority: 2
+      kind: http
+      region: us-east
+      provider: quicknode # fallback HTTP only
+    # P5: ZeroSlot — ultra-low-latency RPC for transaction submission.
+    # Disabled by default (empty URL); set SOLANA_ZEROSLOT_HTTP to enable.
+    # ZeroSlot routes via private mempool, reducing front-run exposure.
+    - url: "${SOLANA_ZEROSLOT_HTTP}"
+      priority: 1
+      kind: http
+      region: us-east
+      provider: zeroslot
+  programs:
+    - program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+      family: raydium-v4
+      # PRODUCTION_GATE_ANALYSIS § 5 Option 3: switch from logsSubscribe to
+      # transactionSubscribe with accountInclude on the Raydium V4 pool-creation
+      # authority account. logsSubscribe fires for every swap (~2M credits/day);
+      # transactionSubscribe fires only for new-pool initialization transactions
+      # (~500/day × ~2 credits = ~1k credits/day — 99.95% credit reduction).
+      # 5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1 is the Raydium V4 pool
+      # creation authority — a required signer for Initialize2 but not for swaps.
+      subscription_method: "transactionSubscribe"
+      account_filter: "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"
+    - program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+      family: pumpfun
+      # PRODUCTION_GATE_ANALYSIS § 5 Option 1 + § 3 Problem B: the factory
+      # CreatorAddress resolves to this program ID (not a human wallet), causing
+      # 100% hard-reject events and wasting Helius credits on every bonding-curve
+      # launch. Disable this subscription to eliminate the wasteful WS stream.
+      # pumpfun-amm below remains active to capture graduation events.
+      disabled: true
+    # P4: PumpFun AMM (graduation events — token migrates from bonding curve to AMM)
+    - program_id: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+      family: pumpfun-amm
+    # Raydium CLMM / Orca Whirlpool / Meteora DLMM — enabled for Helius plan.
+    # Helius Developer (Enhanced WS) supports unlimited concurrent logsSubscribe
+    # connections — no 3-slot cap. These AMMs generate rare new-pool events that
+    # cover PumpFun graduation (raydium-clmm) and high-quality Orca/Meteora
+    # launches. Credit cost is minimal: ≤300 getTransaction calls/day × 1
+    # credit = ~9k credits/month worst-case (well within 10M budget).
+    # getTransaction is 1 credit per Helius docs (helius.dev/docs/billing/credits).
+    # The 100-credit figure refers to the Enhanced TX API (getTransactionsForAddress),
+    # which this bot does not call.
+    - program_id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+      family: raydium-clmm
+    - program_id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+      family: orca-whirlpool
+    - program_id: "LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe"
+      family: meteora-dlmm
+  # getTransaction HTTP rate cap — must be ≤ RPC provider account limit.
+  # Helius Developer plan: 50 RPS sustained. Set to 3 as a safety net now that
+  # the ray_log: pre-filter eliminates >99% of raydium-v4 swap notifications
+  # before getTransaction is called. Only genuine Initialize2 (pool creation)
+  # events reach this RPS cap. Lower from 10 to 3 to bound worst-case credit
+  # spend to ~10,800 calls/hr × ~4 credits = ~43,200 credits/hr even if the
+  # filter is somehow bypassed. Raise to 10 only if new-pool detection misses.
+  get_transaction_rps: 3
+  # rate_limit_backoff_ms: backoff after a 429/rate-limit response from the RPC
+  # provider. Helius uses per-second RPS limits (not daily quotas), so a short
+  # backoff is sufficient — 429s are transient bursts, not 24h lockouts.
+  rate_limit_backoff_ms: 5000
+  # processing_workers: bounded goroutine pool for non-pumpfun families
+  # (raydium-v4) so that slow getTransaction calls do not block the WS read
+  # loop and create a notification backlog. Pump.fun runs entirely from log
+  # decoding and does not consume these slots.
+  processing_workers: 8
+  # pumpfun_decode_from_logs: when true, derive Pump.fun CreateEvent fields
+  # directly from the logsSubscribe `Program data:` payload (Anchor self-CPI
+  # event) and skip the getTransaction round-trip. Eliminates RPC rate-limit
+  # pressure for pumpfun and removes the head-of-line blocking that previously
+  # produced events_emitted=0 in heartbeats. Set false to fall back to the
+  # tx-fetch path.
+  pumpfun_decode_from_logs: true
+  # Pump.fun bonding curve virtual reserve at launch (protocol constant).
+  # At BondingCurveProgress=0 the curve holds exactly 30 SOL of virtual liquidity
+  # (30_000_000_000 lamports). Injected as ReserveBaseRaw + LiquidityUsd so that
+  # Layer-2 feature extraction and the CPMM slippage model receive a non-zero
+  # reserve instead of the default "0" from the log-only ingest path. Setting
+  # this to 0 disables the virtual-reserve injection.
+  pumpfun_virtual_sol_lamports: 30000000000
+  # Dual ingestion delivery: stream (WebSocket + getTransaction) | webhook (Helius push) | hybrid.
+  # Runtime override: SOLANA_INGESTION_DELIVERY=stream|webhook|hybrid
+  ingestion:
+    delivery: stream
+    webhook:
+      enabled: false
+      path: /webhooks/helius
+      max_body_bytes: 65536
+      programs:
+        - family: pumpfun-amm
+          program_id: pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA
+  # Conservative SOL price estimate (USD) used ONLY when the live price feed is
+  # unavailable. Injected into LiquidityUsd = lamports / 1e9 × sol_estimated_price_usd.
+  # Update this when the long-run SOL price range shifts significantly.
+  sol_estimated_price_usd: 150.0
+  # Phase 3 (recovery): live SOL/USD via Pyth on-chain price account.
+  # Set pyth_sol_usd_account to "" to disable and force the static estimate.
+  # Mainnet SOL/USD = H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG.
+  pyth_sol_usd_account: "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
+  # pyth_cache_ttl_seconds: Pyth SOL/USD price is fetched via getAccountInfo
+  # (1 Helius credit). At 5s TTL that is 518k credits/month. Raising to 30s
+  # reduces this to 86k credits/month (saves 432k credits) with negligible
+  # impact on position accuracy — SOL price moves <0.1% per 30s in normal
+  # conditions and our positions use 5-min max_hold_seconds.
+  pyth_cache_ttl_seconds: 30
+  pyth_stale_after_seconds: 60
+  # ws_subscribe_stagger_ms: delay between each program's first logsSubscribe
+  # attempt at startup.  Spreads the connection burst across time so all 6
+  # programs don't hammer the WS endpoint simultaneously.
+  # With 6 programs and 3000ms stagger: program 0 at t=0, ..., 5 at t=15s.
+  # Lowered from 10000ms (3-program era) — Helius Enhanced WS handles bursts.
+  ws_subscribe_stagger_ms: 3000
+  ingestion_backoff:
+    initial_ms: 200
+    max_ms: 30000
+    multiplier: 2.0
+  health:
+    score_refresh_interval_ms: 5000
+    latency_normalizer_ms: 1000
+    latency_failover_threshold_ms: 3000
+    error_rate_failover_threshold: 0.1
+    consecutive_ws_failures_threshold: 5
+    circuit_open_cooldown_ms: 30000
+  # Phase 11 (Reference-Repo R2 — INGEST) — pluggable transport.
+  # Mode: "rpc" (default WS), "grpc" (Yellowstone/Geyser), or "hybrid"
+  # (gRPC primary, RPC fallback after fallback_error_n consecutive errors).
+  #
+  # P5: Yellowstone gRPC — sub-100ms stream latency vs ~200ms WS+RPC.
+  # To enable: set SOLANA_GRPC_ENDPOINT to "<host>:<port>" (QuickNode /
+  # Triton endpoints supported), SOLANA_GRPC_TOKEN to the auth token,
+  # then change mode to "grpc" or "hybrid". The auth token is read from
+  # SOLANA_GRPC_TOKEN env var only — never store it in this file.
+  #
+  # P5: ZeroSlot private mempool — set mode to "hybrid" and set the
+  # SOLANA_ZEROSLOT_HTTP env var to route submissions through ZeroSlot.
+  transport:
+    mode: "rpc"
+    # Yellowstone/Geyser gRPC endpoint — leave blank, read from env:
+    # SOLANA_GRPC_ENDPOINT (e.g. "my-node.quiknode.pro:10000")
+    grpc_endpoint: ""
+    fallback_on_error: true
+    fallback_error_n: 5
+  # Task 25 — Pre-cohort filter: drop pump.fun graduates whose creator has
+  # launched more than max_creator_prev_token_count prior tokens BEFORE issuing
+  # Helius probe calls or running the DQ engine.  The threshold (25) is
+  # intentionally above VERY_EXPLORATION's max_creator_prev_token_count=10 so
+  # this filter never overrides a DQ mode decision — it only drops the strict
+  # super-set that always SKIP/REJECT under every mode (e.g. creator_count=49).
+  # Enabled (PLAN Task 9): drop serial launchers at L0 before Helius probe calls.
+  # Threshold 25 is above VERY_EXPLORATION DQ ceiling (10) — only drops creators
+  # that SKIP/REJECT under every mode. Fail-open when profile unknown.
+  # PRODUCTION_GATE_ANALYSIS § 3 + §7.20.
+  pre_filter:
+    enabled: true
+    max_creator_prev_token_count: 25
+  # Task 14 — reject system/stable mints as TokenAddress before event-bus emit.
+  # Prevents WSOL/USDC/USDT from entering probes, DQ, and creator_profiles.
+  # Gate run 20260612_174145: 44/48 pumpfun-amm emissions had TokenAddress=WSOL.
+  system_mint_reject:
+    enabled: true
+    mints:
+      - "So11111111111111111111111111111111111111112" # WSOL / native SOL placeholder
+      - "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC
+      - "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" # USDT

@@ -27,7 +27,7 @@ You are a refactoring specialist. Your job is to improve code structure without 
 
 1. **Same input → same output** — For every module, identical input DTOs must produce identical output DTOs
 2. **All tests pass** — Run the full test suite before AND after. Green → green.
-3. **DTO contracts unchanged** — No field added, removed, renamed, or retyped in `contracts/`
+3. **DTO contracts unchanged** — No field added, removed, renamed, or retyped in `shared/contracts/`
 4. **Module boundaries intact** — No new cross-module imports introduced
 5. **No new dependencies** — Cannot add libraries or tools
 6. **Pipeline order preserved** — Stage sequence unchanged
@@ -36,11 +36,11 @@ You are a refactoring specialist. Your job is to improve code structure without 
 
 This agent is invoked by `scripts/run_parallel.sh` as the **fix step** for failing validations. The orchestrator validates protected paths after every stage, including yours. Any modification to existing protected files rolls back the entire phase.
 
-- `contracts/` is **ADDITIVE-ONLY** outside Phase 0 — never edit, reformat, rename, or delete any existing `*.go` or `*_test.go` file under `contracts/`. New DTO files MAY be added, but existing files are immutable. Even gofmt-style whitespace edits are violations.
-- `database/migrations/*.sql` already committed are immutable — only new migration files with later `YYYYMMDD000NNN_` prefixes may be added.
+- `shared/contracts/` is **ADDITIVE-ONLY** outside Phase 0 — never edit, reformat, rename, or delete any existing `*.go` or `*_test.go` file under `shared/contracts/`. New DTO files MAY be added, but existing files are immutable. Even gofmt-style whitespace edits are violations.
+- `shared/database/migrations/*.sql` already committed are immutable — only new migration files with later `YYYYMMDD000NNN_` prefixes may be added.
 - `docs/` is read-only (PROGRESS_REPORT.md is updated by the orchestrator only).
 
-If a build/test failure appears to require touching `contracts/`, the correct fix is in the **consumer code**, not the contract. If a missing field is needed, ADD a new DTO file — do not modify an existing one. Refusing to edit protected files is the right answer; reporting the limitation in the commit message is acceptable.
+If a build/test failure appears to require touching `shared/contracts/`, the correct fix is in the **consumer code**, not the contract. If a missing field is needed, ADD a new DTO file — do not modify an existing one. Refusing to edit protected files is the right answer; reporting the limitation in the commit message is acceptable.
 
 ## Allowed Refactoring Operations
 
@@ -77,7 +77,7 @@ If a build/test failure appears to require touching `contracts/`, the correct fi
 ## Constraints
 
 - Do NOT change observable behavior
-- Do NOT touch `contracts/` DTOs
+- Do NOT touch `shared/contracts/` DTOs
 - Do NOT create new cross-module imports
 - Do NOT delete test files
 - Do NOT introduce randomness or non-determinism

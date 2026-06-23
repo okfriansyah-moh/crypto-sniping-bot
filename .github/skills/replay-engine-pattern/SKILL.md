@@ -236,4 +236,4 @@ func CompareReplayToProduction(
 - `.github/skills/event-bus/SKILL.md` — PostgreSQL event bus patterns
 - `.github/skills/determinism/SKILL.md` — No-randomness enforcement
 - `.github/skills/strategy-versioning/SKILL.md` — Version replay determinism
-- `database/adapter.go` — `ClaimNextEvent`, `Adapter` interface
+- `shared/database/adapter.go` — `ClaimNextEvent`, `Adapter` interface

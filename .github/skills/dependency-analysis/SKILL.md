@@ -14,8 +14,8 @@ Analyze and enforce dependency rules across the codebase. Detect circular depend
 
 ### Import Rules
 
-1. **Modules MUST NOT import other modules' internals** — only `contracts/` types
-2. **Modules MUST NOT import database drivers** — all DB access through `database/adapter.*`
+1. **Modules MUST NOT import other modules' internals** — only `shared/contracts/` types
+2. **Modules MUST NOT import database drivers** — all DB access through `shared/database/adapter.*`
 3. **No circular dependencies** — if A imports B, B must not import A (even transitively)
 4. **Features MUST NOT import other features** — use port interfaces for cross-feature communication
 5. **Only the orchestrator imports modules** — modules are leaf nodes in the dependency graph

@@ -32,9 +32,9 @@ These three DTOs are produced independently and consumed together by the validat
 
 | DTO                      | Answers                               | File                       |
 | ------------------------ | ------------------------------------- | -------------------------- |
-| `ProbabilityEstimateDTO` | Will it pump? P ∈ [0,1]               | `contracts/probability.go` |
-| `SlippageEstimateDTO`    | How much do we lose on entry? %       | `contracts/slippage.go`    |
-| `LatencyProfileDTO`      | How much edge decays from latency? ms | `contracts/latency.go`     |
+| `ProbabilityEstimateDTO` | Will it pump? P ∈ [0,1]               | `shared/contracts/probability.go` |
+| `SlippageEstimateDTO`    | How much do we lose on entry? %       | `shared/contracts/slippage.go`    |
+| `LatencyProfileDTO`      | How much edge decays from latency? ms | `shared/contracts/latency.go`     |
 
 Each model is a pure function — no DB, no RPC, no external calls.
 
@@ -247,4 +247,4 @@ EV = prob.P * cfg.TargetReturn
 - Architecture context: `docs/archive/architecture-context/6_slippage_models.md`
 - DTO spec: `docs/reference/dto_contracts.md` § 3.5 (ProbabilityEstimateDTO, SlippageEstimateDTO, LatencyProfileDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 4
-- Config: `config/models.yaml`
+- Config: `shared/config/models.yaml`

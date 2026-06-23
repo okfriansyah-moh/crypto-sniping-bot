@@ -52,8 +52,8 @@ def process(input_dto: InputDTO, config: dict) -> OutputDTO:
     ...
 ```
 
-- Input: immutable DTOs from `contracts/`
-- Output: immutable DTO from `contracts/`
+- Input: immutable DTOs from `shared/contracts/`
+- Output: immutable DTO from `shared/contracts/`
 - Config: dict from YAML (passed by orchestrator)
 - No side effects visible to other modules
 - No shared mutable state
@@ -72,16 +72,16 @@ def process(input_dto: InputDTO, config: dict) -> OutputDTO:
 
 | Package             | Who Can Import     | Contains                            |
 | ------------------- | ------------------ | ----------------------------------- |
-| `contracts/`        | All modules        | Frozen dataclass DTOs only          |
-| `config/`           | Orchestrator only  | YAML config files                   |
-| `database/`         | Orchestrator only  | DB adapter + engine implementations |
+| `shared/contracts/`        | All modules        | Frozen dataclass DTOs only          |
+| `shared/config/`           | Orchestrator only  | YAML config files                   |
+| `shared/database/`         | Orchestrator only  | DB adapter + engine implementations |
 | `app/orchestrator/` | `app/main.py` only | Pipeline sequencing                 |
 
 **Modules may NOT import from:**
 
 - Other `app/modules/*` packages
 - `app/orchestrator/`
-- `database/`
+- `shared/database/`
 - Any database driver directly
 
 ## Examples
@@ -90,7 +90,7 @@ def process(input_dto: InputDTO, config: dict) -> OutputDTO:
 
 | Phase   | Owned Directories                     | DO NOT TOUCH   |
 | ------- | ------------------------------------- | -------------- |
-| Phase 0 | `database/`, `config/`, `app/main.py` | `app/modules/` |
+| Phase 0 | `shared/database/`, `shared/config/`, `app/main.py` | `app/modules/` |
 | Phase N | `app/modules/{stage_name}/`           | Other modules  |
 
 ### Anti-Patterns

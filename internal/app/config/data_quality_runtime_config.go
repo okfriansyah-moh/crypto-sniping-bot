@@ -93,6 +93,38 @@ type DataQualityModeProfile struct {
 	// 0 → gate disabled for this mode.
 	// EXPLORATION = 50, VERY_EXPLORATION = 25 per §7.9.
 	SerialLauncherMinHolderCount int32 `yaml:"serial_launcher_min_holder_count"`
+
+	// ShadowPipelineProof enables Task 22 serial-launcher relaxation for shadow
+	// pipeline proof runs only (requires_social_links=false, min_holder_count=0).
+	ShadowPipelineProof bool `yaml:"shadow_pipeline_proof"`
+
+	// SerialLauncherMomentumOverride allows RISKY_PASS when on-chain momentum
+	// is strong even without social links. Disabled by default.
+	SerialLauncherMomentumOverride SerialLauncherMomentumOverride `yaml:"serial_launcher_momentum_override"`
+
+	// NoSocialMonitoring allows confirmed-no-social RISKY_PASS in EXPLORATION+
+	// when all other mandatory Known checks pass.
+	NoSocialMonitoring NoSocialMonitoringConfig `yaml:"no_social_monitoring"`
+}
+
+// NoSocialMonitoringConfig gates RISKY_PASS for tokens with confirmed absent social links.
+type NoSocialMonitoringConfig struct {
+	Enabled                         bool    `yaml:"enabled"`
+	RequireAllOtherMandatoryKnown   bool    `yaml:"require_all_other_mandatory_known"`
+	MaxTotalSupply                  float64 `yaml:"max_total_supply"`
+	MinHolderCount                  int32   `yaml:"min_holder_count"`
+}
+
+// SerialLauncherMomentumOverride gates the momentum profit path for serial launchers.
+type SerialLauncherMomentumOverride struct {
+	Enabled                     bool    `yaml:"enabled"`
+	MinHolderCount              int32   `yaml:"min_holder_count"`
+	MinLiquidityUsd             float64 `yaml:"min_liquidity_usd"`
+	MaxTop5HolderPct            float64 `yaml:"max_top5_holder_pct"`
+	RequireAuthoritiesRenounced bool    `yaml:"require_authorities_renounced"`
+	RequireNarrative            bool    `yaml:"require_narrative"`
+	MinNarrativeScore           float64 `yaml:"min_narrative_score"`
+	MaxRiskScore                float64 `yaml:"max_risk_score"`
 }
 
 // DataQualityDetectorFlags toggles individual detectors at runtime.

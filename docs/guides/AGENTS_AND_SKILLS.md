@@ -36,7 +36,7 @@ Agents consume skills to minimize token usage while maintaining constraint enfor
 | Agent             | File                                        | Purpose                                        |
 | ----------------- | ------------------------------------------- | ---------------------------------------------- |
 | phase-builder     | `.github/agents/phase-builder.agent.md`     | Implement any phase from the roadmap           |
-| dto-guardian      | `.github/agents/dto-guardian.agent.md`      | Validate DTO contracts in `contracts/`         |
+| dto-guardian      | `.github/agents/dto-guardian.agent.md`      | Validate DTO contracts in `shared/contracts/`         |
 | integration       | `.github/agents/integration.agent.md`       | Wire modules together, detect coupling         |
 | refactor          | `.github/agents/refactor.agent.md`          | Improve code structure without behavior change |
 | orchestrator      | `.github/agents/orchestrator.agent.md`      | Build and validate the pipeline orchestrator   |

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/shared/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/health"
 )

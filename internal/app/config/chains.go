@@ -64,6 +64,10 @@ type SolanaProgramConfig struct {
 	// account for pool-creation transactions (not a swap-only account) so that
 	// only new-pool initialization events are received. Ignored for logsSubscribe.
 	AccountFilter string `yaml:"account_filter"`
+	// Delivery overrides the global solana.ingestion.delivery when the global
+	// mode is "hybrid". Values: stream | webhook. Ignored when global is stream
+	// or webhook (global mode applies to all programs).
+	Delivery string `yaml:"delivery"`
 }
 
 // SolanaHealthConfig holds endpoint health-scoring parameters.
@@ -156,6 +160,34 @@ type SolanaConfig struct {
 	// a configured system/stable mint (WSOL, USDC, USDT) before the event bus.
 	// Also used by mint-pair resolution to identify quote-side mints (Task 14).
 	SystemMintReject SystemMintRejectConfig `yaml:"system_mint_reject"`
+
+	// Ingestion controls dual delivery: stream (WebSocket) vs webhook (Helius push).
+	Ingestion SolanaIngestionConfig `yaml:"ingestion"`
+}
+
+// SolanaIngestionConfig selects how L0 Solana events arrive: stream, webhook, or hybrid.
+type SolanaIngestionConfig struct {
+	// Delivery is the global mode: stream | webhook | hybrid.
+	// Overridden at runtime by SOLANA_INGESTION_DELIVERY env var.
+	Delivery string `yaml:"delivery"`
+	// Webhook configures the Helius HTTP push ingress (enabled when delivery is
+	// webhook or hybrid with webhook programs).
+	Webhook SolanaWebhookConfig `yaml:"webhook"`
+}
+
+// SolanaWebhookConfig holds HTTP webhook ingress settings. HELIUS_WEBHOOK_SECRET
+// is read from the environment only — never from YAML.
+type SolanaWebhookConfig struct {
+	Enabled      bool                        `yaml:"enabled"`
+	Path         string                      `yaml:"path"`
+	MaxBodyBytes int64                       `yaml:"max_body_bytes"`
+	Programs     []SolanaWebhookProgramConfig `yaml:"programs"`
+}
+
+// SolanaWebhookProgramConfig mirrors Helius dashboard account filters.
+type SolanaWebhookProgramConfig struct {
+	Family    string `yaml:"family"`
+	ProgramID string `yaml:"program_id"`
 }
 
 // IngestionTransportConfig governs Solana streaming transport selection.

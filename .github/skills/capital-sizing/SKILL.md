@@ -103,7 +103,7 @@ func enforceConstraints(size float64, c CapitalConstraints, portfolio PortfolioS
 Config:
 
 ```yaml
-# config/capital.yaml
+# shared/config/capital.yaml
 capital:
   max_position_usd: 500.0
   max_concurrent_positions: 10
@@ -258,7 +258,7 @@ func AvailableCryptoCapital(portfolioValue float64, openAllocations []contracts.
 ```go
 // Regime multipliers compress or expand allocation based on market state.
 // A crisis regime blocks ALL allocation (multiplier=0.0).
-// Values from config/capital.yaml — never hardcoded.
+// Values from shared/config/capital.yaml — never hardcoded.
 
 type RegimeType string
 
@@ -344,7 +344,7 @@ func CheckCorrelationLimit(
 
 Per `docs/reference/implementation_roadmap.md` § 9.4, Phase 9 closes **GAP-05** by replacing the
 fixed `cfg.FixedEntrySizeUsd = $50` constant with a Kelly-adjacent edge-proportional
-sizing function. Configuration lives in `config/capital.yaml`.
+sizing function. Configuration lives in `shared/config/capital.yaml`.
 
 **Phase 9 mandates:**
 
@@ -357,7 +357,7 @@ size_raw   = base_size_usd × f_kelly × confidence × cohort_multiplier × mode
 size_final = clamp(size_raw, min_size_usd, max_size_usd)
 ```
 
-- **Mode multipliers** (from `config/capital.yaml`): STRICT 0.5×, BALANCED 1.0×, EXPLORATION 1.3×
+- **Mode multipliers** (from `shared/config/capital.yaml`): STRICT 0.5×, BALANCED 1.0×, EXPLORATION 1.3×
 - **Exploration band**: when `SelectionOutputDTO.IsExploration=true`, allocate 1–5 % of total capital regardless of edge score (intentional FN-frontier probing per architecture § 7)
 - **Kelly cap**: `kelly_cap` (0.25 default), tightened to `kelly_cap_exploration` (0.05) during EXPLORATION mode
 - **Confidence floor**: `Aggregate < min_aggregate_confidence` (0.40) → reject allocation
@@ -378,6 +378,6 @@ mode-multiplier effect observable (STRICT mean ≈ 0.5 × BALANCED mean within �
 - Architecture context: `docs/archive/architecture-context/9_capital_engine.md`
 - DTO spec: `docs/reference/dto_contracts.md` § 3.8 (AllocationDTO)
 - Roadmap: `docs/reference/implementation_roadmap.md` Phase 2.7
-- Config: `config/capital.yaml`, `config/cohorts.yaml`
+- Config: `shared/config/capital.yaml`, `shared/config/cohorts.yaml`
 - `.github/skills/drawdown-protection/SKILL.md` — HWM tier multiplier on final allocation
 - `.github/skills/exposure-monitor/SKILL.md` — Hard position count and ceiling enforcement

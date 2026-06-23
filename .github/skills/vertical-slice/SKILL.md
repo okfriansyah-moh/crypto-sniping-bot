@@ -56,7 +56,7 @@ app/modules/<module_name>/
 1. **Ports are the ONLY public API** — other modules depend on port interfaces, not feature internals
 2. **Ports define interfaces** — abstract types that hide implementation details
 3. **Ports live at module root** — `<module>/port/<module>_port.*`
-4. **Ports use contracts DTOs** — for inter-module communication, use types from `contracts/`
+4. **Ports use contracts DTOs** — for inter-module communication, use types from `shared/contracts/`
 
 ### Endpoint Registration
 

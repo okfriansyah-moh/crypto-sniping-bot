@@ -1,10 +1,15 @@
+// Package web provides the sniper-bot HTTP surface.
+//
+// The trading process exposes exactly one route: GET /health (plus 404 for all
+// other paths). Operator dashboard REST lives exclusively on backend-dashboard
+// :8090 — see docs/plans/2026-06-13-operator-dashboard-plan.md §7.10.
 package web
 
 import (
 	"log/slog"
 	"net/http"
 
-	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/shared/database"
 	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/internal/modules/health"
 	healthEndpoint "crypto-sniping-bot/internal/modules/health/endpoint"
@@ -12,10 +17,12 @@ import (
 
 // Server is the HTTP server that aggregates all module endpoints.
 type Server struct {
-	cfg        *config.Config
-	logger     *slog.Logger
-	adapter    database.Adapter
-	shadowGate *health.ShadowGateEvaluator
+	cfg            *config.Config
+	logger         *slog.Logger
+	adapter        database.Adapter
+	shadowGate     *health.ShadowGateEvaluator
+	webhookPath    string
+	webhookHandler http.Handler
 }
 
 // NewServer creates a new HTTP server.
@@ -31,35 +38,31 @@ func NewServer(cfg *config.Config, logger *slog.Logger, adapter database.Adapter
 	return s
 }
 
+// WithWebhook registers a Helius webhook ingress handler at path.
+func (s *Server) WithWebhook(path string, h http.Handler) *Server {
+	if path != "" && h != nil {
+		s.webhookPath = path
+		s.webhookHandler = h
+	}
+	return s
+}
+
 // Router returns the HTTP handler with all routes registered.
+// Sniper-bot registers GET /health only; dashboard /api/v1/* routes are not mounted here.
 // All responses are wrapped with securityHeaders middleware.
 func (s *Server) Router() http.Handler {
 	mux := http.NewServeMux()
 
-	// Register module endpoints (vertical slice — each module owns its routes)
+	// Health probe + shadow_gate JSON block (Docker / orchestrator liveness).
 	var healthOpts *healthEndpoint.RegisterOpts
 	if s.shadowGate != nil {
 		healthOpts = &healthEndpoint.RegisterOpts{ShadowGate: s.shadowGate}
 	}
 	healthEndpoint.Register(mux, healthOpts)
 
-	return securityHeaders(mux)
-}
+	if s.webhookHandler != nil && s.webhookPath != "" {
+		mux.Handle(s.webhookPath, s.webhookHandler)
+	}
 
-// securityHeaders is a middleware that attaches defensive HTTP response headers
-// to every response, regardless of which handler produces it.
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Prevent MIME-type sniffing.
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// Disallow framing to mitigate clickjacking.
-		w.Header().Set("X-Frame-Options", "DENY")
-		// Instruct clients not to cache API responses.
-		w.Header().Set("Cache-Control", "no-store")
-		// Do not send the Referer header to third parties.
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		// Minimal CSP — this server serves only JSON APIs, never HTML/scripts.
-		w.Header().Set("Content-Security-Policy", "default-src 'none'")
-		next.ServeHTTP(w, r)
-	})
+	return SecurityHeaders(mux)
 }

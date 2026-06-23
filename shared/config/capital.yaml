@@ -1,0 +1,80 @@
+# Capital Engine — Phase 9 (Profitability Restoration § 9.4)
+# ─────────────────────────────────────────────────────────────────
+# Dynamic edge-proportional capital sizing.
+# Closes GAP-05 from docs/analysis/profitability-gaps.md.
+# Replaces fixed `$50` with size ∝ score × probability × confidence.
+# ─────────────────────────────────────────────────────────────────
+
+capital:
+  # ── Dynamic sizing toggle ─────────────────────────────────────
+  # `false` reverts to fixed_entry_size_usd (emergency fallback only).
+  use_dynamic_sizing: true
+
+  # ── Base sizing parameters ────────────────────────────────────
+  base_size_usd: 5.0 # starting base — scale up only after confirmed P&L
+  min_size_usd: 5.0
+  max_size_usd: 500.0
+  fixed_entry_size_usd: 5.0 # documented fallback only
+
+  # ── Kelly fraction ────────────────────────────────────────────
+  # f_kelly = (P × R − (1−P)) / R   where R = PriorGainBps / PriorLossBps
+  kelly:
+    cap: 0.25 # fractional Kelly cap (default mode)
+    cap_exploration: 0.05 # tighter cap during EXPLORATION
+    cap_strict: 0.10 # tighter cap during STRICT
+    prior_gain_bps: 3000 # baseline expected gain (30 %)
+    prior_loss_bps: 4000 # baseline expected loss (40 %)
+    reject_negative: true # f_kelly < 0 → reject with negative_kelly
+
+  # ── Mode multipliers ──────────────────────────────────────────
+  # Applied as final multiplier on size_raw.
+  mode_multipliers:
+    STRICT: 0.5
+    BALANCED: 1.0
+    EXPLORATION: 1.3
+    VERY_EXPLORATION: 1.5
+
+  # ── Mode lookup freshness ─────────────────────────────────────
+  mode_freshness_sec: 30 # if SystemStateDTO.Mode older → default to BALANCED
+
+  # ── Cohort multipliers ────────────────────────────────────────
+  cohort:
+    default_multiplier: 1.0 # used when cohort_id not yet learned
+    min_multiplier: 0.3
+    max_multiplier: 2.0
+
+  # ── Exploration band ──────────────────────────────────────────
+  # When SelectionOutputDTO.IsExploration=true, allocate fixed-pct of total capital
+  # regardless of edge score (intentional FN-frontier probing per architecture § 7).
+  exploration:
+    enabled: true
+    min_pct_of_total: 0.01 # 1 %
+    max_pct_of_total: 0.05 # 5 %
+    daily_budget_pct: 0.05 # cumulative cap per UTC day
+
+  # ── Confidence floor ──────────────────────────────────────────
+  # Aggregate FeatureDTO.Confidence below this → reject allocation.
+  min_aggregate_confidence: 0.40
+
+  # ── Failure handling ──────────────────────────────────────────
+  failure_policy:
+    on_missing_probability: "reject" # reject | fallback_prior
+    on_cohort_lookup_miss: "use_default" # use_default | reject
+    on_mode_lookup_stale: "fallback_balanced" # fallback_balanced | reject
+    # Used only when on_missing_probability="fallback_prior". 0 means
+    # "unset" — engine rejects rather than picking a hardcoded value.
+    # Mirrors probability.prior_probability so both engines share intent.
+    fallback_prior_probability: 0.35
+
+  # ── Phase 10 (Reference-Repo Improvements / Task B) ───────────
+  # De-hardcode AllocationDTO fields. When unset (0/empty), module
+  # falls back to legacy values: 200 / 1 / "default".
+  default_max_slippage_bps: 200 # AllocationDTO.MaxSlippageBps
+  wallet_shard_count: 1 # 1 = no sharding; >1 enables hash(token)%n routing
+  default_cohort_id: "default" # AllocationDTO.CohortID until learning supplies one
+
+  # Fortress macro throttle — set MACRO_REGIME=risk_off to halve max position size.
+  macro_regime:
+    enabled: true
+    max_size_multiplier: 0.5
+    exploration_cap_scale: 0.5

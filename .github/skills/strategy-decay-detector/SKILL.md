@@ -263,7 +263,7 @@ func EmitDecayEvent(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 strategy_decay:
@@ -300,4 +300,4 @@ strategy_decay:
 - `.github/skills/learning-engine/SKILL.md` — Bounded updates and sample gates
 - `.github/skills/strategy-versioning/SKILL.md` — Version rollback mechanics
 - `.github/skills/strategy-auto-disable/SKILL.md` — Lifecycle state machine
-- `contracts/evaluation.go` — `EvaluationDTO` fields
+- `shared/contracts/evaluation.go` — `EvaluationDTO` fields

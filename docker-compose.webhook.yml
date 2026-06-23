@@ -1,0 +1,10 @@
+# Override for production webhook exposure (Caddy TLS on 443).
+# Use: docker compose -f docker-compose.yml -f docker-compose.webhook.yml --profile webhook-caddy up -d
+# Or: make webhook-production
+#
+# Binds sniper-bot :8080 to localhost only so the webhook is not reachable on plain HTTP from WAN.
+
+services:
+  sniper-bot:
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"

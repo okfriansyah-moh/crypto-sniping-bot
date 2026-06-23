@@ -122,7 +122,7 @@ type SampleSizeResult struct {
 }
 
 func ValidateSampleSize(n int, featureName string) SampleSizeResult {
-    // Thresholds from config/pipeline.yaml
+    // Thresholds from shared/config/pipeline.yaml
     const fullScoreMin = 100
     const coldStartMin = 30
 
@@ -260,7 +260,7 @@ func (m *ProbabilityModule) OnConfigChange(
 
 ---
 
-## Config Reference (`config/pipeline.yaml`)
+## Config Reference (`shared/config/pipeline.yaml`)
 
 ```yaml
 overfit_detection:
@@ -281,7 +281,7 @@ overfit_detection:
 - [ ] Indicator count includes only enabled indicators
 - [ ] Parameter count counts tunable params only (not fixed constants)
 - [ ] `RiskLevel` emitted as `system_event` when medium or high
-- [ ] All limits read from `config/pipeline.yaml`, none hardcoded
+- [ ] All limits read from `shared/config/pipeline.yaml`, none hardcoded
 
 ---
 
@@ -291,4 +291,4 @@ overfit_detection:
 - `docs/archive/architecture-context/6_slippage_models.md` — Model parameter guidelines
 - `.github/skills/probability-modeling/SKILL.md` — P(success) model patterns
 - `.github/skills/learning-engine/SKILL.md` — Bounded updates and sample requirements
-- `contracts/probability.go` — `ProbabilityEstimateDTO`
+- `shared/contracts/probability.go` — `ProbabilityEstimateDTO`

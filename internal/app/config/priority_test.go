@@ -122,7 +122,7 @@ func TestLoad_PriorityYAML_MergesModes(t *testing.T) {
 	if err != nil {
 		t.Skipf("repo root not found: %v", err)
 	}
-	cfgPath := filepath.Join(repoRoot, "config", "pipeline.yaml")
+	cfgPath := filepath.Join(repoRoot, "shared", "config", "pipeline.yaml")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -149,7 +149,7 @@ func findRepoRoot() (string, error) {
 	}
 	dir := cwd
 	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "config", "priority.yaml")); statErr == nil {
+		if _, statErr := os.Stat(filepath.Join(dir, "shared", "config", "priority.yaml")); statErr == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)

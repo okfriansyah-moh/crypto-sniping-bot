@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"crypto-sniping-bot/database"
+	"crypto-sniping-bot/shared/database"
 	"crypto-sniping-bot/internal/app/config"
 )
 

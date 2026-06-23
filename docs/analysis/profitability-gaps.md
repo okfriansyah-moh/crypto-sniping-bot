@@ -73,7 +73,7 @@ Only 4 real checks run: missing reserves, reserve below minimum, reorged event, 
 | Rug risk          | Decode ABI selectors; flag if `mint()`/`pause()`/`blacklist()` exist in unverified contract | Check mint authority not renounced via `getAccountInfo` on token mint account |
 | Contract verified | Query Etherscan / BscScan v2 API `/api?module=contract&action=getsourcecode`                | n/a — Solana programs are bytecode; check program upgrade authority instead   |
 
-**Config addition needed in `config/chains.yaml`:**
+**Config addition needed in `shared/config/chains.yaml`:**
 
 ```yaml
 data_quality:
@@ -218,7 +218,7 @@ sizeUsd = base_size × f_kelly × cohort_multiplier × mode_multiplier
   clamp(sizeUsd, min_size_usd, max_size_usd)
 ```
 
-**Mode multipliers** (per `config/pipeline.yaml` operational_modes section):
+**Mode multipliers** (per `shared/config/pipeline.yaml` operational_modes section):
 
 - `STRICT` → 0.5×
 - `BALANCED` → 1.0×
@@ -249,7 +249,7 @@ ETH mainnet validators deprioritize legacy Type-0 transactions vs EIP-1559 Type-
 
 - Add `GetMaxFeePerGas(ctx) (baseFee *big.Int, tip *big.Int, err error)` to `EVMClient` interface
 - Build `geth_core.DynamicFeeTx` (Type 2) instead of `LegacyTx` for ETH
-- Config additions in `config/gas.yaml`:
+- Config additions in `shared/config/gas.yaml`:
   ```yaml
   eth:
     max_priority_fee_gwei: 2.0 # tip cap for validators
@@ -298,7 +298,7 @@ func (r *PrivateRPCRouter) Route(sizeUsd float64) bool {
 
 **Required implementation:**
 
-- Add Flashbots relay endpoint to `config/execution.yaml` `private_endpoints`
+- Add Flashbots relay endpoint to `shared/config/execution.yaml` `private_endpoints`
 - Implement `eth_sendBundle` POST format for `https://relay.flashbots.net`
 - `sendBundle` requires signing with `X-Flashbots-Signature` header (separate flashbots signing key)
 - Route decision already handled by `PickRoute()` — only need the HTTP relay call in the execution worker
@@ -359,7 +359,7 @@ Fix these after Tier 0–2 to expand opportunity set.
 
 **Layer:** 0 · **Chain:** Solana · **Priority:** P3
 
-**Code location:** `config/chains.yaml` solana.programs
+**Code location:** `shared/config/chains.yaml` solana.programs
 
 Currently configured:
 
@@ -380,11 +380,11 @@ Missing:
 | Orca Whirlpool               | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc`  | Second-largest Solana DEX by volume                                                                                                                  |
 | Meteora DLMM                 | `LBUZKhRxPF3XUpBCjp4YzTKgLLjLeNox4HgSehp9ZSe`  | Dynamic bin-based AMM; popular for new launches                                                                                                      |
 
-**Implementation pattern** — ingestion module is config-driven and program-agnostic. Adding coverage = add decoder + add program entry to `config/chains.yaml`:
+**Implementation pattern** — ingestion module is config-driven and program-agnostic. Adding coverage = add decoder + add program entry to `shared/config/chains.yaml`:
 
 1. Create `internal/modules/ingestion_solana/{program_name}.go` with discriminator + decoder
 2. Register in `ingestion_solana.go` `normalizeNotification()` dispatch switch
-3. Add to `config/chains.yaml` programs list
+3. Add to `shared/config/chains.yaml` programs list
 
 ---
 
@@ -392,7 +392,7 @@ Missing:
 
 **Layer:** 0 · **Chain:** ETH · **Priority:** P3
 
-**Code location:** `config/chains.yaml` eth.factories
+**Code location:** `shared/config/chains.yaml` eth.factories
 
 Currently configured: UniswapV2 + UniswapV3.
 
@@ -403,7 +403,7 @@ Missing:
 | SushiSwap V2 | `0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac` | Significant new token launch volume |
 | SushiSwap V3 | `0xbACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F` | Concentrated liquidity              |
 
-**Implementation:** EVM ingestion is factory-agnostic (subscribes to `PairCreated`/`PoolCreated` events). Add factory addresses to `config/chains.yaml` — no code changes required for V2. V3 requires the `PoolCreated` log signature decoder already present for UniV3.
+**Implementation:** EVM ingestion is factory-agnostic (subscribes to `PairCreated`/`PoolCreated` events). Add factory addresses to `shared/config/chains.yaml` — no code changes required for V2. V3 requires the `PoolCreated` log signature decoder already present for UniV3.
 
 ---
 
@@ -411,7 +411,7 @@ Missing:
 
 **Layer:** 0 · **Chain:** BSC · **Priority:** P3
 
-**Code location:** `config/chains.yaml` bsc.factories
+**Code location:** `shared/config/chains.yaml` bsc.factories
 
 Only PancakeSwap V2 (`0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73`) configured.
 
@@ -439,7 +439,7 @@ The problem: every `LearningRecord` is labeled with a `FeatureDTO` where 5/8 sig
 
 **Actions once GAP-03 is resolved:**
 
-- Raise `MinSamplesForUpdate` to `N ≥ 50` (from whatever default is in `config/pipeline.yaml`)
+- Raise `MinSamplesForUpdate` to `N ≥ 50` (from whatever default is in `shared/config/pipeline.yaml`)
 - Enable per-cohort multiplier updates in `LearningConfig`
 - Verify `ShadowRecorder.RecordRejection()` is wired in the worker for false-negative tracking (shadow trade path)
 
@@ -456,7 +456,7 @@ DiversityBucket: "default",   // single bucket — no diversity
 IsExploration:   false,        // hardcoded — EXPLORATION mode never fires
 ```
 
-`max_open_positions = 1` (configured in `config/pipeline.yaml`) means ranking is moot at single-position scale. But exploration band = 0 means the system never deliberately tests lower-confidence candidates to measure false-negative rate. Without exploration data, the learning engine cannot tune thresholds beyond the training distribution.
+`max_open_positions = 1` (configured in `shared/config/pipeline.yaml`) means ranking is moot at single-position scale. But exploration band = 0 means the system never deliberately tests lower-confidence candidates to measure false-negative rate. Without exploration data, the learning engine cannot tune thresholds beyond the training distribution.
 
 **Required implementation:**
 
@@ -480,7 +480,7 @@ Single universal threshold set for all chains. Chain-specific rug/honeypot dynam
 | BSC    | Tax anomalies 10–30% common, rug timeline minutes                     | Current `MaxBuyTaxBps=1000` (10%) rejects valid BSC tokens |
 | Solana | No concept of transfer tax; rug pattern is LP drain or mint authority | Tax checks are irrelevant, different signals needed        |
 
-**Required addition to `config/chains.yaml`:**
+**Required addition to `shared/config/chains.yaml`:**
 
 ```yaml
 eth:
@@ -602,7 +602,7 @@ Phase 6 — Multi-chain Scaling (P5)
 ## Key Architectural Rules for All Implementations
 
 1. **Chain-specific logic belongs only in `internal/modules/ingestion*/` and `internal/modules/execution*/`** — all other modules must remain chain-agnostic via config and interfaces
-2. **All DQ simulation (honeypot, tax) requires RPC calls** — the DQ module must accept an injected RPC client from the worker; it must not import `database/` or `internal/rpc/` directly
+2. **All DQ simulation (honeypot, tax) requires RPC calls** — the DQ module must accept an injected RPC client from the worker; it must not import `shared/database/` or `internal/rpc/` directly
 3. **PriceClient implementations go in `internal/rpc/`** — not in `internal/modules/position/`
-4. **All new thresholds go in `config/chains.yaml` or `config/pipeline.yaml`** — no hardcoded values in module code
-5. **All new DTO fields are additive only** — never modify existing fields in `contracts/`
+4. **All new thresholds go in `shared/config/chains.yaml` or `shared/config/pipeline.yaml`** — no hardcoded values in module code
+5. **All new DTO fields are additive only** — never modify existing fields in `shared/contracts/`

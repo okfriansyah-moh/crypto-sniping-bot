@@ -1,0 +1,94 @@
+# Phase 3: Event bus priority weights (ORDER BY priority DESC, created_at ASC).
+# Exit-path events use PRIORITY_EXIT constant (≥900) — never dropped.
+event_weights:
+  position_event_exit: 1000
+  execution_replacement: 900
+  position_event_open: 500
+  allocation_event: 400
+  validated_edge_event: 300
+  edge_event: 200
+  feature_event: 150
+  data_quality_event: 120
+  market_data_event: 100
+  adjustment_event: 50
+
+# Phase 3: State machine enforcement parameters.
+state_machine:
+  quarantine_threshold: 3 # violations before QuarantineToken
+
+# Phase 3: Evaluation engine parameters.
+evaluation:
+  fp_loss_threshold_pct: -5.0 # PnlPct below this = false positive
+  fn_gain_threshold_pct: 20.0 # shadow trade gain above this = false negative
+  window_seconds: 3600 # rolling window for cohort Expectancy
+  # Phase 11 (Reference-Repo R2 — EVALUATE) — when true, the evaluator
+  # computes simulated-vs-realized output variance (bps) and writes it
+  # to EvaluationDTO.ExecutionVarianceBps. Requires the orchestrator
+  # to populate SimulatedExpectedOutAmount before execution.
+  enable_simulation_diff: false
+
+# Phase 3: Execution retry / replacement parameters (merged with execution.yaml).
+# These are additive keys — do not remove execution.yaml keys.
+execution:
+  max_retry: 3
+  max_replacements: 2
+  retry_backoff_ms: [100, 400, 1600]
+  replacement_threshold_ms: 10000
+  drop_timeout_ms: 60000
+  fee_bump_multiplier: 1.15
+  poll_interval_ms: 2000
+
+priority:
+  # Operational mode thresholds (STRICT | BALANCED | EXPLORATION | VERY_EXPLORATION)
+  # See docs/reference/architecture.md § 7 and docs/plans/2026-06-10-profit-restoration-plan.md §7.1.
+  #
+  # Runtime lookup: Config.ResolveModeThresholds(mode) in internal/app/config/priority.go
+  # Wired by workers in PLAN Tasks 2–4:
+  #   L5 validation → ev_threshold_bps
+  #   L3 edge       → edge_strength_min
+  #   L6 selection  → max_positions + explore_budget_pct
+  #
+  # max_positions is the per-mode concurrent-position ceiling for Top-K selection
+  # (PLAN Task 4). selection.max_open_positions in pipeline.yaml is the legacy
+  # Phase-2 single-slot gate until Task 4 lands.
+  modes:
+    strict:
+      explore_budget_pct: 1.0
+      edge_strength_min: 0.75
+      ev_threshold_bps: 150
+      max_positions: 5
+
+    balanced:
+      explore_budget_pct: 2.0
+      edge_strength_min: 0.58
+      ev_threshold_bps: 100
+      max_positions: 15
+
+    exploration:
+      explore_budget_pct: 5.0
+      edge_strength_min: 0.45
+      ev_threshold_bps: 60
+      max_positions: 20
+
+    very_exploration:
+      explore_budget_pct: 8.0 # maximum aggression — catches early launches at creation
+      edge_strength_min: 0.30 # very permissive — prioritise recall over precision
+      ev_threshold_bps: 30 # accept thin edges that would be noise in other modes
+      max_positions: 25 # higher position ceiling for wider net
+
+  # Active mode (overridden at runtime by /mode command)
+  active_mode: balanced
+
+  # Starvation recovery threshold (trades/hour before auto-switching to EXPLORATION)
+  starvation_threshold_trades_per_hour: 2
+
+  # Mode transition cooldown
+  mode_transition_cooldown_minutes: 30
+
+  # Capital allocation weights (used by capital engine)
+  allocation:
+    base_size_usd: 100.0
+    max_portfolio_exposure_pct: 80.0
+    max_single_position_pct: 0.5
+    absolute_max_position_pct: 5.0
+    max_concurrent_positions: 20

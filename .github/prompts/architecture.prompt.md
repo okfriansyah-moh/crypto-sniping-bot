@@ -53,13 +53,13 @@ Define database tables:
 
 List all DTOs with:
 
-- Name, source file in `contracts/`
+- Name, source file in `shared/contracts/`
 - Producer module, consumer module(s)
 - Key fields and constraints
 
 ### 6. Configuration
 
-Define `config/pipeline.yaml` structure with all tunable parameters.
+Define `shared/config/pipeline.yaml` structure with all tunable parameters.
 
 ### 7. State Machine
 
@@ -78,7 +78,7 @@ Define thresholds, retry policies, and degradation strategies.
 - Enforce determinism — same input = same output
 - Enforce idempotency — content-addressable IDs, ON CONFLICT DO NOTHING
 - Enforce orchestrator authority — only orchestrator calls modules
-- Enforce database adapter — all DB access through `database/adapter.*`
+- Enforce database adapter — all DB access through `shared/database/adapter.*`
 
 ## Output
 

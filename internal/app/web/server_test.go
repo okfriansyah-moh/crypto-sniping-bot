@@ -73,6 +73,28 @@ func TestRouter_UnknownRoute_Returns404(t *testing.T) {
 	}
 }
 
+func TestRouter_DashboardAPIRoute_Returns404(t *testing.T) {
+	// Dashboard REST is backend-dashboard :8090 only — sniper must not expose /api/v1/*.
+	s := newTestServer(t)
+	h := s.Router()
+
+	paths := []string{
+		"/api/v1/overview",
+		"/api/v1/pipeline",
+		"/api/v1/health",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("GET %s: got status %d, want %d", path, rec.Code, http.StatusNotFound)
+			}
+		})
+	}
+}
+
 func TestSecurityHeaders_AllHeadersPresent(t *testing.T) {
 	// Arrange
 	s := newTestServer(t)

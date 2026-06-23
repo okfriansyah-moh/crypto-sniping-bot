@@ -1,0 +1,15 @@
+# config/dashboard.yaml — operator dashboard API process (backend-dashboard).
+# Loaded only by backend-dashboard/cmd (Task 8+); sniper-bot does not read this file.
+# API keys and operator IDs are env-only: DASHBOARD_API_KEY, DASHBOARD_ALLOWED_OPERATORS.
+
+dashboard:
+  listen_port: 8090
+  cors_allowed_origins:
+    - "http://localhost:5173" # Vite default (legacy)
+    - "http://localhost:5175" # Vite dev (frontend-dashboard — make dashboard-dev)
+    - "http://localhost:3000"
+  poll_interval_seconds: 30
+  max_events_per_request: 50
+  gate_evidence_dir: "output/logs"
+  config_manifest_dir: "shared/config"
+  destructive_confirm_ttl_seconds: 60

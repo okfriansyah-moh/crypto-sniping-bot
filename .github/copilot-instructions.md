@@ -22,8 +22,8 @@
 | `docs/plans/`                    | Executable implementation plans (task-numbered; see `plans/README.md`)                                                                                                            |
 | `docs/analysis/`                 | Dated investigations and certifications (historical context; see `analysis/README.md`)                                                                                              |
 | `docs/archive/`                  | Superseded chunks — e.g. `archive/architecture-context/` for layer-focused extracts                                                                                                 |
-| `contracts/`                     | Immutable DTO definitions — all modules MUST use these, not upstream sources or raw dicts/objects                                                                                 |
-| `config/`                        | YAML configuration files — all thresholds, paths, and tunable parameters live here                                                                                                |
+| `shared/contracts/`                     | Immutable DTO definitions — all modules MUST use these, not upstream sources or raw dicts/objects                                                                                 |
+| `shared/config/`                        | YAML configuration files — all thresholds, paths, and tunable parameters live here                                                                                                |
 
 When generating code, refer to these documents for exact schemas, DTO definitions, interfaces, and algorithms. Do not invent new structures that contradict them.
 
@@ -39,7 +39,7 @@ When generating code, refer to these documents for exact schemas, DTO definition
 
 ### Module Communication
 
-- Modules communicate **only** through immutable DTO types defined in `contracts/`
+- Modules communicate **only** through immutable DTO types defined in `shared/contracts/`
 - No direct imports between module internals — only public contracts
 - No raw dicts/maps/objects, no untyped data crossing module boundaries
 - See `docs/reference/dto_contracts.md` for DTO definitions and validation rules
@@ -109,7 +109,7 @@ If any factor → 0, profit → 0. Every change must preserve every factor.
 
 ### Database Adapter
 
-- **All database access goes through `database/adapter.*`** — the single entry point
+- **All database access goes through `shared/database/adapter.*`** — the single entry point
 - Modules under `app/modules/` **MUST NOT** import any database driver directly
 - Modules **MUST NOT** contain SQL strings or execute queries
 - The adapter accepts and returns immutable DTOs — no raw rows, no dicts/maps
@@ -131,15 +131,15 @@ The orchestrator is the **ONLY** component that:
 - Calls modules (modules never call each other)
 - Manages execution order (the pipeline stage sequence)
 - Performs checkpointing (writes `last_completed_stage` after each stage)
-- Writes to the database (via `database/adapter.*`)
+- Writes to the database (via `shared/database/adapter.*`)
 - Routes DTOs between modules (passes output of stage N as input to stage N+1)
 - Handles failures (decides retry, skip, or abort)
 
 Modules MUST:
 
 - Be **pure functions** — accept DTOs, return DTOs, no side effects on shared state
-- **Not call the database** — no imports from `database/`, no SQL, no adapter calls
-- **Not call other modules** — no imports from other modules (only `contracts/`)
+- **Not call the database** — no imports from `shared/database/`, no SQL, no adapter calls
+- **Not call other modules** — no imports from other modules (only `shared/contracts/`)
 - **Not manage their own state** — all state lives in the database, managed by the orchestrator
 - **Not perform checkpointing** — only the orchestrator decides when to persist progress
 
@@ -172,8 +172,8 @@ These rules extend the skeleton-parallel framework with the specific architectur
 - **EventID** = `SHA256(chain ‖ token_address ‖ band_name ‖ bucket_ts)[:16]` — content-addressable, idempotent via `ON CONFLICT DO NOTHING`
 - **Eligibility is SQL-side only** — honeypot_score, rug_score, buy_tax_bps filters plus open-position skip; mode-adaptive thresholds
 - **Transport tag** = `"rescan_<band_name>"` (e.g. `"rescan_8h"`) on every re-emitted `MarketDataDTO`
-- **Fully generic**: worker iterates `cfg.Rescan.Bands` at runtime — add/remove bands via `config/pipeline.yaml` only, no code changes
-- **Configured in:** `config/pipeline.yaml` → `rescan:` block (enabled by default); defaults in `internal/app/config/rescan_config.go`
+- **Fully generic**: worker iterates `cfg.Rescan.Bands` at runtime — add/remove bands via `shared/config/pipeline.yaml` only, no code changes
+- **Configured in:** `shared/config/pipeline.yaml` → `rescan:` block (enabled by default); defaults in `internal/app/config/rescan_config.go`
 
 ### Telegram via Event Bus Only (per `docs/reference/architecture.md` § 2.5, § 4.4)
 
@@ -198,7 +198,7 @@ The system runs in exactly one of four modes at any time:
 - `EXPLORATION` — relaxed thresholds, higher explore budget (3–5%), used for starvation recovery
 - `VERY_EXPLORATION` — maximum relaxation; auto-entered when starvation persists in EXPLORATION
 
-Mode transitions are **bounded**: one transition per window, auto-downgrade on starvation, auto-upgrade on rug/FP spike, manual override via `/mode` (logged, reversible). Values live in `config/` YAML.
+Mode transitions are **bounded**: one transition per window, auto-downgrade on starvation, auto-upgrade on rug/FP spike, manual override via `/mode` (logged, reversible). Values live in `shared/config/` YAML.
 
 ### Learning Safety (per `docs/reference/architecture.md` § 3.10.12, § 5.3)
 
@@ -223,11 +223,11 @@ All adaptive updates are non-negotiably:
 
 - **HTTPS only for Jito bundle URLs** — `NewJitoClient` rejects any non-HTTPS URL unless `shadow_mode: true` or the URL is a loopback address (`http://127.` / `http://localhost`) for test servers. Never disable this check in production code.
 - **Chain allowlist for DEXScreener** — `CopyTradeProvider` accepts only `ethereum`/`eth`, `bsc`/`bnb`, `solana`/`sol`, `base`. Unknown chains return an error (fail-closed). No passthrough allowed.
-- **gRPC auth tokens from env vars only** — `SOLANA_GRPC_TOKEN` is read exclusively via `os.Getenv`. The field `GrpcAuthToken` is intentionally absent from `TransportConfig`, `IngestionTransportConfig`, and `config/chains.yaml`. Never add it back.
+- **gRPC auth tokens from env vars only** — `SOLANA_GRPC_TOKEN` is read exclusively via `os.Getenv`. The field `GrpcAuthToken` is intentionally absent from `TransportConfig`, `IngestionTransportConfig`, and `shared/config/chains.yaml`. Never add it back.
 - **API keys never in YAML** — all external API keys (`BIRDEYE_API_KEY`, `TWITTER_BEARER_TOKEN`, `COPY_TRADE_WALLETS`, `JITO_BUNDLE_URL`, `JITO_TIP_ACCOUNT`, `GITHUB_COPILOT_TOKEN`, etc.) are read via `os.Getenv` at constructor only. Never log, never config-file.
 - **Response bodies are bounded** — Jito HTTP response: 64 KiB cap. DEXScreener copy-trade: 128 KiB cap. Copilot AI response: 4 KiB cap (`max_response_bytes`). Never use `io.ReadAll` without a `LimitReader`.
 - **AI enrichment is 1-shot and autonomous** — `GroqClient.Complete()` issues one HTTP request (plus one retry on 429/5xx) and returns immediately. No human approval gate, no interaction loop. All callers are fail-open (`NarrativeKnown=false` / `AIExplanationKnown=false` on any error). The pipeline is never blocked by AI calls.
-- **AI model is configurable, never hardcoded** — model priority: `AI_ENRICH_MODEL` env var (highest) → `ai_enrichment.model` in `config/pipeline.yaml` → built-in default `llama-3.3-70b-versatile`. This follows the same pattern as `MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}"` in `scripts/run_parallel.sh`. Never hardcode a model name in Go source.
+- **AI model is configurable, never hardcoded** — model priority: `AI_ENRICH_MODEL` env var (highest) → `ai_enrichment.model` in `shared/config/pipeline.yaml` → built-in default `llama-3.3-70b-versatile`. This follows the same pattern as `MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.7}"` in `scripts/run_parallel.sh`. Never hardcode a model name in Go source.
 - **HTTPS only for AI enrichment endpoint** — `NewGroqClient` rejects any non-HTTPS endpoint at construction (same invariant as Jito). Default endpoint: `https://api.groq.com/openai/v1/chat/completions`.
 - **RPC error messages are truncated** — `truncate(msg, 200)` before surfacing in returned errors or logs. Never expose raw RPC error strings of arbitrary length.
 - **Mandatory DQ hard-rejects (fail-closed, never relax)** — Layer 1 enforces three mandatory structural hard-rejects that cannot be bypassed by any operational mode, starvation condition, or profit argument:
@@ -284,10 +284,10 @@ Do not introduce any of these unless the project explicitly requires them:
 ### Database Engine Policy
 
 - **The database engine is project-specific.** Choose the appropriate engine when setting up a new project.
-- **Supported engines are configured via `database/adapter.*`.** See `docs/reference/db_adapter_spec.md`.
+- **Supported engines are configured via `shared/database/adapter.*`.** See `docs/reference/db_adapter_spec.md`.
 - **Modules MUST remain database-agnostic.** No module may reference any specific database engine.
 - Direct use of any database driver in `app/modules/` is forbidden.
-- The adapter is the **sole abstraction boundary** — switching engines requires changes only in `database/`.
+- The adapter is the **sole abstraction boundary** — switching engines requires changes only in `shared/database/`.
 
 ---
 
@@ -315,11 +315,11 @@ skeleton-parallel/
 **Placement rules:**
 
 - New module logic goes in the appropriate `app/modules/` subdirectory
-- New DTO definitions go in `contracts/` — never duplicate in a module
-- Database migrations go in `database/migrations/`
+- New DTO definitions go in `shared/contracts/` — never duplicate in a module
+- Database migrations go in `shared/database/migrations/`
 - Tests mirror the `app/modules/` structure under `tests/`
-- Configuration defaults go in `config/` YAML files — never hardcode
-- Never put module-specific logic in `app/orchestrator/` or `contracts/`
+- Configuration defaults go in `shared/config/` YAML files — never hardcode
+- Never put module-specific logic in `app/orchestrator/` or `shared/contracts/`
 
 ---
 
@@ -328,8 +328,8 @@ skeleton-parallel/
 1. **Language & runtime** — Use the project's chosen language and version. Use type annotations on all public interfaces
 2. **Immutable DTOs** for all contracts — no mutable state crossing module boundaries
 3. **Each module** gets its own package under `app/modules/` with a public entry point exposing only the public contract
-4. **No module may import another module's internals** — only `contracts/` types
-5. **Database access** through `database/adapter.*` only — no raw SQL in modules, no ORM
+4. **No module may import another module's internals** — only `shared/contracts/` types
+5. **Database access** through `shared/database/adapter.*` only — no raw SQL in modules, no ORM
 6. **Tests** must be runnable without GPU, without network, and without real data files
 7. **Config** via YAML files — no hardcoded paths, thresholds, or magic numbers
 8. **Logging** via structured logging (language-appropriate library) — leveled, no unstructured console output
@@ -342,7 +342,7 @@ skeleton-parallel/
 
 - Create duplicate files with similar names (e.g., `utils.py` and `helpers.py` with overlapping functions)
 - Create new utility modules when existing ones already cover the functionality
-- Duplicate DTO definitions — all DTOs live in `contracts/` and are defined exactly once
+- Duplicate DTO definitions — all DTOs live in `shared/contracts/` and are defined exactly once
 - Copy SQL schemas between migration files — reference the existing table, don't redefine it
 - Duplicate configuration defaults — all defaults live in `config.yaml`, not scattered in code
 - Create wrapper modules that simply re-export another module's functions
@@ -350,7 +350,7 @@ skeleton-parallel/
 **MUST:**
 
 - Check existing files before creating new ones — use the project structure as the source of truth
-- Reuse existing utility functions from `contracts/`, `core/`, and shared helpers
+- Reuse existing utility functions from `shared/contracts/`, `core/`, and shared helpers
 - Place new code in the correct existing module rather than creating a parallel file
 - When adding a new module, verify no existing module already handles that responsibility
 - Keep one canonical location for each piece of logic — no copies, no forks, no alternatives
@@ -585,11 +585,11 @@ These files/directories have strict modification rules during parallel developme
 
 | Path                      | Rule                                                                                                                                                                              |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contracts/*`             | **Additive only** — new DTOs allowed, existing fields never modified                                                                                                              |
-| `database/*`              | **Migrations immutable** — new migrations and adapter/engine additions allowed in any phase; existing migration files in `database/migrations/` must never be modified or deleted |
+| `shared/contracts/*`             | **Additive only** — new DTOs allowed, existing fields never modified                                                                                                              |
+| `shared/database/*`              | **Migrations immutable** — new migrations and adapter/engine additions allowed in any phase; existing migration files in `shared/database/migrations/` must never be modified or deleted |
 | `docs/*`                  | **Read-only** — no agent may modify documentation                                                                                                                                 |
 | `docs/ops/PROGRESS_REPORT.md` | **Exception** — must be updated after each phase completion (see below)                                                                                                           |
-| `config/*`                | **Append-only** — new keys allowed, existing keys never removed                                                                                                                   |
+| `shared/config/*`                | **Append-only** — new keys allowed, existing keys never removed                                                                                                                   |
 
 ### PROGRESS_REPORT.md Exception
 
@@ -615,4 +615,4 @@ status and must be kept current:
 5. Use `ON CONFLICT DO NOTHING` (not engine-specific variants like `INSERT OR IGNORE`)
 6. Use parameterized queries only — no string interpolation in SQL
 7. Use `CURRENT_TIMESTAMP` for defaults — no engine-specific date/time functions
-8. Engine-specific settings (e.g., WAL mode, connection pooling) belong in `database/engines/` only
+8. Engine-specific settings (e.g., WAL mode, connection pooling) belong in `shared/database/engines/` only

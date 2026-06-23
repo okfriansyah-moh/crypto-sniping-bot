@@ -71,7 +71,7 @@ After all tasks complete, dispatch a final reviewer for the full implementation.
 **Always include:**
 
 - Full task text (copy from plan, don't summarize)
-- Relevant DTO types from `contracts/`
+- Relevant DTO types from `shared/contracts/`
 - The module's public interface
 - skeleton-parallel constraints (see below)
 

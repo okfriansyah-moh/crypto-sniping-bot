@@ -6,7 +6,7 @@
 #   ./scripts/gate_review_collect.sh [DURATION_MINUTES] [SERVICE] [MODE]
 #
 #   DURATION_MINUTES  How long to collect logs.  Default: 60
-#   SERVICE           Docker Compose service name. Default: bot
+#   SERVICE           Docker Compose service name. Default: sniper-bot
 #   MODE              Force review mode: PIPELINE_PROOF | SHADOW_TRADING |
 #                     MICRO_CAPITAL | LIVE_MONITORING
 #                     Default: auto-detected from evidence counts.
@@ -51,7 +51,7 @@ if [[ "${1:-}" == "--analyze" ]]; then
   FORCED_MODE="${3:-}"
 else
   DURATION_MINUTES="${1:-60}"
-  SERVICE="${2:-bot}"
+  SERVICE="${2:-sniper-bot}"
   FORCED_MODE="${3:-}"
   TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   RAW_LOG="$OUTPUT_DIR/gate_raw_${TIMESTAMP}.log"
@@ -197,6 +197,11 @@ TOTAL_PANIC=$(count_jq 'select(.level == "PANIC" or .level == "FATAL")')
 UNIQUE_TRACES=$(jq -r 'select(.trace_id != null) | .trace_id' "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
 
 COUNT_INGESTION=$(count_jq 'select(.msg == "solana_ingestion_emitted" or .msg == "dex_pool_detected")')
+INGESTION_DELIVERY_MODE=$(jq -r 'select(.msg == "solana_ingestion_delivery") | .mode' "$CLEAN_LOG" 2>/dev/null | tail -1)
+[ -z "$INGESTION_DELIVERY_MODE" ] || [ "$INGESTION_DELIVERY_MODE" = "null" ] && INGESTION_DELIVERY_MODE="stream"
+COUNT_INGESTION_WEBHOOK=$(count_jq 'select(.msg == "solana_ingestion_emitted" and .transport == "webhook")')
+COUNT_HELIUS_WEBHOOK_DELIVERED=$(count_jq 'select(.msg == "helius_webhook_delivered")')
+COUNT_INGESTION_STREAM=$(count_jq 'select(.msg == "solana_ingestion_emitted" and (.transport == "ws" or .transport == null or .transport == ""))')
 COUNT_DQ=$(count_jq 'select(.msg == "dq_decision")')
 COUNT_DQ_STAGE=$(count_stage_worker "dq_worker")
 COUNT_DQ_EMITTED=$(count_stage_worker_status "dq_worker" "emitted")
@@ -213,6 +218,11 @@ COUNT_EDGE_EMITTED=$(count_stage_worker_status "edge_worker" "emitted")
 COUNT_EDGE_FILTERED=$(count_stage_worker_status "edge_worker" "filtered")
 COUNT_EDGE_REJECTED=$(count_stage_worker_status "edge_worker" "rejected")
 COUNT_EDGE_SKIPPED=$(count_stage_worker_status "edge_worker" "skipped")
+
+COUNT_GRADUATION_EDGE=$(count_jq 'select(.msg == "edge_decision" and .edge_type == "GRADUATION_EDGE")')
+RESCAN_BAND_15M=$(count_jq 'select(.msg == "rescan_band_emitted" and .band == "15m")')
+RESCAN_BAND_EMITTED_TOTAL=$(count_jq 'select(.msg == "rescan_band_emitted")')
+EDGE_REJECT_TOP=$(jq -r 'select(.msg == "edge_decision" and .reject_reason != null and .reject_reason != "") | .reject_reason' "$CLEAN_LOG" 2>/dev/null | sort | uniq -c | sort -rn | head -5 | tr '\n' '; ' | sed 's/; $//')
 
 COUNT_PROB=$(count_stage_worker "probability_worker")
 COUNT_PROB_EMITTED=$(count_stage_worker_status "probability_worker" "emitted")
@@ -264,6 +274,27 @@ COUNT_PROBES_COMPLETED=$(count_jq 'select(.msg == "market_probes_completed")')
 COUNT_DQ_PASS=$(count_jq 'select(.msg == "dq_decision" and (.decision == "PASS" or .decision == "RISKY_PASS"))')
 COUNT_DQ_SKIP=$(count_jq 'select(.msg == "dq_decision" and .decision == "SKIP")')
 COUNT_DQ_REJECT=$(count_jq 'select(.msg == "dq_decision" and .decision == "REJECT")')
+COUNT_PROBE_PASS_COMPLETE=$(count_jq 'select(.msg == "market_probes_completed" and .probe_pass_complete == true)')
+COUNT_PROBE_INCOMPLETE_ENQUEUED=$(count_jq 'select(.msg == "market_probes_completed" and .background_retry_enqueued == true)')
+COUNT_PROBE_EXHAUSTED_RETRY=$(count_jq 'select(.msg == "probe_pending_requeued" and .transport == "probe_exhausted_retry")')
+COUNT_PROBE_PENDING_ENQUEUED=$(count_jq 'select(.msg == "probe_pending_enqueued")')
+COUNT_RESCAN_PROBE_SKIP=$(count_jq 'select(.msg == "rescan_probe_skip_complete")')
+COUNT_DQ_DECISIONS=$(count_jq 'select(.msg == "dq_decision")')
+COUNT_DQ_WITH_CREATOR=$(count_jq 'select(.msg == "dq_decision" and (.creator_address // "") != "")')
+CREATOR_ADDRESS_POPULATED_PCT="N/A"
+if [[ "$COUNT_DQ_DECISIONS" -gt 0 ]]; then
+  CREATOR_ADDRESS_POPULATED_PCT=$(awk -v c="$COUNT_DQ_WITH_CREATOR" -v t="$COUNT_DQ_DECISIONS" 'BEGIN{printf "%.1f", 100*c/t}')
+fi
+PROBE_PENDING_QUEUE_DEPTH="N/A"
+if command -v docker >/dev/null 2>&1; then
+  _pp_depth=$(docker compose exec -T db psql -U sniper -d sniper -tAc \
+    "SELECT COUNT(*) FROM probe_pending_queue WHERE status='pending'" 2>/dev/null | tr -d ' \n' || true)
+  if [[ -n "$_pp_depth" && "$_pp_depth" =~ ^[0-9]+$ ]]; then
+    PROBE_PENDING_QUEUE_DEPTH="$_pp_depth"
+  fi
+fi
+COUNT_UNKNOWN_REJECT=$(jq -r 'select(.msg == "dq_decision" and .decision == "REJECT" and ((.reject_reasons // []) | index("unknown_social_links") or index("unknown_creator_count") or index("unknown_holder_count") or index("unknown_total_supply"))) | .trace_id' "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+COUNT_PROBE_PARTIAL_SKIP=$(count_jq 'select(.msg == "dq_skip" and ((.flags // []) | index("probe_partial:social") or index("probe_partial:creator") or index("probe_partial:holder") or index("probe_partial:supply") or index("probe_exhausted")))')
 # serial_launcher_skipped dominates Helius pump.fun — intentional capital guardrail, not a code defect.
 COUNT_SERIAL_LAUNCHER_SKIP=$(jq -r 'select(.msg == "dq_decision" and (.flags // [] | index("serial_launcher_skipped"))) | .trace_id' "$CLEAN_LOG" 2>/dev/null | sort -u | wc -l | tr -d ' ')
 COUNT_SHADOW_OBS_FAIL=$(count_jq 'select(.msg == "shadow_observer_failed")')
@@ -605,11 +636,12 @@ PROD_DECISION="NOT_READY"
 if [[ "$BLOCKER_COUNT" -gt 0 ]]; then
   PROD_DECISION="NOT_READY"
 elif [[ "$DETECTED_MODE" == "PIPELINE_PROOF" ]]; then
-  # Still in proof mode — check if at least one full trace completed
   if [[ "$TRACES_COMPLETED" -ge 1 ]]; then
     PROD_DECISION="SHADOW_READY"
-  else
+  elif [[ "$COUNT_EDGE_EMITTED" -ge 1 && "$COUNT_VAL_EMITTED" -ge 1 ]]; then
     PROD_DECISION="PIPELINE_PROOF_READY"
+  else
+    PROD_DECISION="NOT_READY"
   fi
 elif [[ "$DETECTED_MODE" == "SHADOW_TRADING" ]]; then
   # Shadow mode exit: ≥500 closed, ≥95% pipeline completion, 0 dup exec, 0 determinism violations
@@ -726,9 +758,26 @@ echo "  Over-exposure events:       $COUNT_OVER_EXPOSURE"
 echo "  Drawdown events:            $COUNT_DRAWDOWN"
 echo ""
 echo "  Throughput metrics (PLAN §1.1):"
+echo "    ingestion_delivery_mode      $INGESTION_DELIVERY_MODE"
+echo "    ingestion_stream_emitted     $COUNT_INGESTION_STREAM"
+echo "    ingestion_webhook_emitted    $COUNT_INGESTION_WEBHOOK"
+echo "    helius_webhook_delivered     $COUNT_HELIUS_WEBHOOK_DELIVERED"
+echo "    graduation_edge_decisions    $COUNT_GRADUATION_EDGE"
+echo "    rescan_band_emitted_total    $RESCAN_BAND_EMITTED_TOTAL"
+echo "    rescan_15m_emitted           $RESCAN_BAND_15M"
+echo "    edge_reject_reasons_top5     ${EDGE_REJECT_TOP:-none}"
 echo "    wsol_token_address_emitted   $WSOL_TOKEN_ADDRESS_EMITTED"
 echo "    ingestion_valid_token_ratio  $INGESTION_VALID_TOKEN_RATIO  ($INGESTION_VALID_COUNT/$COUNT_INGESTION)"
 echo "    market_probes_completed      $COUNT_PROBES_COMPLETED"
+echo "    probe_pass_complete          $COUNT_PROBE_PASS_COMPLETE"
+echo "    probe_incomplete_enqueued    $COUNT_PROBE_INCOMPLETE_ENQUEUED"
+echo "    probe_exhausted_retry        $COUNT_PROBE_EXHAUSTED_RETRY"
+echo "    probe_pending_enqueued       $COUNT_PROBE_PENDING_ENQUEUED"
+echo "    probe_pending_queue_depth    $PROBE_PENDING_QUEUE_DEPTH"
+echo "    rescan_probe_skip_complete   $COUNT_RESCAN_PROBE_SKIP"
+echo "    creator_address_populated_pct ${CREATOR_ADDRESS_POPULATED_PCT}% ($COUNT_DQ_WITH_CREATOR/$COUNT_DQ_DECISIONS)"
+echo "    unknown_star_reject_traces   $COUNT_UNKNOWN_REJECT"
+echo "    probe_partial_skip           $COUNT_PROBE_PARTIAL_SKIP"
 echo "    market_probes_completion     $MARKET_PROBES_COMPLETION_RATIO"
 echo "    market_probes_backlog_ratio  $MARKET_PROBES_BACKLOG_RATIO"
 echo "    dq_pass_or_risky_pass         $COUNT_DQ_PASS"
@@ -843,15 +892,34 @@ HB_RAYDIUM_V4_JSON="null"
   echo "    \"operational_consistency\": $PC_OPS"
   echo "  },"
   echo "  \"throughput_metrics\": {"
+  echo "    \"ingestion_delivery_mode\": \"$INGESTION_DELIVERY_MODE\","
+  echo "    \"ingestion_stream_emitted\": $COUNT_INGESTION_STREAM,"
+  echo "    \"ingestion_webhook_emitted\": $COUNT_INGESTION_WEBHOOK,"
   echo "    \"wsol_token_address_emitted\": $WSOL_TOKEN_ADDRESS_EMITTED,"
   echo "    \"ingestion_valid_token_ratio\": \"$INGESTION_VALID_TOKEN_RATIO\","
   echo "    \"ingestion_emitted\": $COUNT_INGESTION,"
   echo "    \"ingestion_valid_count\": $INGESTION_VALID_COUNT,"
   echo "    \"market_probes_completed\": $COUNT_PROBES_COMPLETED,"
+  echo "    \"probe_pass_complete\": $COUNT_PROBE_PASS_COMPLETE,"
+  echo "    \"probe_incomplete_enqueued\": $COUNT_PROBE_INCOMPLETE_ENQUEUED,"
+  echo "    \"probe_exhausted_retry\": $COUNT_PROBE_EXHAUSTED_RETRY,"
+  echo "    \"probe_pending_enqueued\": $COUNT_PROBE_PENDING_ENQUEUED,"
+  echo "    \"probe_pending_queue_depth\": \"$PROBE_PENDING_QUEUE_DEPTH\","
+  echo "    \"rescan_probe_skip_complete\": $COUNT_RESCAN_PROBE_SKIP,"
+  echo "    \"creator_address_populated_pct\": \"$CREATOR_ADDRESS_POPULATED_PCT\","
+  echo "    \"dq_decisions_with_creator\": $COUNT_DQ_WITH_CREATOR,"
+  echo "    \"dq_decisions_total\": $COUNT_DQ_DECISIONS,"
+  echo "    \"unknown_star_reject_traces\": $COUNT_UNKNOWN_REJECT,"
+  echo "    \"probe_partial_skip\": $COUNT_PROBE_PARTIAL_SKIP,"
   echo "    \"market_probes_completion_ratio\": \"$MARKET_PROBES_COMPLETION_RATIO\","
   echo "    \"market_probes_backlog_ratio\": \"$MARKET_PROBES_BACKLOG_RATIO\","
   echo "    \"dq_pass_or_risky_pass\": $COUNT_DQ_PASS,"
   echo "    \"shadow_observer_failed\": $COUNT_SHADOW_OBS_FAIL,"
+  echo "    \"helius_webhook_delivered\": $COUNT_HELIUS_WEBHOOK_DELIVERED,"
+  echo "    \"graduation_edge_decisions\": $COUNT_GRADUATION_EDGE,"
+  echo "    \"rescan_band_emitted_total\": $RESCAN_BAND_EMITTED_TOTAL,"
+  echo "    \"rescan_15m_emitted\": $RESCAN_BAND_15M,"
+  echo "    \"edge_worker_emitted\": $COUNT_EDGE_EMITTED,"
   echo "    \"ingestion_notifications_sum\": $TOTAL_INGESTION_NOTIFICATIONS,"
   echo "    \"throughput_verdict\": \"$THROUGHPUT_VERDICT\","
   echo "    \"heartbeat_pumpfun_amm_final\": $HB_PUMPFUN_AMM_JSON,"

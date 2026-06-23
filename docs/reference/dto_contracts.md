@@ -1,6 +1,6 @@
 # DTO Contracts — Project-Specific
 
-> **Canonical DTO registry.** All data crossing module boundaries in the deterministic event-driven sniper system uses these immutable DTOs from `contracts/`. No module may define its own DTOs. No module may pass raw maps, primitives, or untyped JSON across boundaries.
+> **Canonical DTO registry.** All data crossing module boundaries in the deterministic event-driven sniper system uses these immutable DTOs from `shared/contracts/`. No module may define its own DTOs. No module may pass raw maps, primitives, or untyped JSON across boundaries.
 
 ---
 
@@ -10,7 +10,7 @@
 
 - All DTOs are **immutable** Go structs — no setters, no mutating methods, no post-construction logic
 - All fields **exported** and typed; zero `interface{}` / `any`
-- DTOs live exclusively in `contracts/` — one file per logical DTO group
+- DTOs live exclusively in `shared/contracts/` — one file per logical DTO group
 - No methods on DTOs (pure data)
 
 ### Serialization
@@ -102,7 +102,7 @@ type MarketDataDTO struct {
 }
 ```
 
-- **Source file:** `contracts/market_data.go`
+- **Source file:** `shared/contracts/market_data.go`
 - **Producer:** `internal/modules/ingestion` (EVM) and `internal/modules/ingestion_solana` (Phase 7, Solana)
 - **Consumer:** `internal/modules/data_quality`
 - **ID rule:** `EventID = SHA256(chain||tx_hash||log_index)[:16]` (EVM) or `SHA256("solana"||signature||instruction_index)[:16]` (Solana). Both forms are content-addressable hashes over the chain-natural ordering keys; collisions across chains are statistically negligible because `chain` is part of the hash.
@@ -149,7 +149,7 @@ type DataQualityDTO struct {
 }
 ```
 
-- **Source file:** `contracts/data_quality.go`
+- **Source file:** `shared/contracts/data_quality.go`
 - **Producer:** `internal/modules/data_quality`
 - **Consumer:** `internal/modules/features` (PASS / RISKY_PASS only)
 
@@ -204,7 +204,7 @@ type FeatureConfidence struct {
 }
 ```
 
-- **Source file:** `contracts/feature.go`
+- **Source file:** `shared/contracts/feature.go`
 - **Producer:** `internal/modules/features`
 - **Consumer:** `internal/modules/edge`
 
@@ -234,7 +234,7 @@ type EdgeDTO struct {
 }
 ```
 
-- **Source file:** `contracts/edge.go`
+- **Source file:** `shared/contracts/edge.go`
 - **Producer:** `internal/modules/edge`
 - **Consumer:** `internal/modules/validation`
 
@@ -288,7 +288,7 @@ type LatencyProfileDTO struct {
 }
 ```
 
-- **Source file:** `contracts/probability.go`, `contracts/slippage.go`, `contracts/latency.go`
+- **Source file:** `shared/contracts/probability.go`, `shared/contracts/slippage.go`, `shared/contracts/latency.go`
 - **Producer:** `internal/modules/models`
 - **Consumer:** `internal/modules/validation`
 
@@ -322,7 +322,7 @@ type ValidatedEdgeDTO struct {
 }
 ```
 
-- **Source file:** `contracts/validated_edge.go`
+- **Source file:** `shared/contracts/validated_edge.go`
 - **Producer:** `internal/modules/validation`
 - **Consumer:** `internal/modules/selection` (ACCEPT only)
 
@@ -353,7 +353,7 @@ type SelectionOutputDTO struct {
 }
 ```
 
-- **Source file:** `contracts/selection.go`
+- **Source file:** `shared/contracts/selection.go`
 - **Producer:** `internal/modules/selection`
 - **Consumer:** `internal/modules/capital`
 
@@ -385,7 +385,7 @@ type AllocationDTO struct {
 }
 ```
 
-- **Source file:** `contracts/allocation.go`
+- **Source file:** `shared/contracts/allocation.go`
 - **Producer:** `internal/modules/capital`
 - **Consumer:** `internal/modules/execution`
 
@@ -429,7 +429,7 @@ type ExecutionResultDTO struct {
 }
 ```
 
-- **Source file:** `contracts/execution.go`
+- **Source file:** `shared/contracts/execution.go`
 - **Producer:** `internal/modules/execution`
 - **Consumer:** `internal/modules/position` (on success)
 
@@ -474,7 +474,7 @@ type PositionStateDTO struct {
 }
 ```
 
-- **Source file:** `contracts/position.go`
+- **Source file:** `shared/contracts/position.go`
 - **Producer:** `internal/modules/position`
 - **Consumer:** `internal/modules/learning` (on exit only)
 
@@ -510,7 +510,7 @@ type EvaluationDTO struct {
 }
 ```
 
-- **Source file:** `contracts/evaluation.go`
+- **Source file:** `shared/contracts/evaluation.go`
 - **Producer:** `internal/modules/learning`
 - **Consumer:** `internal/modules/learning` (triggers weight updates)
 
@@ -547,30 +547,81 @@ type LearningRecordDTO struct {
 }
 ```
 
-- **Source file:** `contracts/learning_record.go`
+- **Source file:** `shared/contracts/learning_record.go`
 - **Producer:** `internal/modules/learning`
 - **Consumer:** `internal/modules/learning` (self-consuming for parameter updates)
 
 ---
 
+### 3.20 Operator Dashboard API Response DTOs — Platform (not event bus)
+
+JSON response shapes for the operator dashboard REST API (`GET /api/v1/*`). **Not** published to the event bus — produced by `internal/operator` and serialized by `backend-dashboard` HTTP handlers.
+
+| Type                       | Endpoint                        |
+| -------------------------- | ------------------------------- |
+| `OverviewResponseDTO`      | `GET /api/v1/overview`          |
+| `PipelineStatsResponseDTO` | `GET /api/v1/pipeline`          |
+| `PositionRowDTO`           | `GET /api/v1/positions` (slice) |
+| `ActivityEventDTO`         | `GET /api/v1/activity` (slice)  |
+| `DQBreakdownResponseDTO`   | `GET /api/v1/dq`                |
+| `GateEvidenceResponseDTO`  | `GET /api/v1/gate/evidence`     |
+| `ConfigManifestEntryDTO`   | `GET /api/v1/configs` (slice)   |
+
+Supporting nested types: `ShadowGateBlockDTO`, `ChainStatusDTO`, `AlertBannerDTO`, `PipelineFunnelDTO`, `LayerHeartbeatDTO`, `DQRejectReasonDTO`, `GateCriterionDTO`.
+
+- **Source file:** `shared/contracts/operator_api.go`
+- **Producer:** `internal/operator` (Phase 1+), `backend-dashboard/internal/api/*` (Phase 2+)
+- **Consumer:** `frontend-dashboard` typed API client
+- **Plan:** `docs/plans/2026-06-13-operator-dashboard-plan.md` Task 1
+
+---
+
+### 3.21 `OperatorCommandDTO` — Platform (event bus, Phase 5)
+
+Dashboard-originated operator control commands. Payload for `operator_command_event` on the append-only event bus.
+
+| Field           | Type              | Notes                                                        |
+| --------------- | ----------------- | ------------------------------------------------------------ |
+| `command_id`    | `string`          | 16 hex — `SHA256(canonical_json without command_id)[:16]`    |
+| `command_type`  | `string`          | `mode` \| `kill` \| `resume` \| `force_close`                |
+| `issuer_id`     | `string`          | Dashboard operator identity (from auth)                        |
+| `args`          | `map[string]string` | Command parameters (e.g. `mode=EXPLORATION`)             |
+| `confirm_token` | `string`          | Required for destructive commands (`kill`, `resume`, `force_close`) |
+| `timestamp`     | `string`          | ISO 8601 UTC                                                 |
+
+- **Source file:** `shared/contracts/operator_command.go`
+- **Producer:** `backend-dashboard` (Phase 5+ — `POST /api/v1/commands`)
+- **Consumer:** `sniper-bot/internal/workers` (Phase 5+)
+- **Audit table:** `operator_command_audit` (append-only mirror; migration `20260613000001_operator_command_audit.sql`)
+- **Plan:** `docs/plans/2026-06-13-operator-dashboard-plan.md` Task 21
+
+---
+
 ## 4. Cross-Module Dependency Matrix
 
-| DTO                      | Producer               | Consumer(s)                               |
-| ------------------------ | ---------------------- | ----------------------------------------- |
-| `MarketDataDTO`          | `modules/ingestion`    | `modules/data_quality`                    |
-| `DataQualityDTO`         | `modules/data_quality` | `modules/features`, `modules/learning`    |
-| `FeatureDTO`             | `modules/features`     | `modules/edge`, `modules/learning`        |
-| `EdgeDTO`                | `modules/edge`         | `modules/validation`, `modules/learning`  |
-| `ProbabilityEstimateDTO` | `modules/models`       | `modules/validation`                      |
-| `SlippageEstimateDTO`    | `modules/models`       | `modules/validation`, `modules/execution` |
-| `LatencyProfileDTO`      | `modules/models`       | `modules/execution`                       |
-| `ValidatedEdgeDTO`       | `modules/validation`   | `modules/selection`, `modules/learning`   |
-| `SelectionOutputDTO`     | `modules/selection`    | `modules/capital`                         |
-| `AllocationDTO`          | `modules/capital`      | `modules/execution`                       |
-| `ExecutionResultDTO`     | `modules/execution`    | `modules/position`, `modules/learning`    |
-| `PositionStateDTO`       | `modules/position`     | `modules/learning`                        |
-| `EvaluationDTO`          | `modules/learning`     | `modules/learning` (internal)             |
-| `LearningRecordDTO`      | `modules/learning`     | `modules/learning` (internal)             |
+| DTO                        | Producer               | Consumer(s)                               |
+| -------------------------- | ---------------------- | ----------------------------------------- |
+| `MarketDataDTO`            | `modules/ingestion`    | `modules/data_quality`                    |
+| `DataQualityDTO`           | `modules/data_quality` | `modules/features`, `modules/learning`    |
+| `FeatureDTO`               | `modules/features`     | `modules/edge`, `modules/learning`        |
+| `EdgeDTO`                  | `modules/edge`         | `modules/validation`, `modules/learning`  |
+| `ProbabilityEstimateDTO`   | `modules/models`       | `modules/validation`                      |
+| `SlippageEstimateDTO`      | `modules/models`       | `modules/validation`, `modules/execution` |
+| `LatencyProfileDTO`        | `modules/models`       | `modules/execution`                       |
+| `ValidatedEdgeDTO`         | `modules/validation`   | `modules/selection`, `modules/learning`   |
+| `SelectionOutputDTO`       | `modules/selection`    | `modules/capital`                         |
+| `AllocationDTO`            | `modules/capital`      | `modules/execution`                       |
+| `ExecutionResultDTO`       | `modules/execution`    | `modules/position`, `modules/learning`    |
+| `PositionStateDTO`         | `modules/position`     | `modules/learning`                        |
+| `EvaluationDTO`            | `modules/learning`     | `modules/learning` (internal)             |
+| `LearningRecordDTO`        | `modules/learning`     | `modules/learning` (internal)             |
+| `OverviewResponseDTO`      | `internal/operator`    | `backend-dashboard` API, frontend         |
+| `PipelineStatsResponseDTO` | `internal/operator`    | `backend-dashboard` API, frontend         |
+| `PositionRowDTO`           | `internal/operator`    | `backend-dashboard` API, frontend         |
+| `ActivityEventDTO`         | `internal/operator`    | `backend-dashboard` API, frontend         |
+| `DQBreakdownResponseDTO`   | `internal/operator`    | `backend-dashboard` API, frontend         |
+| `GateEvidenceResponseDTO`  | `internal/operator`    | `backend-dashboard` API, frontend         |
+| `ConfigManifestEntryDTO`   | `internal/operator`    | `backend-dashboard` API, frontend         |
 
 ---
 
@@ -595,6 +646,7 @@ Each event in the `events` table wraps exactly one DTO as payload:
 | `evaluation_event`      | `EvaluationDTO`                  | learning                          |
 | `learning_record_event` | `LearningRecordDTO`              | learning                          |
 | `telegram_event`        | `TelegramNotificationDTO` (meta) | multiple (operator notifications) |
+| `operator_command_event` | `OperatorCommandDTO`            | backend-dashboard (Phase 5+)        |
 
 ---
 
@@ -636,6 +688,7 @@ Each event in the `events` table wraps exactly one DTO as payload:
 | `PositionStateDTO.ExitReason`      | TP1, TP2, SL, TIME, MANUAL                                                                                                     |
 | `LearningRecordDTO.Outcome`        | TP, SL, TIME, RUG, MISSED_PUMP, CORRECT_REJECT                                                                                 |
 | `LearningRecordDTO.Classification` | TP, FP, TN, FN                                                                                                                 |
+| `OperatorCommandDTO.CommandType`   | mode, kill, resume, force_close                                                                                                |
 | `MarketDataDTO.Transport`          | websocket, polling, gap_recovery                                                                                               |
 
 ---
@@ -696,8 +749,8 @@ Since Go has no `frozen` keyword, immutability is enforced by convention + revie
 - **No pointer receivers on DTOs** — all DTO types have no methods
 - **Exported fields only** — consumers read by field access, never set
 - **Pass by value** — DTOs passed as values, not `*DTO`, across module boundaries
-- **Review gate:** PR reviewers reject any commit that adds a method, setter, or `*DTO` return type in `contracts/`
-- **Lint rule:** forbid `*contracts.X` in function signatures except in `database/` implementations
+- **Review gate:** PR reviewers reject any commit that adds a method, setter, or `*DTO` return type in `shared/contracts/`
+- **Lint rule:** forbid `*contracts.X` in function signatures except in `shared/database/` implementations
 
 ---
 
@@ -719,7 +772,7 @@ Priority  int32  `json:"priority"`      // Higher = processed first. Default 0.
 
 ### Rules
 
-- **Producer sets `ExpiresAt`** using per-stage TTL from `config/pipeline.yaml`:
+- **Producer sets `ExpiresAt`** using per-stage TTL from `shared/config/pipeline.yaml`:
   - `market_data.ttl_seconds` (default 30)
   - `data_quality.ttl_seconds` (default 15)
   - `feature.ttl_seconds` (default 10)
