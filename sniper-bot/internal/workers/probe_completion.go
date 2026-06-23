@@ -49,7 +49,7 @@ func isHolderExemptTopic(topic string, exempt []string) bool {
 			return true
 		}
 	}
-	return topic == "PumpFunCreate"
+	return topic == "PumpFunCreate" || topic == "PumpFunAMMCreatePool"
 }
 
 func probePassComplete(missing []string) bool {

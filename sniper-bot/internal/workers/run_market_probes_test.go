@@ -169,7 +169,7 @@ func (b *batchCountRPC) GetMultipleAccounts(ctx context.Context, pubkeys []strin
 func TestProbesWorker_RescanPhase2_SkipsPumpfunLp(t *testing.T) {
 	fp := &fakeProbe{name: "solana_pumpfun_lp"}
 	w := NewMarketProbesWorker(&stubAdapter{}, []probes.MarketProbe{fp}, nil).
-		WithBatchAccounts(false, nil, nil, BatchAccountsConfig{RescanSkipPumpfunLpPhase2: true})
+		WithBatchAccounts(false, nil, nil, 0, BatchAccountsConfig{RescanSkipPumpfunLpPhase2: true})
 
 	md := contracts.MarketDataDTO{
 		EventID:   "md-rescan",
@@ -198,7 +198,7 @@ func TestProbesWorker_BatchAccounts_SkipsIndividualRPC(t *testing.T) {
 	w := NewMarketProbesWorker(&stubAdapter{}, []probes.MarketProbe{
 		probes.NewSolanaAuthoritiesProbe(rpc, probes.SolanaAuthoritiesConfig{Enabled: true, TimeoutMs: 1000, Commitment: "confirmed"}, nil),
 		&countingPumpfunLpProbe{rpc: rpc},
-	}, nil).WithBatchAccounts(true, rpc, fixedSolUsdProbe{px: 150}, BatchAccountsConfig{
+	}, nil).WithBatchAccounts(true, rpc, fixedSolUsdProbe{px: 150}, 0, BatchAccountsConfig{
 		AuthoritiesEnabled:   true,
 		PumpfunLpEnabled:     true,
 		AuthoritiesTimeoutMs: 1000,

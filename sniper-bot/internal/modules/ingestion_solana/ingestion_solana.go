@@ -226,6 +226,38 @@ func txFeePayer(tx *TransactionResult) string {
 	return tx.AccountKeys[0]
 }
 
+// ResolveCreatorIdentity fills an empty CreatorAddress from fallback when
+// fallback is a non-factory wallet. Returns true when a resolution occurred.
+func ResolveCreatorIdentity(dto *contracts.MarketDataDTO, fallback string) bool {
+	if dto == nil || dto.CreatorAddress != "" {
+		return false
+	}
+	if fallback == "" || IsFactoryProgram(fallback) {
+		return false
+	}
+	dto.CreatorAddress = fallback
+	return true
+}
+
+// applyCreatorIdentity resolves empty creators from fallback, then enforces
+// the factory-program guard.
+func (m *Module) applyCreatorIdentity(dto *contracts.MarketDataDTO, fallback string) {
+	if dto == nil {
+		return
+	}
+	if ResolveCreatorIdentity(dto, fallback) {
+		m.logger.Debug("ingestion_creator_identity_resolved",
+			"chain", dto.Chain,
+			"token", dto.TokenAddress,
+			"creator", dto.CreatorAddress,
+			"market", dto.Market,
+			"tx", dto.TxHash,
+			"source", "fee_payer_fallback",
+		)
+	}
+	m.applyCreatorGuard(dto, fallback)
+}
+
 // applyCreatorGuard enforces that dto.CreatorAddress is never a known pump.fun
 // factory program ID. When a factory program is detected, it is replaced with
 // fallback (when valid) or cleared. Telemetry counters are incremented and a
@@ -264,7 +296,7 @@ func (m *Module) applyCreatorGuard(dto *contracts.MarketDataDTO, fallback string
 }
 
 // applyPreFilter checks the L0 pre-cohort filter (Task 25) for a DTO that has
-// already passed applyCreatorGuard. Returns true when the token should be
+// already passed applyCreatorIdentity. Returns true when the token should be
 // dropped (market_data_event MUST NOT be emitted); false when the token passes.
 //
 // Fail-open contract: if the reader is nil, the creator address is empty, the
@@ -352,6 +384,15 @@ func (m *Module) Start(ctx context.Context) error {
 				"program_id", prog.ProgramID,
 				"family", prog.Family,
 				"reason", "disabled_in_config",
+			)
+			continue
+		}
+		if !ProgramUsesStream(m.cfg, prog) {
+			m.logger.Info("ingestion_program_skipped",
+				"program_id", prog.ProgramID,
+				"family", prog.Family,
+				"reason", "delivery_webhook",
+				"ingestion_delivery", EffectiveGlobalDelivery(m.cfg),
 			)
 			continue
 		}
@@ -648,7 +689,7 @@ func (m *Module) runSubscribeLoop(ctx context.Context, prog config.SolanaProgram
 			go func(n LogsNotification, s int64) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if err := m.processNotification(ctx, n, prog, s, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip, &skippedUnknownInstruction, &raydiumInitFallbackFetch); err != nil {
+				if err := m.processNotification(ctx, n, prog, s, "", &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip, &skippedUnknownInstruction, &raydiumInitFallbackFetch); err != nil {
 					processErrors.Add(1)
 					m.logger.Warn("solana_ingestion_process_error",
 						"signature", n.Signature,
@@ -702,7 +743,7 @@ func (m *Module) handlePumpfunFromLogs(
 	// Guard: factory program IDs must never propagate as creator identity.
 	// event.User is already in dto.CreatorAddress; pass "" as no separate
 	// fallback exists when the event-derived user IS the factory program.
-	m.applyCreatorGuard(dto, "")
+	m.applyCreatorIdentity(dto, "")
 	if m.applySystemMintReject(dto) {
 		return
 	}
@@ -741,6 +782,13 @@ func (m *Module) handlePumpfunFromLogs(
 // so operators see real traffic without log flooding.
 const solanaLogSampleRate int64 = 100
 
+// ProcessLogsNotification normalizes and emits market_data_event DTOs for one
+// WS or webhook notification. Used by the stream loop and HTTP webhook ingress.
+func (m *Module) ProcessLogsNotification(ctx context.Context, notif LogsNotification, prog config.SolanaProgramConfig, transport string) error {
+	var emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip, skippedUnknownInstruction, raydiumInitFallbackFetch atomic.Int64
+	return m.processNotification(ctx, notif, prog, 0, transport, &emitted, &nilTx, &noInstrMatch, &normalizeSkip, &rateLimitSkip, &dtoNilSkip, &skippedUnknownInstruction, &raydiumInitFallbackFetch)
+}
+
 // processNotification fetches (or reuses embedded) transaction data and emits DTOs.
 // seq is the monotonically increasing counter used for 1-in-sampleRate sampling.
 func (m *Module) processNotification(
@@ -748,6 +796,7 @@ func (m *Module) processNotification(
 	notif LogsNotification,
 	prog config.SolanaProgramConfig,
 	seq int64,
+	transport string,
 	emitted, nilTx, noInstrMatch, normalizeSkip, rateLimitSkip, dtoNilSkip, skippedUnknownInstruction, raydiumInitFallbackFetch *atomic.Int64,
 ) error {
 	var tx *TransactionResult
@@ -847,7 +896,10 @@ func (m *Module) processNotification(
 				dtoNilSkip.Add(1)
 				continue
 			}
-			m.applyCreatorGuard(dto, txFeePayer(tx))
+			if transport != "" {
+				dto.Transport = transport
+			}
+			m.applyCreatorIdentity(dto, txFeePayer(tx))
 			if m.applySystemMintReject(dto) {
 				continue
 			}
@@ -870,6 +922,7 @@ func (m *Module) processNotification(
 				"name", dto.Name,
 				"tx", notif.Signature,
 				"slot", notif.Slot,
+				"transport", dto.Transport,
 			)
 		}
 		return instrMatched, nil

@@ -279,6 +279,37 @@ func TestProcess_PumpFunCreate_ZeroReserveNotRejected(t *testing.T) {
 	}
 }
 
+// TestProcess_PumpFunAMMCreatePool_ZeroReserveNotRejected verifies graduation
+// pool-creation events are exempt from missing_reserves like bonding-curve creates.
+func TestProcess_PumpFunAMMCreatePool_ZeroReserveNotRejected(t *testing.T) {
+	m := New(defaultDQConfig(), nil)
+	in := contracts.MarketDataDTO{
+		EventID:         "mkt-pf-amm-1",
+		TraceID:         "trace-pf-amm-1",
+		CorrelationID:   "corr-pf-amm-1",
+		VersionID:       "v1",
+		TokenAddress:    "BMcS31k3jDKfLdc9UmvA4drJKWK3kx3Jidvs8EJpump",
+		Chain:           "solana",
+		Market:          "solana-pumpfun-amm",
+		EventTopic:      "PumpFunAMMCreatePool",
+		ReserveBaseRaw:  "0",
+		ReserveTokenRaw: "0",
+		Reorged:         false,
+	}
+
+	out, err := m.Process(context.Background(), in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Decision == "REJECT" {
+		t.Errorf("PumpFunAMMCreatePool with zero reserves must not be REJECT; got Decision=%s RejectReasons=%v",
+			out.Decision, out.RejectReasons)
+	}
+	if contains(out.RejectReasons, "missing_reserves") {
+		t.Error("PumpFunAMMCreatePool must not produce a missing_reserves reject reason")
+	}
+}
+
 // TestProcess_NonLaunch_ZeroReserveStillRejected ensures the guard only
 // applies to new-launch events; existing behaviour for swaps/pool-inits is
 // preserved.

@@ -82,6 +82,17 @@ if [[ -z "${DASHBOARD_ALLOWED_OPERATORS:-}" ]]; then
 	echo "Set DASHBOARD_ALLOWED_OPERATORS=local-operator in .env"
 fi
 
+delivery_mode="$(echo "${SOLANA_INGESTION_DELIVERY:-stream}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$delivery_mode" == "hybrid" || "$delivery_mode" == "webhook" ]]; then
+	if is_placeholder "${HELIUS_WEBHOOK_SECRET:-}" || [[ -z "${HELIUS_WEBHOOK_SECRET:-}" ]]; then
+		new_secret="$(gen_secret)"
+		set_env_key HELIUS_WEBHOOK_SECRET "$new_secret"
+		HELIUS_WEBHOOK_SECRET="$new_secret"
+		patched=1
+		echo "Generated HELIUS_WEBHOOK_SECRET in .env"
+	fi
+fi
+
 if [[ "$patched" -eq 1 ]]; then
 	echo "Review ${ENV_FILE} — add RPC keys and wallets before production use."
 	set -a
@@ -90,4 +101,4 @@ if [[ "$patched" -eq 1 ]]; then
 	set +a
 fi
 
-export SNIPER_DB_PASSWORD DASHBOARD_API_KEY DASHBOARD_ALLOWED_OPERATORS
+export SNIPER_DB_PASSWORD DASHBOARD_API_KEY DASHBOARD_ALLOWED_OPERATORS HELIUS_WEBHOOK_SECRET

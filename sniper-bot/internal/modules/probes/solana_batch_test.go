@@ -66,7 +66,7 @@ func TestFetchBatchAccounts_PartialMissing_FailClosed(t *testing.T) {
 		TokenAddress: mint,
 		PoolAddress:  pool,
 	}
-	out := ApplyBatchAccounts(context.Background(), in, res, nil, true, true)
+	out := ApplyBatchAccounts(context.Background(), in, res, nil, 0, true, true)
 	if !out.SolanaAuthoritiesKnown {
 		t.Fatal("expected authorities known from batch mint")
 	}
@@ -99,7 +99,7 @@ func TestApplyBatchAccounts_FullSuccess(t *testing.T) {
 		TokenAddress: mint,
 		PoolAddress:  pool,
 	}
-	out := ApplyBatchAccounts(context.Background(), in, res, fixedSolUsd{px: 150.0}, true, true)
+	out := ApplyBatchAccounts(context.Background(), in, res, fixedSolUsd{px: 150.0}, 0, true, true)
 	if !out.SolanaAuthoritiesKnown {
 		t.Fatal("expected SolanaAuthoritiesKnown")
 	}

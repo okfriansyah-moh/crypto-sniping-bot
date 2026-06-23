@@ -66,17 +66,10 @@ func RunIngestionSolana(
 		}
 	}
 
-	emit := buildSolanaEmitter(ctx, adapter, versionID, logger)
+	emit := BuildSolanaEmitter(ctx, adapter, versionID, logger)
 
-	mod := ingestion_solana.New(solanaCfg, versionID, emit, logger)
-	if client != nil {
-		mod.WithClient(client)
-	}
-	if solUsdSource != nil {
-		mod.WithSolUsdSource(solUsdSource)
-	}
+	mod := NewSolanaIngestionModule(adapter, solanaCfg, versionID, emit, client, solUsdSource, logger)
 	if solanaCfg.PreFilter.Enabled && solanaCfg.PreFilter.MaxCreatorPrevTokenCount > 0 {
-		mod.WithCreatorProfileReader(newAdapterCreatorProfileReader(adapter))
 		logger.Info("solana_ingestion_pre_filter_enabled",
 			"max_creator_prev_token_count", solanaCfg.PreFilter.MaxCreatorPrevTokenCount,
 		)
@@ -88,9 +81,42 @@ func RunIngestionSolana(
 	return ctx.Err()
 }
 
+// NewSolanaIngestionModule constructs a configured Solana ingestion module.
+// Shared by the stream worker and webhook HTTP ingress.
+func NewSolanaIngestionModule(
+	adapter database.Adapter,
+	solanaCfg config.SolanaConfig,
+	versionID string,
+	emit ingestion_solana.EventEmitter,
+	client ingestion_solana.SolanaRPCClient,
+	solUsdSource ingestion_solana.SolUsdSource,
+	logger *slog.Logger,
+) *ingestion_solana.Module {
+	mod := ingestion_solana.New(solanaCfg, versionID, emit, logger)
+	if client != nil {
+		mod.WithClient(client)
+	}
+	if solUsdSource != nil {
+		mod.WithSolUsdSource(solUsdSource)
+	}
+	if solanaCfg.PreFilter.Enabled && solanaCfg.PreFilter.MaxCreatorPrevTokenCount > 0 {
+		mod.WithCreatorProfileReader(newAdapterCreatorProfileReader(adapter))
+	}
+	return mod
+}
+
+// BuildSolanaEmitter returns an EventEmitter that persists MarketDataDTOs to the adapter.
+func BuildSolanaEmitter(
+	_ context.Context,
+	adapter database.Adapter,
+	versionID string,
+	logger *slog.Logger,
+) ingestion_solana.EventEmitter {
+	return buildSolanaEmitter(adapter, versionID, logger)
+}
+
 // buildSolanaEmitter returns an EventEmitter that persists MarketDataDTOs to the adapter.
 func buildSolanaEmitter(
-	_ context.Context,
 	adapter database.Adapter,
 	versionID string,
 	logger *slog.Logger,

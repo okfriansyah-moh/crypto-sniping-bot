@@ -1299,6 +1299,12 @@ type solanaTransactionJSON struct {
 	} `json:"meta"`
 }
 
+// ParseGetTransactionResponse converts a getTransaction-style JSON blob into a
+// TransactionResult. Exported for webhook ingress and tests.
+func ParseGetTransactionResponse(signature string, raw json.RawMessage) (*ingestion_solana.TransactionResult, error) {
+	return parseGetTransactionResponse(signature, raw)
+}
+
 // parseGetTransactionResponse converts the raw JSON from getTransaction into
 // a TransactionResult suitable for the normalizer.
 func parseGetTransactionResponse(signature string, raw json.RawMessage) (*ingestion_solana.TransactionResult, error) {

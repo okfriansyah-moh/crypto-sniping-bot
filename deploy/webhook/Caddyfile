@@ -1,0 +1,13 @@
+# TLS reverse proxy for Helius webhook ingress.
+# Set WEBHOOK_DOMAIN in .env (e.g. sniper.example.com).
+# DNS A record must point at your static IP; forward ports 80 and 443 to this host.
+
+{$WEBHOOK_DOMAIN} {
+	handle /webhooks/helius* {
+		reverse_proxy sniper-bot:8080
+	}
+	handle /health {
+		reverse_proxy sniper-bot:8080
+	}
+	respond "not found" 404
+}

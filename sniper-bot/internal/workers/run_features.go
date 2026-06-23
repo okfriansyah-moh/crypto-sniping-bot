@@ -166,6 +166,11 @@ func (w *FeaturesWorker) fetchMarketSnapshot(
 	}
 	md, err := w.adapter.GetMarketData(ctx, mdID)
 	if err != nil || md == nil {
+		if dq.TokenAddress != "" {
+			md, err = w.adapter.GetLatestMarketDataForToken(ctx, dq.Chain, dq.TokenAddress)
+		}
+	}
+	if err != nil || md == nil {
 		w.logger.Warn("features_worker_market_data_unavailable",
 			"event_id", evt.EventID,
 			"market_data_id", mdID,

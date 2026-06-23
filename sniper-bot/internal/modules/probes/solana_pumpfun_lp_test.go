@@ -86,6 +86,26 @@ func TestSolanaPumpfunLpProbe_HappyPath_ComputesLiquidityUsd(t *testing.T) {
 	}
 }
 
+func TestSolanaPumpfunLpProbe_NoSolPrice_FallbackUsd_ComputesLiquidity(t *testing.T) {
+	pool := "PoolFallback"
+	curve := buildPumpfunCurve(30_000_000_000, 0, 800_000_000_000_000, 0, 0, false)
+	rpc := &stubSolanaRPC{accounts: map[string]*SolanaAccountData{
+		pool: {DataB64: base64.StdEncoding.EncodeToString(curve)},
+	}}
+	probe := NewSolanaPumpfunLpProbeWithFallback(rpc, stubSolUsd{ok: false}, 150.0, SolanaPumpfunLpConfig{Enabled: true, TimeoutMs: 100}, nil)
+	in := contracts.MarketDataDTO{Chain: "solana", Market: "solana-pumpfun", PoolAddress: pool}
+	out, err := probe.Probe(context.Background(), in)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if !out.LpStatsKnown {
+		t.Fatal("expected LpStatsKnown=true with fallback SOL price")
+	}
+	if out.LiquidityUsd < 4499 || out.LiquidityUsd > 4501 {
+		t.Fatalf("expected liquidity ~4500 from fallback, got %f", out.LiquidityUsd)
+	}
+}
+
 func TestSolanaPumpfunLpProbe_NoSolPrice_LeavesLpStatsUnknown(t *testing.T) {
 	pool := "Pool2"
 	curve := buildPumpfunCurve(1, 1, 1, 1, 0, false)
@@ -99,7 +119,7 @@ func TestSolanaPumpfunLpProbe_NoSolPrice_LeavesLpStatsUnknown(t *testing.T) {
 		t.Fatalf("probe: %v", err)
 	}
 	if out.LpStatsKnown {
-		t.Fatal("LpStatsKnown must NOT flip true without a SOL price")
+		t.Fatal("LpStatsKnown must NOT flip true without a SOL price or fallback")
 	}
 	if out.ReserveBaseRaw != "2" {
 		t.Fatalf("reserves should still be populated, got %s", out.ReserveBaseRaw)

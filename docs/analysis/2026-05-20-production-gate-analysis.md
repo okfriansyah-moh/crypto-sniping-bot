@@ -467,6 +467,8 @@ old before they can even be approved. Being 0.5 seconds later on detection means
 
 **Step 3**: Configure the webhook:
 
+> **Operator runbook (current implementation):** see [`docs/guides/HELIUS_WEBHOOK_SETUP.md`](../guides/HELIUS_WEBHOOK_SETUP.md) for ngrok, Cloudflare Tunnel, and Caddy exposure. Handler: `POST /webhooks/helius` on sniper `:8080`.
+
 - **Webhook URL**: `https://your-server.com/webhooks/helius` (your bot's HTTP endpoint)
 - **Transaction Type**: Select "Program Activity"
 - **Program ID**: `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8` (Raydium V4)

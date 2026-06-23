@@ -73,6 +73,7 @@ type MarketProbesWorker struct {
 	rescanSkipPumpfunLpPhase2 bool
 	batchRPC                  probes.SolanaProbeRPCClient
 	batchSolUsd               probes.SolUsdSource
+	batchSolUsdFallback       float64
 	batchAuthoritiesEnabled   bool
 	batchPumpfunLpEnabled     bool
 	batchAuthoritiesTimeoutMs int
@@ -161,11 +162,13 @@ func (w *MarketProbesWorker) WithBatchAccounts(
 	enabled bool,
 	rpc probes.SolanaProbeRPCClient,
 	solUsd probes.SolUsdSource,
+	fallbackUsd float64,
 	cfg BatchAccountsConfig,
 ) *MarketProbesWorker {
 	w.batchAccounts = enabled
 	w.batchRPC = rpc
 	w.batchSolUsd = solUsd
+	w.batchSolUsdFallback = fallbackUsd
 	w.rescanSkipPumpfunLpPhase2 = cfg.RescanSkipPumpfunLpPhase2
 	w.batchAuthoritiesEnabled = cfg.AuthoritiesEnabled
 	w.batchPumpfunLpEnabled = cfg.PumpfunLpEnabled
@@ -292,6 +295,25 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 	isRescanEvent := strings.HasPrefix(enriched.Transport, "rescan_")
 	if isRescanEvent {
 		w.hydrateEnrichedFromLatest(ctx, &enriched)
+		if probePassComplete(mandatoryKnownMissing(enriched, w.probeCompletion, w.dqRuntime)) {
+			enriched.EventID = contracts.ContentIDFromString(fmt.Sprintf("md_enriched:%s", md.EventID))
+			if err := w.adapter.InsertMarketData(ctx, enriched); err != nil {
+				w.logger.Warn("market_probes_persist_failed",
+					"event_id", enriched.EventID,
+					"trace_id", evt.TraceID,
+					"error", err,
+				)
+			}
+			w.logger.Info("rescan_probe_skip_complete",
+				"event_id", evt.EventID,
+				"token", md.TokenAddress,
+				"transport", enriched.Transport,
+			)
+			return makeOutputEvent(
+				enriched.EventID, enriched, MarketDataEnrichedEventType,
+				evt.TraceID, evt.CorrelationID, evt.EventID, evt.VersionID,
+			)
+		}
 	}
 
 	probeNames := w.enabledProbeNames(isRescanEvent, enriched.Transport)
@@ -387,6 +409,7 @@ func (w *MarketProbesWorker) Process(ctx context.Context, evt *database.Event) (
 				enriched = probes.ApplyBatchAccounts(
 					ctx, enriched, res,
 					w.batchSolUsd,
+					w.batchSolUsdFallback,
 					w.batchAuthoritiesEnabled,
 					w.batchPumpfunLpEnabled,
 				)
@@ -534,7 +557,7 @@ func (w *MarketProbesWorker) deferProbePending(
 	md contracts.MarketDataDTO,
 	evt *database.Event,
 ) error {
-	return w.enqueueProbePending(ctx, md, evt, 0)
+	return w.enqueueProbePending(ctx, md, evt, 0, true)
 }
 
 func (w *MarketProbesWorker) deferProbeIncomplete(
@@ -543,7 +566,7 @@ func (w *MarketProbesWorker) deferProbeIncomplete(
 	evt *database.Event,
 	_ []string,
 ) error {
-	return w.enqueueProbePending(ctx, md, evt, 1)
+	return w.enqueueProbePending(ctx, md, evt, 1, false)
 }
 
 func (w *MarketProbesWorker) enqueueProbePending(
@@ -551,6 +574,7 @@ func (w *MarketProbesWorker) enqueueProbePending(
 	md contracts.MarketDataDTO,
 	evt *database.Event,
 	priorityBoost int,
+	budgetScoped bool,
 ) error {
 	dueAt := time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
 	if w.probeBudget != nil {
@@ -563,6 +587,9 @@ func (w *MarketProbesWorker) enqueueProbePending(
 		priority = 1
 	}
 	pendingID := database.ProbePendingID(evt.EventID, dueAt)
+	if budgetScoped {
+		pendingID = database.ProbePendingBudgetID(md.Chain, md.TokenAddress, dueAt)
+	}
 	return w.adapter.EnqueueProbePending(ctx, database.ProbePendingEnqueue{
 		PendingID:     pendingID,
 		SourceEventID: evt.EventID,
@@ -714,4 +741,6 @@ func (w *MarketProbesWorker) hydrateEnrichedFromLatest(ctx context.Context, md *
 		md.MintAuthorityRenounced = latest.MintAuthorityRenounced
 		md.FreezeAuthorityRenounced = latest.FreezeAuthorityRenounced
 	}
+	mergeIdentityFieldsFromLatest(md, latest)
+	mergeLiquidityFieldsFromLatest(md, latest)
 }

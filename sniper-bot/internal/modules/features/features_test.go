@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"crypto-sniping-bot/internal/app/config"
 	"crypto-sniping-bot/shared/contracts"
 )
 
@@ -96,6 +97,29 @@ func TestProcess_HigherLiquidityUsd_HigherLiquidityScore(t *testing.T) {
 	}
 	if outLow.LiquidityUsdRaw != 1_000 || outHigh.LiquidityUsdRaw != 1_000_000 {
 		t.Errorf("raw liquidity not propagated: low=%f high=%f", outLow.LiquidityUsdRaw, outHigh.LiquidityUsdRaw)
+	}
+}
+
+func TestProcess_ReserveBaseRawDerivesLiquidityScore(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Solana.SolEstimatedPriceUsd = 150.0
+	m := New(cfg)
+	in := passedDQ()
+
+	// 30 SOL virtual reserve without LiquidityUsd — mirrors pump.fun cold-start.
+	snap := MarketSnapshot{
+		Market:         "solana-pumpfun-amm",
+		ReserveBaseRaw: "30000000000",
+	}
+	out, err := m.ProcessWithContext(context.Background(), in, snap, BaselineSnapshot{}, "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.LiquidityScore <= 0.55 {
+		t.Fatalf("expected liquidity_score > 0.55 from reserve derivation, got %f", out.LiquidityScore)
+	}
+	if out.LiquidityUsdRaw != 4500 {
+		t.Fatalf("expected derived LiquidityUsdRaw=4500, got %f", out.LiquidityUsdRaw)
 	}
 }
 

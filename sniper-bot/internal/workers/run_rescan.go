@@ -281,6 +281,8 @@ func hydrateRescanDTO(ctx context.Context, adapter database.Adapter, dto contrac
 		out.MintAuthorityRenounced = latest.MintAuthorityRenounced
 		out.FreezeAuthorityRenounced = latest.FreezeAuthorityRenounced
 	}
+	mergeIdentityFieldsFromLatest(&out, latest)
+	mergeLiquidityFieldsFromLatest(&out, latest)
 	return out
 }
 

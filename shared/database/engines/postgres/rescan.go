@@ -84,7 +84,10 @@ SELECT DISTINCT ON (md.token_address)
     COALESCE(md.holder_dist_known, FALSE),
     COALESCE(md.holder_count, 0),
     COALESCE(md.top5_holder_pct, 0.0),
-    COALESCE(md.pool_age_seconds, 0)
+    COALESCE(md.pool_age_seconds, 0),
+    COALESCE(md.creator_address, ''),
+    COALESCE(md.symbol, ''),
+    COALESCE(md.name, '')
 FROM market_data md
 JOIN latest_dq dq ON dq.token_address = md.token_address
 LEFT JOIN latest_lifecycle ll ON ll.token_address = md.token_address
@@ -201,6 +204,9 @@ func (d *DB) GetTokensForRescan(ctx context.Context, q database.RescanQuery) ([]
 			&dto.HolderCount,
 			&dto.Top5HolderPct,
 			&dto.PoolAgeSeconds,
+			&dto.CreatorAddress,
+			&dto.Symbol,
+			&dto.Name,
 		); err != nil {
 			return nil, fmt.Errorf("postgres.GetTokensForRescan: scan: %w", err)
 		}

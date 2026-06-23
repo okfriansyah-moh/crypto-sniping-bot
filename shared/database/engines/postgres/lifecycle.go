@@ -410,14 +410,27 @@ ORDER BY cnt DESC, reason ASC
 LIMIT 20`
 
 const dqProbeCompletenessSQL = `
+WITH richest_per_token AS (
+    SELECT DISTINCT ON (token_address)
+        holder_dist_known,
+        lp_stats_known,
+        creator_address
+    FROM market_data
+    WHERE ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
+      AND ($2 = '' OR chain = $2)
+    ORDER BY token_address,
+        (CASE WHEN COALESCE(holder_dist_known, FALSE) THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(lp_stats_known, FALSE) THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(creator_address, '') <> '' THEN 1 ELSE 0 END) DESC,
+        CASE WHEN COALESCE(transport, '') LIKE 'rescan_%' THEN 0 ELSE 1 END DESC,
+        ingested_at DESC NULLS LAST
+)
 SELECT
     COALESCE(100.0 * AVG(CASE WHEN holder_dist_known THEN 1.0 ELSE 0.0 END), 0),
     COALESCE(100.0 * AVG(CASE WHEN lp_stats_known THEN 1.0 ELSE 0.0 END), 0),
     COALESCE(100.0 * AVG(CASE WHEN COALESCE(creator_address, '') <> '' THEN 1.0 ELSE 0.0 END), 0),
     COALESCE(100.0 * AVG(CASE WHEN holder_dist_known AND lp_stats_known THEN 1.0 ELSE 0.0 END), 0)
-FROM market_data
-WHERE ingested_at >= NOW() - ($1 * INTERVAL '1 hour')
-  AND ($2 = '' OR chain = $2)`
+FROM richest_per_token`
 
 const dqFairChanceSkipSQL = `
 SELECT COUNT(*)

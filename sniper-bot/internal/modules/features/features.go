@@ -14,6 +14,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 
 	"crypto-sniping-bot/shared/contracts"
 	"crypto-sniping-bot/internal/app/config"
@@ -34,9 +36,10 @@ const (
 
 // Module is the feature extraction engine.
 type Module struct {
-	normalizerCfg NormalizerConfig
-	stabilityCfg  StabilityConfig
-	tokenAgeCfg   ageConfig
+	normalizerCfg        NormalizerConfig
+	stabilityCfg         StabilityConfig
+	tokenAgeCfg          ageConfig
+	solEstimatedPriceUsd float64
 }
 
 type ageConfig struct {
@@ -83,6 +86,9 @@ func New(cfg *config.Config) *Module {
 			confidenceTg: a.ConfidenceTarget,
 		}
 	}
+	if cfg.Solana.SolEstimatedPriceUsd > 0 {
+		m.solEstimatedPriceUsd = cfg.Solana.SolEstimatedPriceUsd
+	}
 	return m
 }
 
@@ -115,7 +121,7 @@ func (m *Module) ProcessWithContext(
 	}
 
 	// ── Compute raw signals ───────────────────────────────────────
-	rawLiquidity, liquidityKnown := rawLiquiditySize(snap)
+	rawLiquidity, liquidityKnown := m.rawLiquiditySize(snap)
 	rawTxVel, txVelKnown := rawTxVelocity(snap)
 	rawHolderDist, holderDistKnown := rawHolderDistribution(dq, snap)
 	rawWalletEntropy, walletEntropyKnown := rawWalletEntropy(dq, snap)
@@ -214,7 +220,7 @@ func (m *Module) ProcessWithContext(
 		VolumeMomentum:     volumeMomentum,
 		PriceMomentum:      priceMomentum,
 
-		LiquidityUsdRaw:    snap.LiquidityUsd,
+		LiquidityUsdRaw:    m.derivedLiquidityUsd(snap),
 		TxVelocity30sRaw:   float64(snap.TxCount1m),
 		HolderCountRaw:     int64(holderCountRaw(dq, snap)),
 		TokenAgeSecondsRaw: int64(snap.PoolAgeSeconds),
@@ -287,7 +293,7 @@ func (m *Module) applyStabilityGate(
 // the same raw inputs the module just consumed.
 func (m *Module) RawSignalsForBaseline(dq contracts.DataQualityDTO, snap MarketSnapshot) map[string]float64 {
 	out := make(map[string]float64, 8)
-	if v, ok := rawLiquiditySize(snap); ok {
+	if v, ok := m.rawLiquiditySize(snap); ok {
 		out[SignalLiquidity] = v
 	}
 	if v, ok := rawTxVelocity(snap); ok {
@@ -312,16 +318,38 @@ func (m *Module) RawSignalsForBaseline(dq contracts.DataQualityDTO, snap MarketS
 // Each returns (raw_value, known). When known is false, downstream
 // confidence is materially reduced.
 
-func rawLiquiditySize(s MarketSnapshot) (float64, bool) {
-	// Use any positive LiquidityUsd regardless of LpStatsKnown.
-	// LpStatsKnown=false only means the Pyth SOL/USD feed was unavailable;
-	// the on-chain SOL reserve was still read. Blocking on LpStatsKnown
-	// causes sigmoid(0)=0.5 < MinLiquidityScore=0.55 → edge_strength=0
-	// for every token when the Pyth cache expires after 60 s.
-	if s.LiquidityUsd <= 0 {
+func (m *Module) derivedLiquidityUsd(snap MarketSnapshot) float64 {
+	if snap.LiquidityUsd > 0 {
+		return snap.LiquidityUsd
+	}
+	if m.solEstimatedPriceUsd <= 0 {
+		return 0
+	}
+	lamports, err := parseReserveLamports(snap.ReserveBaseRaw)
+	if err != nil || lamports <= 0 {
+		return 0
+	}
+	return (float64(lamports) / 1e9) * m.solEstimatedPriceUsd
+}
+
+func parseReserveLamports(raw string) (uint64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "0" {
+		return 0, errEmptyDecimal
+	}
+	v, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+func (m *Module) rawLiquiditySize(s MarketSnapshot) (float64, bool) {
+	liq := m.derivedLiquidityUsd(s)
+	if liq <= 0 {
 		return 0, false
 	}
-	return math.Log1p(s.LiquidityUsd), true
+	return math.Log1p(liq), true
 }
 
 func rawTxVelocity(s MarketSnapshot) (float64, bool) {

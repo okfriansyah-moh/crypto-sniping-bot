@@ -33,7 +33,13 @@ INSERT INTO probe_pending_queue (
     pending_id, source_event_id, token_address, chain, market,
     priority, payload, enqueued_at, due_at, status, attempt_count, last_error
 ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, 'pending', 0, '')
-ON CONFLICT (pending_id) DO NOTHING`
+ON CONFLICT (pending_id) DO UPDATE SET
+    source_event_id = EXCLUDED.source_event_id,
+    due_at          = EXCLUDED.due_at,
+    priority        = LEAST(probe_pending_queue.priority, EXCLUDED.priority),
+    payload         = EXCLUDED.payload,
+    enqueued_at     = EXCLUDED.enqueued_at
+WHERE probe_pending_queue.status = 'pending'`
 
 	now := time.Now().UTC()
 	if req.EnqueuedAt.IsZero() {
@@ -260,7 +266,12 @@ SELECT
     COALESCE(creator_address, '')
 FROM market_data
 WHERE chain = $1 AND token_address = $2
-ORDER BY ingested_at DESC NULLS LAST
+ORDER BY
+    (CASE WHEN COALESCE(holder_dist_known, FALSE) THEN 1 ELSE 0 END
+     + CASE WHEN COALESCE(lp_stats_known, FALSE) THEN 1 ELSE 0 END
+     + CASE WHEN COALESCE(creator_address, '') <> '' THEN 1 ELSE 0 END) DESC,
+    CASE WHEN COALESCE(transport, '') LIKE 'rescan_%' THEN 0 ELSE 1 END DESC,
+    ingested_at DESC NULLS LAST
 LIMIT 1`
 
 	var dto contracts.MarketDataDTO

@@ -85,20 +85,27 @@ type SolanaPumpfunLpConfig struct {
 // by ingestion with live bonding-curve reserves and a USD liquidity
 // figure derived from the live SOL/USD feed. Skips non-pumpfun markets.
 type SolanaPumpfunLpProbe struct {
-	rpc    SolanaProbeRPCClient
-	solUsd SolUsdSource
-	cfg    SolanaPumpfunLpConfig
-	logger *slog.Logger
+	rpc         SolanaProbeRPCClient
+	solUsd      SolUsdSource
+	fallbackUsd float64
+	cfg         SolanaPumpfunLpConfig
+	logger      *slog.Logger
 }
 
 func NewSolanaPumpfunLpProbe(rpc SolanaProbeRPCClient, solUsd SolUsdSource, cfg SolanaPumpfunLpConfig, logger *slog.Logger) *SolanaPumpfunLpProbe {
+	return NewSolanaPumpfunLpProbeWithFallback(rpc, solUsd, 0, cfg, logger)
+}
+
+// NewSolanaPumpfunLpProbeWithFallback wires the probe with a static SOL/USD
+// estimate used when the live price feed is unavailable.
+func NewSolanaPumpfunLpProbeWithFallback(rpc SolanaProbeRPCClient, solUsd SolUsdSource, fallbackUsd float64, cfg SolanaPumpfunLpConfig, logger *slog.Logger) *SolanaPumpfunLpProbe {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if cfg.Commitment == "" {
 		cfg.Commitment = "confirmed"
 	}
-	return &SolanaPumpfunLpProbe{rpc: rpc, solUsd: solUsd, cfg: cfg, logger: logger}
+	return &SolanaPumpfunLpProbe{rpc: rpc, solUsd: solUsd, fallbackUsd: fallbackUsd, cfg: cfg, logger: logger}
 }
 
 func (p *SolanaPumpfunLpProbe) Name() string { return "solana_pumpfun_lp" }
@@ -171,14 +178,13 @@ func (p *SolanaPumpfunLpProbe) Probe(ctx context.Context, in contracts.MarketDat
 	// price lookup to time out whenever the RPC fetch consumed most of the
 	// 300 ms budget, keeping the cache perpetually cold and leaving
 	// LiquidityUsd=0 for every token.
-	if p.solUsd != nil {
-		if px, ok := p.solUsd.SolUsd(ctx); ok && px > 0 {
-			solFloat, _ := strconv.ParseFloat(solReserves.String(), 64)
-			if solFloat > 0 {
-				// Normal path: on-chain reserve is non-zero, use it.
-				out.LiquidityUsd = (solFloat / lamportsPerSol) * px
-				out.LpStatsKnown = true
-			} else {
+	if px, ok := solPriceOrFallback(ctx, p.solUsd, p.fallbackUsd); ok {
+		solFloat, _ := strconv.ParseFloat(solReserves.String(), 64)
+		if solFloat > 0 {
+			// Normal path: on-chain reserve is non-zero, use it.
+			out.LiquidityUsd = (solFloat / lamportsPerSol) * px
+			out.LpStatsKnown = true
+		} else {
 				// solReserves = 0 means the bonding curve account was
 				// queried before it was fully initialised (race between the
 				// CREATE transaction confirmation and this RPC call). Do NOT
@@ -194,7 +200,6 @@ func (p *SolanaPumpfunLpProbe) Probe(ctx context.Context, in contracts.MarketDat
 					"real_sol_reserves", state.RealSolReserves,
 				)
 			}
-		}
 	}
 
 	// Set TotalSupply when ingestion missed it.
@@ -255,6 +260,46 @@ func (p *SolanaPumpfunLpProbe) probeAMM(ctx context.Context, in contracts.Market
 	out := in
 	out.TotalSupply = float64(rawSupply) / divisor
 	out.TotalSupplyKnown = true
-	// LP reserves for AMM are not bonding-curve layout; leave LpStatsKnown as ingestion set it.
+
+	pool := strings.TrimSpace(in.PoolAddress)
+	if pool != "" && !out.LpStatsKnown {
+		if enriched, ok := p.enrichAMMFromPool(cctx, out, pool); ok {
+			out = enriched
+		}
+	}
 	return out, nil
+}
+
+// enrichAMMFromPool reads graduated pump.fun AMM vault balances and derives
+// ReserveBaseRaw + LiquidityUsd from the quote (SOL) vault.
+func (p *SolanaPumpfunLpProbe) enrichAMMFromPool(ctx context.Context, in contracts.MarketDataDTO, pool string) (contracts.MarketDataDTO, bool) {
+	acc, err := p.rpc.GetAccountInfo(ctx, pool, p.cfg.Commitment)
+	if err != nil || acc == nil {
+		return in, false
+	}
+	raw, err := base64.StdEncoding.DecodeString(acc.DataB64)
+	if err != nil || len(raw) < pumpfunAMMQuoteVaultOffset+32 {
+		return in, false
+	}
+	quoteVault := pubkeyFromBytes(raw[pumpfunAMMQuoteVaultOffset : pumpfunAMMQuoteVaultOffset+32])
+	if quoteVault == "" {
+		return in, false
+	}
+	vaultAcc, err := p.rpc.GetAccountInfo(ctx, quoteVault, p.cfg.Commitment)
+	if err != nil || vaultAcc == nil {
+		return in, false
+	}
+	solLamports, err := decodeSPLTokenAmount(vaultAcc.DataB64)
+	if err != nil || solLamports == 0 {
+		return in, false
+	}
+	px, ok := solPriceOrFallback(ctx, p.solUsd, p.fallbackUsd)
+	if !ok {
+		return in, false
+	}
+	out := in
+	out.ReserveBaseRaw = strconv.FormatUint(solLamports, 10)
+	out.LiquidityUsd = liquidityUsdFromSolLamports(solLamports, px)
+	out.LpStatsKnown = true
+	return out, true
 }

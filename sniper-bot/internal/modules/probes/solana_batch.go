@@ -108,8 +108,9 @@ func FetchBatchAccounts(ctx context.Context, rpc SolanaProbeRPCClient, req Batch
 // ApplyBatchAccounts enriches the DTO from batch-fetched accounts. Accounts
 // that are nil or fail decode leave the corresponding *Known flags false
 // (fail-closed). solUsd may be nil — LP USD liquidity is skipped without a
-// price source, matching the individual probe behaviour.
-func ApplyBatchAccounts(ctx context.Context, in contracts.MarketDataDTO, res *BatchAccountResult, solUsd SolUsdSource, authoritiesEnabled, pumpfunLpEnabled bool) contracts.MarketDataDTO {
+// price source, matching the individual probe behaviour. fallbackUsd is the
+// static SOL/USD estimate when the live feed is unavailable.
+func ApplyBatchAccounts(ctx context.Context, in contracts.MarketDataDTO, res *BatchAccountResult, solUsd SolUsdSource, fallbackUsd float64, authoritiesEnabled, pumpfunLpEnabled bool) contracts.MarketDataDTO {
 	if res == nil {
 		return in
 	}
@@ -120,7 +121,7 @@ func ApplyBatchAccounts(ctx context.Context, in contracts.MarketDataDTO, res *Ba
 		}
 	}
 	if pumpfunLpEnabled && res.Pool != nil && isPumpfunBondingCurveMarket(in.Market) {
-		if enriched, ok := enrichPumpfunLpFromAccount(ctx, out, res.Pool, solUsd); ok {
+		if enriched, ok := enrichPumpfunLpFromAccount(ctx, out, res.Pool, solUsd, fallbackUsd); ok {
 			out = enriched
 		}
 	}
@@ -181,7 +182,7 @@ func enrichAuthoritiesFromAccount(in contracts.MarketDataDTO, acc *SolanaAccount
 	return out, true
 }
 
-func enrichPumpfunLpFromAccount(ctx context.Context, in contracts.MarketDataDTO, acc *SolanaAccountData, solUsd SolUsdSource) (contracts.MarketDataDTO, bool) {
+func enrichPumpfunLpFromAccount(ctx context.Context, in contracts.MarketDataDTO, acc *SolanaAccountData, solUsd SolUsdSource, fallbackUsd float64) (contracts.MarketDataDTO, bool) {
 	if acc == nil {
 		return in, false
 	}
@@ -203,13 +204,11 @@ func enrichPumpfunLpFromAccount(ctx context.Context, in contracts.MarketDataDTO,
 	out.ReserveBaseRaw = solReserves.String()
 	out.ReserveTokenRaw = tokenReserves.String()
 
-	if solUsd != nil {
-		if px, ok := solUsd.SolUsd(ctx); ok && px > 0 {
-			solFloat, _ := strconv.ParseFloat(solReserves.String(), 64)
-			if solFloat > 0 {
-				out.LiquidityUsd = (solFloat / lamportsPerSol) * px
-				out.LpStatsKnown = true
-			}
+	if px, ok := solPriceOrFallback(ctx, solUsd, fallbackUsd); ok {
+		solFloat, _ := strconv.ParseFloat(solReserves.String(), 64)
+		if solFloat > 0 {
+			out.LiquidityUsd = (solFloat / lamportsPerSol) * px
+			out.LpStatsKnown = true
 		}
 	}
 

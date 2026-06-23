@@ -147,13 +147,13 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 	var rejectReasons []string
 	flags := []string{}
 
-	isNewLaunch := in.EventTopic == "PumpFunCreate"
+	launchExempt := isLaunchExemptReserve(in)
 
-	if !isNewLaunch && (in.ReserveBaseRaw == "" || in.ReserveBaseRaw == "0") {
+	if !launchExempt && (in.ReserveBaseRaw == "" || in.ReserveBaseRaw == "0") {
 		rejectReasons = append(rejectReasons, "missing_reserves")
 	}
 	isFakeLiquidityStructural := false
-	if !isNewLaunch && in.ReserveBaseRaw != "" && in.ReserveBaseRaw != "0" {
+	if !launchExempt && in.ReserveBaseRaw != "" && in.ReserveBaseRaw != "0" {
 		reserveBase, ok := new(big.Int).SetString(in.ReserveBaseRaw, 10)
 		minReserve, _ := new(big.Int).SetString(m.cfg.MinReserveBaseWei, 10)
 		if ok && minReserve != nil && reserveBase.Cmp(minReserve) < 0 {
@@ -362,10 +362,10 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		rejectReasons = append(rejectReasons, "copycat_name")
 	}
 	// Structural reject: insufficient confirmed holder count.
-	// Brand-new launches (PumpFunCreate events) are exempt — holder distribution
-	// takes time to settle and would produce false rejections at the moment of
-	// token creation.
-	if !isNewLaunch && m.runtime != nil && m.runtime.Thresholds.MinHolderCount > 0 {
+	// Brand-new launches (PumpFunCreate / PumpFunAMMCreatePool) are exempt —
+	// holder distribution takes time to settle and would produce false
+	// rejections at the moment of token creation or graduation.
+	if !launchExempt && m.runtime != nil && m.runtime.Thresholds.MinHolderCount > 0 {
 		if in.HolderDistKnown && in.HolderCount < m.runtime.Thresholds.MinHolderCount {
 			rejectReasons = append(rejectReasons, "insufficient_holders")
 		} else if !in.HolderDistKnown && m.runtime.Thresholds.RejectUnknownHolderCount {
@@ -732,7 +732,7 @@ func (m *Module) ProcessForMode(ctx context.Context, in contracts.MarketDataDTO,
 		thresholds := m.runtime.Thresholds
 		rejectReasons, flags = applyNoSocialMonitoring(mode, in, rejectReasons, flags, profile.NoSocialMonitoring, thresholds)
 		var fairSkip bool
-		in, flags, rejectReasons, fairSkip = applyFairUnknownEvaluation(mode, in, isNewLaunch, flags, rejectReasons, profile)
+		in, flags, rejectReasons, fairSkip = applyFairUnknownEvaluation(mode, in, launchExempt, flags, rejectReasons, profile)
 		if fairSkip {
 			return buildSkipResult(in, flags, profileName), nil
 		}
@@ -873,6 +873,17 @@ func tokenAgeSeconds(blockTimestamp, ingestedAt string) int64 {
 		return 0
 	}
 	return age
+}
+
+// isLaunchExemptReserve reports whether zero-reserve and min-holder structural
+// checks should be deferred until LP/holder probes complete.
+func isLaunchExemptReserve(in contracts.MarketDataDTO) bool {
+	switch in.EventTopic {
+	case "PumpFunCreate", "PumpFunAMMCreatePool":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildSkipResult constructs a DataQualityDTO with Decision=SKIP (Task 13).

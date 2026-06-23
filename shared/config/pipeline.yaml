@@ -369,8 +369,8 @@ probes:
     solana_metadata: 0
     solana_creator_reputation: 0
   rate_limit_buckets:
-    fresh_tokens_per_hour: 0
-    rescan_tokens_per_hour: 0
+    fresh_tokens_per_hour: 1000
+    rescan_tokens_per_hour: 200
   pending_queue:
     enabled: true
     drain_interval_seconds: 60
@@ -457,6 +457,7 @@ probes:
       - holder_dist
     exempt_holder_on_topics:
       - PumpFunCreate
+      - PumpFunAMMCreatePool
 
 # Phase 10 — time-banded rescan worker (Layer 0.5).
 # Enabled by default for Phase 10+ pipelines.
@@ -466,7 +467,8 @@ rescan:
   interval_seconds: 60
   max_per_band_per_tick: 10
   skip_open_positions: true
-  include_skipped_for_retry: true
+  # Disabled until first L0→L10 trace completes — re-enable after PIPELINE_PROOF gate passes.
+  include_skipped_for_retry: false
   eligibility:
     max_honeypot_score: 0.5
     max_rug_score: 0.65

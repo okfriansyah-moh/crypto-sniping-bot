@@ -17,10 +17,12 @@ import (
 
 // Server is the HTTP server that aggregates all module endpoints.
 type Server struct {
-	cfg        *config.Config
-	logger     *slog.Logger
-	adapter    database.Adapter
-	shadowGate *health.ShadowGateEvaluator
+	cfg            *config.Config
+	logger         *slog.Logger
+	adapter        database.Adapter
+	shadowGate     *health.ShadowGateEvaluator
+	webhookPath    string
+	webhookHandler http.Handler
 }
 
 // NewServer creates a new HTTP server.
@@ -32,6 +34,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, adapter database.Adapter
 			cfg.Execution.Mode,
 			cfg.Execution.ShadowGate,
 		)
+	}
+	return s
+}
+
+// WithWebhook registers a Helius webhook ingress handler at path.
+func (s *Server) WithWebhook(path string, h http.Handler) *Server {
+	if path != "" && h != nil {
+		s.webhookPath = path
+		s.webhookHandler = h
 	}
 	return s
 }
@@ -48,6 +59,10 @@ func (s *Server) Router() http.Handler {
 		healthOpts = &healthEndpoint.RegisterOpts{ShadowGate: s.shadowGate}
 	}
 	healthEndpoint.Register(mux, healthOpts)
+
+	if s.webhookHandler != nil && s.webhookPath != "" {
+		mux.Handle(s.webhookPath, s.webhookHandler)
+	}
 
 	return SecurityHeaders(mux)
 }

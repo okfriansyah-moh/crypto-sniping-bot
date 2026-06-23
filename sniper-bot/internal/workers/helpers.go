@@ -323,3 +323,42 @@ func openPositionBusEventID(
 	}
 	return pos.EventID
 }
+
+// mergeIdentityFieldsFromLatest copies creator/symbol/name from the richest
+// persisted row when the source DTO is missing them (common on rescan re-emits).
+func mergeIdentityFieldsFromLatest(out *contracts.MarketDataDTO, latest *contracts.MarketDataDTO) {
+	if out == nil || latest == nil {
+		return
+	}
+	if out.CreatorAddress == "" && latest.CreatorAddress != "" {
+		out.CreatorAddress = latest.CreatorAddress
+	}
+	if out.Symbol == "" && latest.Symbol != "" {
+		out.Symbol = latest.Symbol
+	}
+	if out.Name == "" && latest.Name != "" {
+		out.Name = latest.Name
+	}
+}
+
+// mergeLiquidityFieldsFromLatest copies LP reserve/USD fields from the richest
+// persisted row when the rescan re-emit lacks them.
+func mergeLiquidityFieldsFromLatest(out *contracts.MarketDataDTO, latest *contracts.MarketDataDTO) {
+	if out == nil || latest == nil {
+		return
+	}
+	if out.LiquidityUsd <= 0 && latest.LiquidityUsd > 0 {
+		out.LiquidityUsd = latest.LiquidityUsd
+	}
+	if !out.LpStatsKnown && latest.LpStatsKnown {
+		out.LpStatsKnown = true
+	}
+	if (out.ReserveBaseRaw == "" || out.ReserveBaseRaw == "0") &&
+		latest.ReserveBaseRaw != "" && latest.ReserveBaseRaw != "0" {
+		out.ReserveBaseRaw = latest.ReserveBaseRaw
+	}
+	if (out.ReserveTokenRaw == "" || out.ReserveTokenRaw == "0") &&
+		latest.ReserveTokenRaw != "" && latest.ReserveTokenRaw != "0" {
+		out.ReserveTokenRaw = latest.ReserveTokenRaw
+	}
+}

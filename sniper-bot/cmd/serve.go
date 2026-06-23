@@ -149,7 +149,7 @@ func runServer() {
 		}
 		if cfg.Probes.BatchAccounts && solanaRPCClient != nil {
 			probeRPC := &solanaProbeRPCAdapter{client: solanaRPCClient}
-			probeWorker.WithBatchAccounts(true, probeRPC, &solUsdProbeAdapter{src: solUsdSource}, workers.BatchAccountsConfig{
+			probeWorker.WithBatchAccounts(true, probeRPC, &solUsdProbeAdapter{src: solUsdSource, fallbackUsd: cfg.Solana.SolEstimatedPriceUsd}, cfg.Solana.SolEstimatedPriceUsd, workers.BatchAccountsConfig{
 				RescanSkipPumpfunLpPhase2: cfg.Probes.RescanSkipPumpfunLpPhase2,
 				AuthoritiesEnabled:        cfg.Probes.SolanaAuthorities.Enabled,
 				PumpfunLpEnabled:          cfg.Probes.SolanaPumpfunLp.Enabled,
@@ -488,6 +488,14 @@ func runServer() {
 			"creator_profile_reader", "adapter",
 		)
 	}
+	if err := workers.ValidateWebhookBoot(cfg.Solana); err != nil {
+		logger.Error("solana_webhook_boot_failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("solana_ingestion_delivery",
+		"mode", ingestion_solana.EffectiveGlobalDelivery(cfg.Solana),
+		"webhook_active", ingestion_solana.WebhookIngressActive(cfg.Solana),
+	)
 	go func() {
 		if err := workers.RunIngestionSolana(ctx, db, cfg, solanaClient, solUsdSource, logger); err != nil && err != ctx.Err() {
 			logger.Error("solana_ingestion_failed", "error", err)
@@ -496,10 +504,37 @@ func runServer() {
 
 	logger.Info("orchestrator_ready", "version_id", orch.VersionID())
 
-	// Start HTTP server — health-only surface on :8080 (no dashboard /api/v1 routes).
+	// Start HTTP server — health + optional Helius webhook on :8080.
 	// Operator REST API is served by backend-dashboard on :8090.
 	addr := fmt.Sprintf(":%s", cfg.Port())
 	srv := web.NewServer(cfg, logger, db)
+	if ingestion_solana.WebhookIngressActive(cfg.Solana) && len(cfg.Solana.Programs) > 0 {
+		sv, svErr := db.GetActiveStrategyVersion(ctx)
+		if svErr != nil {
+			logger.Error("solana_webhook_version_failed", "error", svErr)
+			os.Exit(1)
+		}
+		webhookMod := workers.NewSolanaIngestionModule(
+			db, cfg.Solana, sv.StrategyVersionID,
+			workers.BuildSolanaEmitter(ctx, db, sv.StrategyVersionID, logger),
+			solanaClient, solUsdSource, logger,
+		)
+		webhookPath := workers.WebhookPath(cfg.Solana.Ingestion.Webhook)
+		srv.WithWebhook(webhookPath, workers.NewHeliusWebhookHandler(workers.HeliusWebhookDeps{
+			Module:   webhookMod,
+			Cfg:      cfg.Solana,
+			Logger:   logger,
+			MaxBytes: workers.WebhookMaxBodyBytes(cfg.Solana.Ingestion.Webhook),
+		}))
+		logger.Info("solana_ingestion_webhook_registered",
+			"path", webhookPath,
+			"ingestion_delivery", ingestion_solana.EffectiveGlobalDelivery(cfg.Solana),
+		)
+		logger.Info("solana_ingestion_webhook_ready",
+			"path", webhookPath,
+			"public_url_hint", os.Getenv("WEBHOOK_PUBLIC_URL"),
+		)
+	}
 	httpSrv := &http.Server{
 		Addr:         addr,
 		Handler:      srv.Router(),
@@ -731,7 +766,8 @@ func buildMarketProbes(ctx context.Context, cfg *config.Config, solanaRPC *rpc.S
 			}, logger))
 		}
 		if cfg.Probes.SolanaPumpfunLp.Enabled {
-			out = append(out, probes.NewSolanaPumpfunLpProbe(probeRPC, &solUsdProbeAdapter{src: solUsd}, probes.SolanaPumpfunLpConfig{
+			solUsdAdapter := &solUsdProbeAdapter{src: solUsd, fallbackUsd: cfg.Solana.SolEstimatedPriceUsd}
+			out = append(out, probes.NewSolanaPumpfunLpProbeWithFallback(probeRPC, solUsdAdapter, cfg.Solana.SolEstimatedPriceUsd, probes.SolanaPumpfunLpConfig{
 				Enabled:    true,
 				TimeoutMs:  cfg.Probes.SolanaPumpfunLp.TimeoutMs,
 				Commitment: cfg.Probes.SolanaPumpfunLp.Commitment,
@@ -966,12 +1002,18 @@ func (a *solanaProbeRPCAdapter) GetProgramAccounts(ctx context.Context, programI
 // Both interfaces share the same method signature; Go requires an
 // explicit adapter to convert between unrelated interface types.
 type solUsdProbeAdapter struct {
-	src ingestion_solana.SolUsdSource
+	src         ingestion_solana.SolUsdSource
+	fallbackUsd float64
 }
 
 func (a *solUsdProbeAdapter) SolUsd(ctx context.Context) (float64, bool) {
-	if a.src == nil {
-		return 0, false
+	if a.src != nil {
+		if px, ok := a.src.SolUsd(ctx); ok && px > 0 {
+			return px, true
+		}
 	}
-	return a.src.SolUsd(ctx)
+	if a.fallbackUsd > 0 {
+		return a.fallbackUsd, true
+	}
+	return 0, false
 }

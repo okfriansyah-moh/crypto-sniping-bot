@@ -14,6 +14,12 @@
 #   sniper-bot     — Trading daemon (port 8080) — no dashboard code mounted
 #   dashboard-api  — Read-only operator API (port 8090) — no wallet keys
 #   dashboard-ui   — nginx static UI (port 3000) — proxies /api → dashboard-api
+#
+# Optional webhook exposure profiles (Helius HTTPS ingress):
+#   make webhook-dev         — profile webhook-ngrok
+#   make webhook-cloudflare  — profile webhook-cloudflare
+#   make webhook-production  — profile webhook-caddy + docker-compose.webhook.yml
+# See docs/guides/HELIUS_WEBHOOK_SETUP.md
 
 services:
 
@@ -85,6 +91,7 @@ services:
       SNIPER_DB_SSL_MODE: disable
       CONFIG_PATH: /app/config/pipeline.yaml
       SOLANA_WALLET_KEY_1: /keys/solana-wallet-1.json
+      WEBHOOK_PUBLIC_URL: ${WEBHOOK_PUBLIC_URL:-}
     volumes:
       - ${SOLANA_KEYS_DIR:-/tmp/sniper-keys}:/keys:ro
     ports:
@@ -151,6 +158,55 @@ services:
       retries: 3
       start_period: 10s
 
+  # ── Helius webhook exposure (optional profiles) ─────────────────────────────
+  # ngrok: local/staging HTTPS tunnel → sniper-bot:8080 (make webhook-dev)
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles: [webhook-ngrok]
+    command: http --log=stdout sniper-bot:8080
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      sniper-bot:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # cloudflared: Cloudflare Tunnel → sniper-bot:8080 (make webhook-cloudflare)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: [webhook-cloudflare]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      sniper-bot:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # caddy: TLS reverse proxy on 443 → sniper-bot:8080 (make webhook-production)
+  caddy:
+    image: caddy:2-alpine
+    profiles: [webhook-caddy]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN}
+    volumes:
+      - ./deploy/webhook/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      sniper-bot:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
     name: crypto-sniping-bot_pgdata
+  caddy_data:
+    name: crypto-sniping-bot_caddy_data
+  caddy_config:
+    name: crypto-sniping-bot_caddy_config

@@ -7,6 +7,7 @@ package ingestion_solana_test
 import (
 	"testing"
 
+	"crypto-sniping-bot/shared/contracts"
 	"crypto-sniping-bot/sniper-bot/internal/modules/ingestion_solana"
 )
 
@@ -54,6 +55,30 @@ func TestNormalize_FactoryCreatorIsReplacedByEventUser(t *testing.T) {
 	}
 	if resolved != realHumanWallet {
 		t.Errorf("want resolved=%q, got %q", realHumanWallet, resolved)
+	}
+}
+
+// TestResolveCreatorIdentity_EmptyCreatorUsesFeePayer verifies empty creators
+// are populated from the transaction fee payer when it is a human wallet.
+func TestResolveCreatorIdentity_EmptyCreatorUsesFeePayer(t *testing.T) {
+	md := &contracts.MarketDataDTO{}
+	if !ingestion_solana.ResolveCreatorIdentity(md, realHumanWallet) {
+		t.Fatal("expected resolution from fee payer fallback")
+	}
+	if md.CreatorAddress != realHumanWallet {
+		t.Errorf("want creator %q, got %q", realHumanWallet, md.CreatorAddress)
+	}
+}
+
+// TestResolveCreatorIdentity_FactoryFeePayerStaysEmpty verifies factory program
+// fee payers are not used as creator identity.
+func TestResolveCreatorIdentity_FactoryFeePayerStaysEmpty(t *testing.T) {
+	md := &contracts.MarketDataDTO{}
+	if ingestion_solana.ResolveCreatorIdentity(md, pumpFunAMMProgram) {
+		t.Fatal("factory program must not resolve as creator")
+	}
+	if md.CreatorAddress != "" {
+		t.Errorf("want empty creator, got %q", md.CreatorAddress)
 	}
 }
 

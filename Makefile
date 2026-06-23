@@ -284,6 +284,69 @@ docker-clean:
 docker-clean-all:
 	docker compose down -v
 
+# ── Helius webhook exposure (optional — see docs/guides/HELIUS_WEBHOOK_SETUP.md) ──
+.PHONY: webhook-enable-hybrid webhook-dev webhook-cloudflare webhook-production webhook-verify webhook-url
+
+webhook-enable-hybrid:
+	@bash scripts/webhook_enable_hybrid.sh
+
+webhook-dev: webhook-enable-hybrid
+	@bash scripts/ensure_env.sh
+	@if ! grep -q '^NGROK_AUTHTOKEN=.\+' .env 2>/dev/null; then \
+		echo "ERROR: set NGROK_AUTHTOKEN in .env (https://dashboard.ngrok.com/get-started/your-authtoken)" >&2; \
+		exit 1; \
+	fi
+	@bash -c 'set -a; source .env; set +a; \
+		set_env() { grep -q "^$$1=" .env && sed -i.bak "s/^$$1=.*/$$1=$$2/" .env || echo "$$1=$$2" >> .env; }; \
+		set_env WEBHOOK_EXPOSURE ngrok; \
+		docker compose --env-file .env --profile webhook-ngrok up --build -d'
+	@echo "Waiting for ngrok tunnel..."
+	@sleep 5
+	@$(MAKE) webhook-url
+	@echo ""
+	@echo "Helius webhook URL: $$( $(MAKE) -s webhook-url )/webhooks/helius"
+	@echo "Run: make webhook-verify"
+
+webhook-cloudflare: webhook-enable-hybrid
+	@bash scripts/ensure_env.sh
+	@if ! grep -q '^CLOUDFLARE_TUNNEL_TOKEN=.\+' .env 2>/dev/null; then \
+		echo "ERROR: set CLOUDFLARE_TUNNEL_TOKEN in .env (Cloudflare Zero Trust tunnel token)" >&2; \
+		exit 1; \
+	fi
+	@bash -c 'set -a; source .env; set +a; \
+		if grep -q "^WEBHOOK_EXPOSURE=" .env; then sed -i.bak "s/^WEBHOOK_EXPOSURE=.*/WEBHOOK_EXPOSURE=cloudflare/" .env; else echo "WEBHOOK_EXPOSURE=cloudflare" >> .env; fi; \
+		docker compose --env-file .env --profile webhook-cloudflare up --build -d'
+	@echo ""
+	@echo "Cloudflare tunnel started. In Cloudflare Zero Trust, route your public hostname to:"
+	@echo "  http://sniper-bot:8080  (Docker service name)"
+	@echo "Helius URL: https://<your-tunnel-host>/webhooks/helius"
+
+webhook-production: webhook-enable-hybrid
+	@bash scripts/ensure_env.sh
+	@if ! grep -q '^WEBHOOK_DOMAIN=.\+' .env 2>/dev/null; then \
+		echo "ERROR: set WEBHOOK_DOMAIN in .env (e.g. sniper.example.com)" >&2; \
+		exit 1; \
+	fi
+	@bash -c 'set -a; source .env; set +a; \
+		if grep -q "^WEBHOOK_EXPOSURE=" .env; then sed -i.bak "s/^WEBHOOK_EXPOSURE=.*/WEBHOOK_EXPOSURE=caddy/" .env; else echo "WEBHOOK_EXPOSURE=caddy" >> .env; fi; \
+		if grep -q "^WEBHOOK_PUBLIC_URL=" .env; then sed -i.bak "s|^WEBHOOK_PUBLIC_URL=.*|WEBHOOK_PUBLIC_URL=https://$$WEBHOOK_DOMAIN|" .env; else echo "WEBHOOK_PUBLIC_URL=https://$$WEBHOOK_DOMAIN" >> .env; fi; \
+		docker compose --env-file .env -f docker-compose.yml -f docker-compose.webhook.yml --profile webhook-caddy up --build -d'
+	@echo ""
+	@bash -c 'set -a; source .env; set +a; echo "Helius webhook URL: https://$$WEBHOOK_DOMAIN/webhooks/helius"'
+	@echo "Ensure DNS A record points to your static IP and ports 80/443 are forwarded."
+
+webhook-verify:
+	@bash scripts/webhook_verify.sh $(WEBHOOK_PUBLIC_URL)
+
+webhook-url:
+	@bash -c 'set -a; [ -f .env ] && source .env; set +a; \
+		if curl -sf http://localhost:4040/api/tunnels >/dev/null 2>&1; then \
+			url=$$(curl -s http://localhost:4040/api/tunnels | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get(\"tunnels\") or []; print(t[0][\"public_url\"] if t else \"\")" 2>/dev/null); \
+			if [ -n "$$url" ]; then echo "$$url"; exit 0; fi; \
+		fi; \
+		if [ -n "$${WEBHOOK_PUBLIC_URL:-}" ]; then echo "$${WEBHOOK_PUBLIC_URL%/}"; exit 0; fi; \
+		echo "http://localhost:$${PORT:-8080}"'
+
 # Tail logs from all long-running deployable services.
 # Optional: GREP=pattern filters the stream; SVC overrides service list.
 LOG_SVCS ?= sniper-bot dashboard-api dashboard-ui

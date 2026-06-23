@@ -186,6 +186,17 @@ solana:
   # reserve instead of the default "0" from the log-only ingest path. Setting
   # this to 0 disables the virtual-reserve injection.
   pumpfun_virtual_sol_lamports: 30000000000
+  # Dual ingestion delivery: stream (WebSocket + getTransaction) | webhook (Helius push) | hybrid.
+  # Runtime override: SOLANA_INGESTION_DELIVERY=stream|webhook|hybrid
+  ingestion:
+    delivery: stream
+    webhook:
+      enabled: false
+      path: /webhooks/helius
+      max_body_bytes: 65536
+      programs:
+        - family: pumpfun-amm
+          program_id: pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA
   # Conservative SOL price estimate (USD) used ONLY when the live price feed is
   # unavailable. Injected into LiquidityUsd = lamports / 1e9 × sol_estimated_price_usd.
   # Update this when the long-run SOL price range shifts significantly.
