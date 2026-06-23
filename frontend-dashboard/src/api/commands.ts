@@ -70,3 +70,30 @@ export async function submitDestructiveCommand(
   }
   return challenge;
 }
+
+/**
+ * Force-close open positions for a token prefix — destructive, two-step confirm.
+ */
+export async function submitForceCloseCommand(
+  tokenAddress: string,
+  issuerId: string,
+): Promise<CommandResponse> {
+  const args = { token_address: tokenAddress.trim() };
+  const challenge = await submitCommand({
+    command_type: "force_close",
+    issuer_id: issuerId,
+    args,
+  });
+  if (
+    challenge.status === "confirmation_required" &&
+    challenge.confirm_token
+  ) {
+    return confirmCommand({
+      confirm_token: challenge.confirm_token,
+      issuer_id: issuerId,
+      command_type: "force_close",
+      args,
+    });
+  }
+  return challenge;
+}

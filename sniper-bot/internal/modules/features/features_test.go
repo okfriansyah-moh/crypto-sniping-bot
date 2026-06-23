@@ -100,26 +100,48 @@ func TestProcess_HigherLiquidityUsd_HigherLiquidityScore(t *testing.T) {
 	}
 }
 
-func TestProcess_ReserveBaseRawDerivesLiquidityScore(t *testing.T) {
+func TestProcess_ReserveBaseRawDerivesLiquidityScore_BirthCapped(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Solana.SolEstimatedPriceUsd = 150.0
 	m := New(cfg)
 	in := passedDQ()
 
-	// 30 SOL virtual reserve without LiquidityUsd — mirrors pump.fun cold-start.
+	// 30 SOL virtual reserve without LiquidityUsd — birth path stays capped.
 	snap := MarketSnapshot{
 		Market:         "solana-pumpfun-amm",
 		ReserveBaseRaw: "30000000000",
+		EventTopic:     "PumpFunCreate",
+	}
+	out, err := m.ProcessWithContext(context.Background(), in, snap, BaselineSnapshot{}, "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.LiquidityScore > 0.55 {
+		t.Fatalf("expected birth liquidity_score <= 0.55, got %f", out.LiquidityScore)
+	}
+	if out.LiquidityUsdRaw != 4500 {
+		t.Fatalf("expected derived LiquidityUsdRaw=4500, got %f", out.LiquidityUsdRaw)
+	}
+}
+
+func TestProcess_RescanTransport_LiquidityScoreAboveFloor(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Solana.SolEstimatedPriceUsd = 150.0
+	m := New(cfg)
+	in := passedDQ()
+
+	snap := MarketSnapshot{
+		Market:         "solana-pumpfun-amm",
+		LiquidityUsd:   10000,
+		LpStatsKnown:   true,
+		Transport:      "rescan_15m",
 	}
 	out, err := m.ProcessWithContext(context.Background(), in, snap, BaselineSnapshot{}, "2026-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if out.LiquidityScore <= 0.55 {
-		t.Fatalf("expected liquidity_score > 0.55 from reserve derivation, got %f", out.LiquidityScore)
-	}
-	if out.LiquidityUsdRaw != 4500 {
-		t.Fatalf("expected derived LiquidityUsdRaw=4500, got %f", out.LiquidityUsdRaw)
+		t.Fatalf("expected rescan liquidity_score > 0.55, got %f", out.LiquidityScore)
 	}
 }
 

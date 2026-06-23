@@ -1,9 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { dashboardApi } from "../api/client";
 import type { GateEvidenceResponseDTO, ThroughputVerdict } from "../api/types";
 import { ViewState } from "../components/ViewState";
 import type { ChainId } from "../hooks/useChainFilter";
 import { usePolling } from "../hooks/usePolling";
+import { useToast } from "../hooks/useToast";
+import { Toast } from "../components/Toast";
 import { formatEventTime } from "../utils/format";
 
 type GateViewProps = {
@@ -24,14 +26,37 @@ export function GateView({ chain, active }: GateViewProps) {
 }
 
 function GateContent({ data, chain }: { data: GateEvidenceResponseDTO; chain: ChainId }) {
+  const { toast, showSuccess, showError, dismiss } = useToast();
+  const [downloading, setDownloading] = useState(false);
   const verdict = data.throughput_verdict || "MARKET_QUIET";
   const verdictClass = verdictPillClass(verdict);
   const bannerClass = verdict === "CODE_DEFECT" ? "bad" : verdict === "HEALTHY" ? "info" : "warn";
   const production = productionDecision(data);
   const showWsolNote = chain === "solana" || chain === "all";
 
+  const handleDownloadBrief = async () => {
+    setDownloading(true);
+    try {
+      const brief = await dashboardApi.getGateBrief();
+      const filename = brief.path.split("/").pop() || "gate_brief.txt";
+      const blob = new Blob([brief.content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      showSuccess(`Downloaded ${filename}`);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <>
+      <Toast toast={toast} onDismiss={dismiss} />
       <div className={`banner ${bannerClass}`}>
         <div className="gate-banner-body">
           <h3>{gateBannerTitle(verdict, data.traces_completed)}</h3>
@@ -92,8 +117,13 @@ function GateContent({ data, chain }: { data: GateEvidenceResponseDTO; chain: Ch
           <button className="btn btn-primary" type="button" disabled title="Use Telegram / CLI for now">
             Run 30m gate collection
           </button>
-          <button className="btn btn-ghost" type="button" disabled title="Use Telegram / CLI for now">
-            Download brief (.txt)
+          <button
+            className="btn btn-ghost"
+            type="button"
+            disabled={downloading}
+            onClick={() => void handleDownloadBrief()}
+          >
+            {downloading ? "Downloading…" : "Download latest brief (.txt)"}
           </button>
         </div>
       </div>

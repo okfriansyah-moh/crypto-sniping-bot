@@ -72,3 +72,9 @@ capital:
   default_max_slippage_bps: 200 # AllocationDTO.MaxSlippageBps
   wallet_shard_count: 1 # 1 = no sharding; >1 enables hash(token)%n routing
   default_cohort_id: "default" # AllocationDTO.CohortID until learning supplies one
+
+  # Fortress macro throttle — set MACRO_REGIME=risk_off to halve max position size.
+  macro_regime:
+    enabled: true
+    max_size_multiplier: 0.5
+    exploration_cap_scale: 0.5

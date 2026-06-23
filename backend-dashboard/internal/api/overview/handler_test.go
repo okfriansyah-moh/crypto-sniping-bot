@@ -51,6 +51,14 @@ func (s *handlerStubDB) GetShadowGateStats(context.Context, int) (*database.Shad
 	return &database.ShadowGateStats{}, nil
 }
 
+func (s *handlerStubDB) GetPipelineStats(context.Context, int) (*database.PipelineStats, error) {
+	return &database.PipelineStats{}, nil
+}
+
+func (s *handlerStubDB) GetDQBreakdown(context.Context, int, string) (*database.DQBreakdown, error) {
+	return &database.DQBreakdown{}, nil
+}
+
 func TestHandler_ReturnsOverviewJSON(t *testing.T) {
 	now := time.Now().UTC()
 	stub := &handlerStubDB{
@@ -72,7 +80,7 @@ func TestHandler_ReturnsOverviewJSON(t *testing.T) {
 		Capital:   config.CapitalConfig{MaxTotalExposureUsd: 100},
 	}
 
-	h := overview.NewHandler(stub, cfg, now.Add(-time.Hour))
+	h := overview.NewHandler(stub, cfg, now.Add(-time.Hour), "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -112,7 +120,7 @@ func TestHandler_ChainQueryFiltersChainStatuses(t *testing.T) {
 	}
 	cfg := &config.Config{Execution: config.ExecutionConfig{Mode: "shadow"}}
 
-	h := overview.NewHandler(stub, cfg, now)
+	h := overview.NewHandler(stub, cfg, now, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/overview?chain=solana", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -124,14 +132,14 @@ func TestHandler_ChainQueryFiltersChainStatuses(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(out.ChainStatuses) != 0 {
-		t.Fatalf("expected empty chain_statuses for stub, got %d", len(out.ChainStatuses))
+	if len(out.ChainStatuses) != 1 || out.ChainStatuses[0].Chain != "solana" {
+		t.Fatalf("expected single solana chain_status, got %+v", out.ChainStatuses)
 	}
 }
 
 func TestHandler_SystemStateErrorReturns500(t *testing.T) {
 	stub := &handlerStubDB{state: nil}
-	h := overview.NewHandler(stub, &config.Config{}, time.Now())
+	h := overview.NewHandler(stub, &config.Config{}, time.Now(), "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -142,7 +150,7 @@ func TestHandler_SystemStateErrorReturns500(t *testing.T) {
 }
 
 func TestHandler_MethodNotAllowed(t *testing.T) {
-	h := overview.NewHandler(&handlerStubDB{}, nil, time.Now())
+	h := overview.NewHandler(&handlerStubDB{}, nil, time.Now(), "")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/overview", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

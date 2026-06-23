@@ -77,9 +77,10 @@ type EdgeDTO struct {
 // Edge type taxonomy (per docs/reference/architecture.md § 3.3 and the
 // edge-detection skill). Modules MUST NOT invent edges outside this set.
 const (
-	EdgeTypeNewLaunch = "NEW_LAUNCH_EDGE"
-	EdgeTypeMomentum  = "MOMENTUM_EDGE"
-	EdgeTypeNone      = "NONE"
+	EdgeTypeNewLaunch   = "NEW_LAUNCH_EDGE"
+	EdgeTypeMomentum    = "MOMENTUM_EDGE"
+	EdgeTypeGraduation  = "GRADUATION_EDGE"
+	EdgeTypeNone        = "NONE"
 )
 
 // IsEdgeDetected reports whether the EdgeDTO represents an actionable

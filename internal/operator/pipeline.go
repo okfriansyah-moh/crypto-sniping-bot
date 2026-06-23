@@ -35,6 +35,9 @@ func BuildPipelineStats(
 		Funnel:          mapPipelineFunnel(stats),
 		LayerHeartbeats: buildLayerHeartbeats(stats),
 	}
+	if verdict, vErr := deriveThroughputVerdictFromDB(ctx, db); vErr == nil {
+		out.ThroughputVerdict = verdict
+	}
 
 	if chain == "" {
 		if rq, ok := db.(rescanPipelineQueryer); ok {
@@ -53,6 +56,14 @@ func BuildPipelineStats(
 	}
 
 	return out, nil
+}
+
+func deriveThroughputVerdictFromDB(ctx context.Context, db database.Adapter) (string, error) {
+	metrics := gateMetrics{}
+	if err := mergeLiveGateMetrics(ctx, db, &metrics); err != nil {
+		return "", err
+	}
+	return computeThroughputVerdict(metrics), nil
 }
 
 // FetchPipelineStats returns raw adapter funnel stats for Telegram /pipeline formatting.

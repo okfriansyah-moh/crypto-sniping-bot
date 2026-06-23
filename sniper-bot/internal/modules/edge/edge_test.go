@@ -201,16 +201,24 @@ func TestProcessWithContext_ModeEdgeStrengthFloor_ExplorationAcceptsWeakerThanBa
 	in := highScoreFeature()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	// highScoreFeature NEW_LAUNCH strength ≈ 0.59 (between EXPLORATION 0.45 and BALANCED 0.60).
-	outBalanced, err := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0.60, now)
+	// highScoreFeature NEW_LAUNCH strength ≈ 0.59 (between EXPLORATION 0.45 and BALANCED 0.58).
+	outBalanced, err := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0.58, now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outBalanced.EdgeType != contracts.EdgeTypeNone {
-		t.Errorf("BALANCED floor 0.60 should reject strength ~0.59, got edge_type=%q", outBalanced.EdgeType)
+	if outBalanced.EdgeType != contracts.EdgeTypeNewLaunch {
+		t.Errorf("BALANCED floor 0.58 should accept strength ~0.59, got edge_type=%q", outBalanced.EdgeType)
 	}
-	if !strings.Contains(outBalanced.RejectReason, "edge_strength_below_floor") {
-		t.Errorf("expected edge_strength_below_floor reject reason, got %q", outBalanced.RejectReason)
+
+	outStrict, err := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0.60, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outStrict.EdgeType != contracts.EdgeTypeNone {
+		t.Errorf("floor 0.60 should reject strength ~0.59, got edge_type=%q", outStrict.EdgeType)
+	}
+	if !strings.Contains(outStrict.RejectReason, "edge_strength_below_floor") {
+		t.Errorf("expected edge_strength_below_floor reject reason, got %q", outStrict.RejectReason)
 	}
 
 	outExploration, err := m.ProcessWithContext(context.Background(), in, BaselineSnapshot{}, 0.45, now)

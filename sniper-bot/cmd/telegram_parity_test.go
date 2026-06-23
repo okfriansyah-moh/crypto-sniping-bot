@@ -68,6 +68,10 @@ func (s *telegramParityStub) GetPipelineStats(context.Context, int) (*database.P
 	return s.pipeline, nil
 }
 
+func (s *telegramParityStub) GetDQBreakdown(context.Context, int, string) (*database.DQBreakdown, error) {
+	return &database.DQBreakdown{}, nil
+}
+
 func (s *telegramParityStub) GetAdaptiveDQStats(context.Context, int) (int, int, error) {
 	return s.adaptiveDQ.total, s.adaptiveDQ.rug, s.adaptiveDQ.err
 }

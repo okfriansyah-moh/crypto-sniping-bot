@@ -64,5 +64,7 @@ execution:
     enabled: false
     shadow_mode: true
     tip_lamports: 1000
+    tip_lamports_balanced: 2000
+    tip_lamports_exploration: 3500
     max_bundle_size: 5
     submit_timeout_ms: 2000

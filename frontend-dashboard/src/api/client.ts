@@ -9,12 +9,17 @@ import type {
   ConfigManifestEntryDTO,
   DashboardQueryParams,
   DQBreakdownResponseDTO,
+  ExecutionsResponseDTO,
+  FortressPostureDTO,
+  GateBriefDTO,
   GateEvidenceResponseDTO,
   HealthResponseDTO,
+  IngestionStatusDTO,
   OverviewResponseDTO,
   PipelineStatsResponseDTO,
   PnLSummaryDTO,
   PositionRowDTO,
+  RescanStatusResponseDTO,
 } from "./types";
 
 export class ApiError extends Error {
@@ -142,6 +147,17 @@ export const dashboardApi = {
     apiGet<ActivityEventDTO[]>("/api/v1/activity", params),
 
   getGateEvidence: () => apiGet<GateEvidenceResponseDTO>("/api/v1/gate/evidence"),
+
+  getGateBrief: () => apiGet<GateBriefDTO>("/api/v1/gate/brief"),
+
+  getPosture: () => apiGet<FortressPostureDTO>("/api/v1/posture"),
+
+  getIngestion: () => apiGet<IngestionStatusDTO>("/api/v1/ingestion"),
+
+  getExecutions: (params?: Pick<DashboardQueryParams, "limit">) =>
+    apiGet<ExecutionsResponseDTO>("/api/v1/executions", params),
+
+  getRescan: () => apiGet<RescanStatusResponseDTO>("/api/v1/rescan"),
 
   getConfigs: () => apiGet<ConfigManifestEntryDTO[]>("/api/v1/configs"),
 };

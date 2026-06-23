@@ -2,6 +2,8 @@
 export type DashboardView =
   | "overview"
   | "pipeline"
+  | "ingestion"
+  | "executions"
   | "positions"
   | "activity"
   | "dq"
@@ -28,6 +30,8 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { view: "overview", label: "Overview", icon: "◉" },
       { view: "pipeline", label: "Pipeline health", icon: "⇄", badge: "L0–L10" },
+      { view: "ingestion", label: "Ingestion", icon: "↓" },
+      { view: "executions", label: "Executions", icon: "◎" },
       { view: "positions", label: "Open positions", icon: "▦" },
       { view: "activity", label: "Recent activity", icon: "⚡" },
     ],
@@ -63,6 +67,8 @@ export const CHAIN_FILTER_VIEWS = new Set<DashboardView>([
 export const VIEW_TITLES: Record<DashboardView, { title: string; subtitle: string }> = {
   overview: { title: "Overview", subtitle: "Helicopter view · high-level health only" },
   pipeline: { title: "Pipeline health", subtitle: "L0–L10 funnel and layer heartbeats" },
+  ingestion: { title: "Ingestion", subtitle: "Solana delivery modes, programs, and rescan bands" },
+  executions: { title: "Executions", subtitle: "Recent L8 execution trail — shadow and live" },
   positions: { title: "Open positions", subtitle: "Live positions with trace attribution" },
   activity: { title: "Recent activity", subtitle: "Event bus tail (newest first)" },
   dq: { title: "Data quality", subtitle: "Decision breakdown and top reject reasons" },

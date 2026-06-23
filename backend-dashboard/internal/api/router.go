@@ -13,13 +13,17 @@ import (
 	"crypto-sniping-bot/backend-dashboard/internal/api/commands"
 	"crypto-sniping-bot/backend-dashboard/internal/api/configs"
 	"crypto-sniping-bot/backend-dashboard/internal/api/dq"
+	"crypto-sniping-bot/backend-dashboard/internal/api/executions"
 	"crypto-sniping-bot/backend-dashboard/internal/api/gate"
 	"crypto-sniping-bot/backend-dashboard/internal/api/health"
+	"crypto-sniping-bot/backend-dashboard/internal/api/ingestion"
 	"crypto-sniping-bot/backend-dashboard/internal/api/overview"
 	"crypto-sniping-bot/backend-dashboard/internal/api/pipeline"
 	"crypto-sniping-bot/backend-dashboard/internal/api/pnl"
 	"crypto-sniping-bot/backend-dashboard/internal/api/positions"
+	"crypto-sniping-bot/backend-dashboard/internal/api/posture"
 	"crypto-sniping-bot/backend-dashboard/internal/api/probepending"
+	"crypto-sniping-bot/backend-dashboard/internal/api/rescan"
 )
 
 // Deps are shared dependencies for dashboard API route registration.
@@ -35,15 +39,21 @@ func Register(mux *http.ServeMux, deps Deps) {
 	if mux == nil {
 		return
 	}
-	mux.Handle("GET /api/v1/overview", overview.NewHandler(deps.DB, deps.PipelineCfg, deps.StartTime))
+	evidenceDir := gateEvidenceDir(deps.DashboardCfg)
+	mux.Handle("GET /api/v1/overview", overview.NewHandler(deps.DB, deps.PipelineCfg, deps.StartTime, evidenceDir))
 	mux.Handle("GET /api/v1/health", health.NewHandler(deps.DB, deps.PipelineCfg))
+	mux.Handle("GET /api/v1/posture", posture.NewHandler(deps.DB, deps.PipelineCfg, evidenceDir))
+	mux.Handle("GET /api/v1/ingestion", ingestion.NewHandler(deps.PipelineCfg))
+	mux.Handle("GET /api/v1/executions", executions.NewHandler(deps.DB, deps.PipelineCfg))
+	mux.Handle("GET /api/v1/rescan", rescan.NewHandler(deps.DB, deps.PipelineCfg))
 	mux.Handle("GET /api/v1/pipeline", pipeline.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/probes/pending", probepending.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/positions", positions.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/pnl", pnl.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/dq", dq.NewHandler(deps.DB))
 	mux.Handle("GET /api/v1/activity", activity.NewHandler(deps.DB, maxEventsPerRequest(deps.DashboardCfg)))
-	mux.Handle("GET /api/v1/gate/evidence", gate.NewHandler(deps.DB, gateEvidenceDir(deps.DashboardCfg)))
+	mux.Handle("GET /api/v1/gate/evidence", gate.NewHandler(deps.DB, evidenceDir))
+	mux.Handle("GET /api/v1/gate/brief", gate.NewBriefHandler(evidenceDir))
 	mux.Handle("GET /api/v1/configs", configs.NewHandler(configManifestDir(deps.DashboardCfg)))
 
 	pending := commands.NewPendingStore(confirmTTL(deps.DashboardCfg))

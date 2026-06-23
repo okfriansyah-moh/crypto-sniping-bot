@@ -215,3 +215,63 @@ export interface DashboardQueryParams {
   window_hours?: number;
   limit?: number;
 }
+
+/** GET /api/v1/posture — fortress readiness banner. */
+export interface FortressPostureDTO {
+  readiness_state: string;
+  blockers: string[];
+  next_action: string;
+  mode: string;
+  execution_mode: string;
+  ingestion_delivery: string;
+  throughput_verdict: ThroughputVerdict;
+  shadow_gate_pass: boolean;
+}
+
+/** GET /api/v1/ingestion — Solana delivery mode and per-program status. */
+export interface IngestionStatusDTO {
+  global_delivery: string;
+  webhook_active: boolean;
+  transport_mode: string;
+  programs: IngestionProgramStatusDTO[];
+}
+
+export interface IngestionProgramStatusDTO {
+  program_id: string;
+  family: string;
+  delivery: string;
+  disabled: boolean;
+}
+
+/** GET /api/v1/executions — recent execution trail. */
+export interface ExecutionsResponseDTO {
+  rows: ExecutionRowDTO[];
+}
+
+export interface ExecutionRowDTO {
+  execution_id: string;
+  token: string;
+  status: string;
+  shadow: boolean;
+  tx_hash: string;
+  timestamp: string;
+}
+
+/** GET /api/v1/rescan — rescan worker band stats (24h). */
+export interface RescanStatusResponseDTO {
+  enabled: boolean;
+  total_emitted_24h: number;
+  bands: RescanBandStatsDTO[];
+}
+
+export interface RescanBandStatsDTO {
+  band: string;
+  emitted_24h: number;
+  phase: string;
+}
+
+/** GET /api/v1/gate/brief — latest gate review brief snippet. */
+export interface GateBriefDTO {
+  path: string;
+  content: string;
+}

@@ -441,6 +441,18 @@ body.sidebar-collapsed .sidebar-toggle {
   background: #f0b90b;
 }
 
+.chain-dot.status-ok {
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.55);
+}
+
+.chain-dot.status-warn {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);
+}
+
+.chain-dot.status-bad {
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.55);
+}
+
 .market-filter {
   margin-left: auto;
   display: flex;

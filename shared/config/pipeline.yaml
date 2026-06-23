@@ -73,9 +73,15 @@ edge:
   # after validating score distribution against live trades.
   bottom_detection:
     enabled: true
-    shadow_mode: false
+    shadow_mode: true
     max_slots: 20
     min_score: 0.60 # gate threshold when NOT in shadow mode (0 = disabled)
+
+  # Fortress graduation lane — PumpFunAMMCreatePool (curve → AMM migration).
+  min_graduation_liquidity_usd: 3000.0
+  graduation_weight_liquidity: 0.5
+  graduation_weight_safety: 0.3
+  graduation_weight_holders: 0.2
 
 validation:
   prior_probability: 0.35 # fixed prior P(success) — Phase 2 simplification
@@ -126,7 +132,7 @@ position:
   tp1_bps: 1500 # take partial at +15%
   tp2_bps: 4000 # full exit at +40%
   sl_bps: 500 # stop-loss at -5% (was 15% — tighter for micro-cap memes)
-  max_hold_seconds: 300 # 5 min max hold — meme tokens pump or dump fast
+  max_hold_seconds: 14400 # 4 h max hold — memecoin cohort (fortress June 2026)
   poll_interval_seconds: 5 # poll every 5s (was 15s — tighter for fast-moving tokens)
 
   # P6 — Dynamic trailing stop tiers.

@@ -200,3 +200,67 @@ type ConfigManifestEntryDTO struct {
 	LastModified string   `json:"last_modified"` // ISO 8601 UTC
 	TopLevelKeys []string `json:"top_level_keys,omitempty"`
 }
+
+// FortressPostureDTO is the payload for GET /api/v1/posture.
+// Surfaces fortress readiness: blockers, ingestion mode, shadow gate, throughput.
+type FortressPostureDTO struct {
+	ReadinessState    string   `json:"readiness_state"` // PIPELINE_PROOF | SHADOW_TRADING | SHADOW_READY | LIVE_READY | BLOCKED
+	Blockers          []string `json:"blockers"`
+	NextAction        string   `json:"next_action"`
+	Mode              string   `json:"mode"`
+	ExecutionMode     string   `json:"execution_mode"`
+	IngestionDelivery string   `json:"ingestion_delivery"`
+	ThroughputVerdict string   `json:"throughput_verdict"`
+	ShadowGatePass    bool     `json:"shadow_gate_pass"`
+}
+
+// IngestionStatusDTO is the payload for GET /api/v1/ingestion.
+type IngestionStatusDTO struct {
+	GlobalDelivery string                     `json:"global_delivery"`
+	WebhookActive  bool                       `json:"webhook_active"`
+	TransportMode  string                     `json:"transport_mode"`
+	Programs       []IngestionProgramStatusDTO `json:"programs"`
+}
+
+// IngestionProgramStatusDTO is one tracked Solana program row.
+type IngestionProgramStatusDTO struct {
+	ProgramID string `json:"program_id"`
+	Family    string `json:"family"`
+	Delivery  string `json:"delivery"`
+	Disabled  bool   `json:"disabled"`
+}
+
+// ExecutionsResponseDTO is the payload for GET /api/v1/executions.
+type ExecutionsResponseDTO struct {
+	Rows []ExecutionRowDTO `json:"rows"`
+}
+
+// ExecutionRowDTO is one execution-trail row for the fortress dashboard.
+type ExecutionRowDTO struct {
+	ExecutionID string `json:"execution_id"`
+	Token       string `json:"token"`
+	Status      string `json:"status"`
+	Shadow      bool   `json:"shadow"`
+	TxHash      string `json:"tx_hash"`
+	Timestamp   string `json:"timestamp"`
+}
+
+// RescanStatusResponseDTO is the payload for GET /api/v1/rescan.
+type RescanStatusResponseDTO struct {
+	Enabled         bool                 `json:"enabled"`
+	TotalEmitted24h int64                `json:"total_emitted_24h"`
+	Bands           []RescanBandStatsDTO `json:"bands"`
+}
+
+// RescanBandStatsDTO is per-band rescan emission stats (24h window).
+type RescanBandStatsDTO struct {
+	Band       string `json:"band"`
+	Emitted24h int64  `json:"emitted_24h"`
+	Phase      string `json:"phase"` // A | B | C — rescan goal lane
+}
+
+// GateBriefDTO is the payload for GET /api/v1/gate/brief.
+type GateBriefDTO struct {
+	Path    string `json:"path"`
+	Content string `json:"content"` // leading snippet (bounded read)
+}

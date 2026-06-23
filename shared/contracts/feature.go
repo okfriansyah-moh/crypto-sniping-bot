@@ -85,6 +85,10 @@ type FeatureDTO struct {
 	// multiplier (±10% max effect, config-driven weight).
 	NarrativeScore float64 `json:"narrative_score,omitempty"`
 	NarrativeKnown bool    `json:"narrative_known,omitempty"`
+
+	// Ingestion context threaded for fortress edge lanes (rescan / graduation).
+	Transport  string `json:"transport,omitempty"`
+	EventTopic string `json:"event_topic,omitempty"`
 }
 
 // FeatureConfidence holds per-feature confidence scores.

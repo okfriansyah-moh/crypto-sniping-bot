@@ -2,7 +2,16 @@
 
 Canonical operator runbook for exposing the sniper-bot Helius webhook ingress (`POST /webhooks/helius`) over **HTTPS**. Ingestion handler and hybrid delivery are implemented in-tree; this guide covers **exposure only** (ngrok, Cloudflare Tunnel, or Caddy on a static IP).
 
-**Related:** [`shared/config/chains.yaml`](../../shared/config/chains.yaml) (`solana.ingestion`), [production gate analysis § webhook](../analysis/2026-05-20-production-gate-analysis.md) (credit rationale).
+**Related:** [`shared/config/chains.yaml`](../../shared/config/chains.yaml) (`solana.ingestion`), [production gate analysis § webhook](../analysis/2026-05-20-production-gate-analysis.md) (credit rationale), [fortress posture spec](../specs/2026-06-23-fortress-posture-design.md).
+
+### Hybrid gate runs
+
+For production gate collection with hybrid delivery:
+
+1. `./scripts/webhook_enable_hybrid.sh` and rebuild the image (`make start --build` or `make webhook-production`).
+2. Configure Helius dashboard webhook to `WEBHOOK_PUBLIC_URL` + `/webhooks/helius`.
+3. `make webhook-verify WEBHOOK_PUBLIC_URL=https://...`
+4. `make gate-collect MINS=30 MODE=PIPELINE_PROOF` — expect `ingestion_delivery_mode=hybrid` and `helius_webhook_delivered > 0`.
 
 ---
 

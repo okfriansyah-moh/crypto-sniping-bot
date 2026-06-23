@@ -15,14 +15,15 @@ import (
 
 // Handler serves GET /api/v1/overview.
 type Handler struct {
-	db        database.Adapter
-	cfg       *config.Config
-	startTime time.Time
+	db          database.Adapter
+	cfg         *config.Config
+	startTime   time.Time
+	evidenceDir string
 }
 
 // NewHandler wires the overview vertical slice.
-func NewHandler(db database.Adapter, cfg *config.Config, startTime time.Time) *Handler {
-	return &Handler{db: db, cfg: cfg, startTime: startTime}
+func NewHandler(db database.Adapter, cfg *config.Config, startTime time.Time, evidenceDir string) *Handler {
+	return &Handler{db: db, cfg: cfg, startTime: startTime, evidenceDir: evidenceDir}
 }
 
 // ServeHTTP returns overview KPIs as JSON.
@@ -32,7 +33,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := operator.BuildOverview(r.Context(), h.db, h.cfg, h.startTime)
+	out, err := operator.BuildOverviewWithEvidence(r.Context(), h.db, h.cfg, h.startTime, h.evidenceDir)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "overview unavailable")
 		return

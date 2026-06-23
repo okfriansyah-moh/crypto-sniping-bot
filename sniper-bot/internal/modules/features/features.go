@@ -130,7 +130,7 @@ func (m *Module) ProcessWithContext(
 	rawVolume, volumeKnown := rawVolumeMomentum(snap)
 
 	// ── Normalize via two-stage pipeline ──────────────────────────
-	liqNS := NormalizeSignal(rawLiquidity, base.HistoryFor(SignalLiquidity), m.normalizerCfg)
+	liqNS := m.normalizeLiquidityScore(snap, base, rawLiquidity)
 	txNS := NormalizeSignal(rawTxVel, base.HistoryFor(SignalTxVelocity), m.normalizerCfg)
 	hdNS := NormalizeSignal(rawHolderDist, base.HistoryFor(SignalHolderDist), m.normalizerCfg)
 	weNS := NormalizeSignal(rawWalletEntropy, base.HistoryFor(SignalWalletEntropy), m.normalizerCfg)
@@ -229,6 +229,9 @@ func (m *Module) ProcessWithContext(
 		NarrativeKnown: snap.NarrativeKnown,
 
 		Confidence:  conf,
+		Transport:  snap.Transport,
+		EventTopic: snap.EventTopic,
+
 		ExtractedAt: extractedAt,
 	}, nil
 }

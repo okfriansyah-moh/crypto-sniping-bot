@@ -234,6 +234,12 @@ type EdgeConfig struct {
 	// observations and emits BottomDetectionScore on EdgeDTO.
 	// ShadowMode: compute + log the score but do not use it as a gate.
 	BottomDetection BottomDetectionConfig `yaml:"bottom_detection"`
+
+	// Fortress graduation lane (June 2026): PumpFunAMMCreatePool events.
+	MinGraduationLiquidityUsd float64 `yaml:"min_graduation_liquidity_usd"`
+	GraduationWeightLiquidity float64 `yaml:"graduation_weight_liquidity"`
+	GraduationWeightSafety    float64 `yaml:"graduation_weight_safety"`
+	GraduationWeightHolders   float64 `yaml:"graduation_weight_holders"`
 }
 
 // BottomDetectionConfig configures the P7 V-shape bottom detector.
@@ -359,6 +365,14 @@ type CapitalConfig struct {
 	DefaultMaxSlippageBps int32  `yaml:"default_max_slippage_bps"`
 	WalletShardCount      int    `yaml:"wallet_shard_count"`
 	DefaultCohortID       string `yaml:"default_cohort_id"`
+	MacroRegime           CapitalMacroRegimeConfig `yaml:"macro_regime"`
+}
+
+// CapitalMacroRegimeConfig optional capital throttle when MACRO_REGIME=risk_off.
+type CapitalMacroRegimeConfig struct {
+	Enabled              bool    `yaml:"enabled"`
+	MaxSizeMultiplier    float64 `yaml:"max_size_multiplier"`    // e.g. 0.5 halves max position
+	ExplorationCapScale  float64 `yaml:"exploration_cap_scale"`  // optional scale on exploration cap
 }
 
 // PositionConfig holds Phase 2 position management parameters.
@@ -436,7 +450,9 @@ type SolanaExecutionConfig struct {
 type JitoConfig struct {
 	Enabled         bool  `yaml:"enabled"`
 	ShadowMode      bool  `yaml:"shadow_mode"`
-	TipLamports     int64 `yaml:"tip_lamports"`
+	TipLamports              int64 `yaml:"tip_lamports"`
+	TipLamportsBalanced      int64 `yaml:"tip_lamports_balanced"`
+	TipLamportsExploration   int64 `yaml:"tip_lamports_exploration"`
 	MaxBundleSize   int   `yaml:"max_bundle_size"`
 	SubmitTimeoutMs int   `yaml:"submit_timeout_ms"`
 }

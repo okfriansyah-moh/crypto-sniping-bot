@@ -52,6 +52,11 @@ type MarketSnapshot struct {
 	// Solana-specific (additive)
 	BondingCurveProgressBps int32
 
+	// Transport and EventTopic thread ingestion context for fortress
+	// rescan/graduation liquidity scoring (Layer 2).
+	Transport  string
+	EventTopic string
+
 	// AI Narrative enrichment (additive) — threaded from MarketDataDTO.
 	// NarrativeKnown=false when the ai_narrative probe has not run.
 	NarrativeScore float64
@@ -89,6 +94,8 @@ func MarketSnapshotFromDTO(md *contracts.MarketDataDTO) MarketSnapshot {
 		ReserveBaseRaw:          md.ReserveBaseRaw,
 		ReserveTokenRaw:         md.ReserveTokenRaw,
 		BondingCurveProgressBps: md.BondingCurveProgressBps,
+		Transport:               md.Transport,
+		EventTopic:              md.EventTopic,
 		NarrativeScore:          md.NarrativeScore,
 		NarrativeKnown:          md.NarrativeKnown,
 	}

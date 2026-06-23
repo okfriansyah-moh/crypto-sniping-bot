@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"crypto-sniping-bot/shared/contracts"
@@ -105,6 +106,15 @@ func applyDefaults(in *config.EdgeConfig) *config.EdgeConfig {
 	if out.ModelVersion == "" {
 		out.ModelVersion = "edge-v1"
 	}
+	if out.MinGraduationLiquidityUsd == 0 {
+		out.MinGraduationLiquidityUsd = 3000.0
+	}
+	if out.GraduationWeightLiquidity == 0 && out.GraduationWeightSafety == 0 &&
+		out.GraduationWeightHolders == 0 {
+		out.GraduationWeightLiquidity = 0.5
+		out.GraduationWeightSafety = 0.3
+		out.GraduationWeightHolders = 0.2
+	}
 	return &out
 }
 
@@ -135,24 +145,29 @@ func (m *Module) ProcessWithContext(
 
 	newLaunch, hasNewLaunch := m.detectNewLaunch(in)
 	momentum, hasMomentum := m.detectMomentum(in, threshold)
+	graduation, hasGraduation := m.detectGraduation(in)
 
-	// Selection rule: highest strength wins; NEW_LAUNCH_EDGE breaks ties
-	// (deterministic — favours fresh-pool discovery).
+	// Selection rule: highest strength wins; GRADUATION_EDGE > NEW_LAUNCH_EDGE
+	// on ties for graduation events; deterministic ordering otherwise.
 	chosen := edgeCandidate{
 		edgeType:     contracts.EdgeTypeNone,
 		rejectReason: "no_qualifying_edge",
 	}
-	switch {
-	case hasNewLaunch && hasMomentum:
-		if momentum.strength > newLaunch.strength {
-			chosen = momentum
-		} else {
-			chosen = newLaunch
+	candidates := []edgeCandidate{}
+	if hasGraduation {
+		candidates = append(candidates, graduation)
+	}
+	if hasNewLaunch {
+		candidates = append(candidates, newLaunch)
+	}
+	if hasMomentum {
+		candidates = append(candidates, momentum)
+	}
+	for _, c := range candidates {
+		if c.strength > chosen.strength ||
+			(c.strength == chosen.strength && c.edgeType == contracts.EdgeTypeGraduation) {
+			chosen = c
 		}
-	case hasNewLaunch:
-		chosen = newLaunch
-	case hasMomentum:
-		chosen = momentum
 	}
 
 	// MomentumScore is always derivable from PriceMomentum and
@@ -188,7 +203,7 @@ func (m *Module) ProcessWithContext(
 		}
 	}
 
-	chosen = applyModeStrengthFloor(chosen, edgeStrengthMin)
+	chosen = applyModeStrengthFloor(chosen, effectiveStrengthFloor(in, edgeStrengthMin))
 
 	// Opportunity window scales with momentum_score regardless of
 	// edge type — preserves legacy semantics expected by Layer 5.
@@ -267,6 +282,57 @@ type edgeCandidate struct {
 	confidence   float64
 	threshold    float64
 	rejectReason string
+}
+
+// effectiveStrengthFloor applies the relaxed BALANCED floor (0.58) only to
+// graduation and rescan-sourced edges; birth NEW_LAUNCH keeps the mode floor.
+func effectiveStrengthFloor(in contracts.FeatureDTO, modeFloor float64) float64 {
+	if modeFloor <= 0 {
+		return 0
+	}
+	if in.EventTopic == "PumpFunAMMCreatePool" || strings.HasPrefix(in.Transport, "rescan_") {
+		relaxed := modeFloor - 0.02
+		if relaxed < 0.30 {
+			return 0.30
+		}
+		return relaxed
+	}
+	return modeFloor
+}
+
+// detectGraduation evaluates GRADUATION_EDGE for PumpFun AMM CreatePool events.
+func (m *Module) detectGraduation(in contracts.FeatureDTO) (edgeCandidate, bool) {
+	if in.EventTopic != "PumpFunAMMCreatePool" && !strings.HasPrefix(in.Transport, "graduation") {
+		return edgeCandidate{}, false
+	}
+	if in.LiquidityUsdRaw < m.cfg.MinGraduationLiquidityUsd {
+		return edgeCandidate{}, false
+	}
+	if in.LiquidityScore < m.cfg.MinLiquidityScore {
+		return edgeCandidate{}, false
+	}
+	if in.ContractSafety < m.cfg.MinContractSafety && m.cfg.MinContractSafety > 0 {
+		return edgeCandidate{}, false
+	}
+
+	strength := clamp01(
+		m.cfg.GraduationWeightLiquidity*in.LiquidityScore +
+			m.cfg.GraduationWeightSafety*in.ContractSafety +
+			m.cfg.GraduationWeightHolders*in.HolderDistribution,
+	)
+
+	confidence := minNonZero(
+		in.Confidence.LiquidityScore,
+		in.Confidence.ContractSafety,
+		in.Confidence.HolderDistribution,
+	)
+
+	return edgeCandidate{
+		edgeType:   contracts.EdgeTypeGraduation,
+		strength:   strength,
+		confidence: confidence,
+		threshold:  m.cfg.MinGraduationLiquidityUsd,
+	}, true
 }
 
 // detectNewLaunch evaluates the NEW_LAUNCH_EDGE gates and returns

@@ -22,6 +22,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"strings"
 	"time"
 
 	"crypto-sniping-bot/shared/contracts"
@@ -121,8 +123,12 @@ func (m *Module) ProcessWithEstimates(
 	sizeUsd = ExplorationBand(sizeUsd, mode, portfolioUsd, m.cfg)
 
 	// ── Min / Max clamping ────────────────────────────────────────
-	if m.cfg.MaxSizeUsd > 0 && sizeUsd > m.cfg.MaxSizeUsd {
-		sizeUsd = m.cfg.MaxSizeUsd
+	maxSize := m.cfg.MaxSizeUsd
+	if mult := macroRegimeMaxSizeMultiplier(m.cfg.MacroRegime); mult > 0 && mult < 1 {
+		maxSize *= mult
+	}
+	if maxSize > 0 && sizeUsd > maxSize {
+		sizeUsd = maxSize
 	}
 	if m.cfg.MinSizeUsd > 0 && sizeUsd < m.cfg.MinSizeUsd {
 		return rejectedAllocation(in, chain, "size_below_min", now), nil
@@ -267,4 +273,18 @@ func clampUnit(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+// macroRegimeMaxSizeMultiplier returns a (0,1] scale when MACRO_REGIME=risk_off.
+func macroRegimeMaxSizeMultiplier(cfg config.CapitalMacroRegimeConfig) float64 {
+	if !cfg.Enabled {
+		return 1
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MACRO_REGIME")), "risk_off") {
+		if cfg.MaxSizeMultiplier > 0 && cfg.MaxSizeMultiplier < 1 {
+			return cfg.MaxSizeMultiplier
+		}
+		return 0.5
+	}
+	return 1
 }

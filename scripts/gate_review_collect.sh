@@ -200,6 +200,7 @@ COUNT_INGESTION=$(count_jq 'select(.msg == "solana_ingestion_emitted" or .msg ==
 INGESTION_DELIVERY_MODE=$(jq -r 'select(.msg == "solana_ingestion_delivery") | .mode' "$CLEAN_LOG" 2>/dev/null | tail -1)
 [ -z "$INGESTION_DELIVERY_MODE" ] || [ "$INGESTION_DELIVERY_MODE" = "null" ] && INGESTION_DELIVERY_MODE="stream"
 COUNT_INGESTION_WEBHOOK=$(count_jq 'select(.msg == "solana_ingestion_emitted" and .transport == "webhook")')
+COUNT_HELIUS_WEBHOOK_DELIVERED=$(count_jq 'select(.msg == "helius_webhook_delivered")')
 COUNT_INGESTION_STREAM=$(count_jq 'select(.msg == "solana_ingestion_emitted" and (.transport == "ws" or .transport == null or .transport == ""))')
 COUNT_DQ=$(count_jq 'select(.msg == "dq_decision")')
 COUNT_DQ_STAGE=$(count_stage_worker "dq_worker")
@@ -217,6 +218,11 @@ COUNT_EDGE_EMITTED=$(count_stage_worker_status "edge_worker" "emitted")
 COUNT_EDGE_FILTERED=$(count_stage_worker_status "edge_worker" "filtered")
 COUNT_EDGE_REJECTED=$(count_stage_worker_status "edge_worker" "rejected")
 COUNT_EDGE_SKIPPED=$(count_stage_worker_status "edge_worker" "skipped")
+
+COUNT_GRADUATION_EDGE=$(count_jq 'select(.msg == "edge_decision" and .edge_type == "GRADUATION_EDGE")')
+RESCAN_BAND_15M=$(count_jq 'select(.msg == "rescan_band_emitted" and .band == "15m")')
+RESCAN_BAND_EMITTED_TOTAL=$(count_jq 'select(.msg == "rescan_band_emitted")')
+EDGE_REJECT_TOP=$(jq -r 'select(.msg == "edge_decision" and .reject_reason != null and .reject_reason != "") | .reject_reason' "$CLEAN_LOG" 2>/dev/null | sort | uniq -c | sort -rn | head -5 | tr '\n' '; ' | sed 's/; $//')
 
 COUNT_PROB=$(count_stage_worker "probability_worker")
 COUNT_PROB_EMITTED=$(count_stage_worker_status "probability_worker" "emitted")
@@ -630,11 +636,12 @@ PROD_DECISION="NOT_READY"
 if [[ "$BLOCKER_COUNT" -gt 0 ]]; then
   PROD_DECISION="NOT_READY"
 elif [[ "$DETECTED_MODE" == "PIPELINE_PROOF" ]]; then
-  # Still in proof mode — check if at least one full trace completed
   if [[ "$TRACES_COMPLETED" -ge 1 ]]; then
     PROD_DECISION="SHADOW_READY"
-  else
+  elif [[ "$COUNT_EDGE_EMITTED" -ge 1 && "$COUNT_VAL_EMITTED" -ge 1 ]]; then
     PROD_DECISION="PIPELINE_PROOF_READY"
+  else
+    PROD_DECISION="NOT_READY"
   fi
 elif [[ "$DETECTED_MODE" == "SHADOW_TRADING" ]]; then
   # Shadow mode exit: ≥500 closed, ≥95% pipeline completion, 0 dup exec, 0 determinism violations
@@ -754,6 +761,11 @@ echo "  Throughput metrics (PLAN §1.1):"
 echo "    ingestion_delivery_mode      $INGESTION_DELIVERY_MODE"
 echo "    ingestion_stream_emitted     $COUNT_INGESTION_STREAM"
 echo "    ingestion_webhook_emitted    $COUNT_INGESTION_WEBHOOK"
+echo "    helius_webhook_delivered     $COUNT_HELIUS_WEBHOOK_DELIVERED"
+echo "    graduation_edge_decisions    $COUNT_GRADUATION_EDGE"
+echo "    rescan_band_emitted_total    $RESCAN_BAND_EMITTED_TOTAL"
+echo "    rescan_15m_emitted           $RESCAN_BAND_15M"
+echo "    edge_reject_reasons_top5     ${EDGE_REJECT_TOP:-none}"
 echo "    wsol_token_address_emitted   $WSOL_TOKEN_ADDRESS_EMITTED"
 echo "    ingestion_valid_token_ratio  $INGESTION_VALID_TOKEN_RATIO  ($INGESTION_VALID_COUNT/$COUNT_INGESTION)"
 echo "    market_probes_completed      $COUNT_PROBES_COMPLETED"
@@ -903,6 +915,11 @@ HB_RAYDIUM_V4_JSON="null"
   echo "    \"market_probes_backlog_ratio\": \"$MARKET_PROBES_BACKLOG_RATIO\","
   echo "    \"dq_pass_or_risky_pass\": $COUNT_DQ_PASS,"
   echo "    \"shadow_observer_failed\": $COUNT_SHADOW_OBS_FAIL,"
+  echo "    \"helius_webhook_delivered\": $COUNT_HELIUS_WEBHOOK_DELIVERED,"
+  echo "    \"graduation_edge_decisions\": $COUNT_GRADUATION_EDGE,"
+  echo "    \"rescan_band_emitted_total\": $RESCAN_BAND_EMITTED_TOTAL,"
+  echo "    \"rescan_15m_emitted\": $RESCAN_BAND_15M,"
+  echo "    \"edge_worker_emitted\": $COUNT_EDGE_EMITTED,"
   echo "    \"ingestion_notifications_sum\": $TOTAL_INGESTION_NOTIFICATIONS,"
   echo "    \"throughput_verdict\": \"$THROUGHPUT_VERDICT\","
   echo "    \"heartbeat_pumpfun_amm_final\": $HB_PUMPFUN_AMM_JSON,"

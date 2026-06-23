@@ -1,3 +1,4 @@
+import type { ChainStatusDTO } from "../api/types";
 import type { ChainId } from "../hooks/useChainFilter";
 import { ChainSwitch } from "./ChainSwitch";
 
@@ -7,6 +8,7 @@ type ChainBarProps = {
   market: string;
   markets: string[];
   marketDisabled: boolean;
+  chainStatuses?: ChainStatusDTO[];
   onChainChange: (chain: ChainId) => void;
   onMarketChange: (market: string) => void;
 };
@@ -17,6 +19,7 @@ export function ChainBar({
   market,
   markets,
   marketDisabled,
+  chainStatuses,
   onChainChange,
   onMarketChange,
 }: ChainBarProps) {
@@ -27,7 +30,12 @@ export function ChainBar({
       aria-label="Chain and market filter"
     >
       <label>Chain</label>
-      <ChainSwitch activeChain={chain} onSelect={onChainChange} ariaLabel="Select chain" />
+      <ChainSwitch
+        activeChain={chain}
+        onSelect={onChainChange}
+        ariaLabel="Select chain"
+        chainStatuses={chainStatuses}
+      />
       <div className="market-filter">
         <label htmlFor="market-select">Market</label>
         <select

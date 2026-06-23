@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChainBar } from "./components/ChainBar";
 import { Sidebar } from "./components/Sidebar";
+import type { ChainStatusDTO } from "./api/types";
 import { chainFilterVisible, useChainFilter } from "./hooks/useChainFilter";
 import { OverviewView } from "./views/OverviewView";
 import { PipelineView } from "./views/PipelineView";
+import { IngestionView } from "./views/IngestionView";
+import { ExecutionsView } from "./views/ExecutionsView";
 import { PositionsView } from "./views/PositionsView";
 import { ActivityView } from "./views/ActivityView";
 import { DQView } from "./views/DQView";
@@ -23,11 +26,13 @@ function ViewBody({
   active,
   chainFilter,
   onNavigate,
+  onChainStatuses,
 }: {
   view: DashboardView;
   active: boolean;
   chainFilter: ReturnType<typeof useChainFilter>;
   onNavigate: (view: DashboardView) => void;
+  onChainStatuses: (statuses: ChainStatusDTO[]) => void;
 }) {
   if (!active) {
     return null;
@@ -41,6 +46,7 @@ function ViewBody({
           market={chainFilter.market}
           active={active}
           onNavigate={onNavigate}
+          onChainStatuses={onChainStatuses}
         />
       );
     case "pipeline":
@@ -51,6 +57,10 @@ function ViewBody({
           active={active}
         />
       );
+    case "ingestion":
+      return <IngestionView active={active} />;
+    case "executions":
+      return <ExecutionsView active={active} />;
     case "positions":
       return (
         <PositionsView
@@ -86,12 +96,17 @@ function ViewBody({
 
 export default function App() {
   const [activeView, setActiveView] = useState<DashboardView>("overview");
+  const [chainStatuses, setChainStatuses] = useState<ChainStatusDTO[]>([]);
   const chainFilter = useChainFilter();
   const showChainFilter = chainFilterVisible(activeView);
 
   const setView = useCallback((view: DashboardView) => {
     setActiveView(view);
     window.scrollTo(0, 0);
+  }, []);
+
+  const handleChainStatuses = useCallback((statuses: ChainStatusDTO[]) => {
+    setChainStatuses(statuses);
   }, []);
 
   useEffect(() => {
@@ -133,6 +148,7 @@ export default function App() {
           market={chainFilter.market}
           markets={chainFilter.markets}
           marketDisabled={chainFilter.marketDisabled}
+          chainStatuses={activeView === "overview" ? chainStatuses : undefined}
           onChainChange={chainFilter.setChain}
           onMarketChange={chainFilter.setMarket}
         />
@@ -162,6 +178,7 @@ export default function App() {
               active={view === activeView}
               chainFilter={chainFilter}
               onNavigate={setView}
+              onChainStatuses={handleChainStatuses}
             />
           </section>
         ))}

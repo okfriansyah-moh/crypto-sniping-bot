@@ -721,3 +721,72 @@ tr:hover td { background: rgba(255, 255, 255, 0.02); }
   font-size: 0.72rem;
   color: var(--muted);
 }
+
+/* Fortress posture console */
+.fortress-banner {
+  margin-bottom: 1.25rem;
+}
+
+.fortress-banner-body h3 {
+  margin-bottom: 0.5rem;
+}
+
+.fortress-blockers {
+  margin: 0.35rem 0 0.5rem;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.fortress-blockers li {
+  margin-bottom: 0.25rem;
+}
+
+.fortress-next-action {
+  font-size: 0.82rem;
+  margin-top: 0.5rem;
+}
+
+.fortress-banner-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  min-width: 10rem;
+}
+
+.fortress-banner--loading {
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.delivery-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.delivery-pill {
+  display: inline-flex;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: lowercase;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.delivery-pill.compact {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.delivery-pill.active {
+  border-color: rgba(56, 189, 248, 0.45);
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+}

@@ -496,11 +496,28 @@ func runServer() {
 		"mode", ingestion_solana.EffectiveGlobalDelivery(cfg.Solana),
 		"webhook_active", ingestion_solana.WebhookIngressActive(cfg.Solana),
 	)
+	for _, prog := range cfg.Solana.Programs {
+		if prog.Disabled {
+			continue
+		}
+		logger.Info("solana_program_delivery",
+			"family", prog.Family,
+			"program_id", prog.ProgramID,
+			"delivery", ingestion_solana.EffectiveProgramDelivery(cfg.Solana, prog),
+		)
+	}
 	go func() {
 		if err := workers.RunIngestionSolana(ctx, db, cfg, solanaClient, solUsdSource, logger); err != nil && err != ctx.Err() {
 			logger.Error("solana_ingestion_failed", "error", err)
 		}
 	}()
+	if ingestion_solana.WebhookIngressActive(cfg.Solana) {
+		go func() {
+			if err := workers.RunWebhookGapRecovery(ctx, db, cfg, solanaClient, logger); err != nil && err != ctx.Err() {
+				logger.Warn("webhook_gap_recovery_stopped", "error", err)
+			}
+		}()
+	}
 
 	logger.Info("orchestrator_ready", "version_id", orch.VersionID())
 

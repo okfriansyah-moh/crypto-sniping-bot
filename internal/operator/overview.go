@@ -20,6 +20,17 @@ func BuildOverview(
 	cfg *config.Config,
 	startTime time.Time,
 ) (*contracts.OverviewResponseDTO, error) {
+	return BuildOverviewWithEvidence(ctx, db, cfg, startTime, "")
+}
+
+// BuildOverviewWithEvidence is BuildOverview with optional gate-evidence dir for chain statuses.
+func BuildOverviewWithEvidence(
+	ctx context.Context,
+	db database.Adapter,
+	cfg *config.Config,
+	startTime time.Time,
+	evidenceDir string,
+) (*contracts.OverviewResponseDTO, error) {
 	state, err := db.GetSystemState(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get system state: %w", err)
@@ -81,6 +92,10 @@ func BuildOverview(
 			Message:  fmt.Sprintf("Kill switch active: %s", haltReason),
 			Code:     "KILL_SWITCH",
 		}
+	}
+
+	if chains, cErr := BuildChainStatuses(ctx, db, cfg, evidenceDir); cErr == nil {
+		out.ChainStatuses = chains
 	}
 
 	_ = startTime // reserved for uptime display in Task 6 parity / future overview field

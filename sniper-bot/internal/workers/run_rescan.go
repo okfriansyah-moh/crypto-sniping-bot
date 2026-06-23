@@ -177,6 +177,12 @@ func runRescanTick(
 				continue
 			}
 			emitted++
+			logger.Info("rescan_band_emitted",
+				"band", band.Name,
+				"transport", "rescan_"+band.Name,
+				"liquidity_usd", hydrated.LiquidityUsd,
+				"token", dto.TokenAddress,
+			)
 		}
 
 		logger.Info("rescan_band_completed",

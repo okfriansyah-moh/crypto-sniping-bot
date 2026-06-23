@@ -130,6 +130,8 @@ func (c *JitoClient) SubmitBundle(ctx context.Context, txns []string) error {
 		c.logger.Info("jito_bundle_shadow",
 			"tx_count", len(txns),
 			"tip_lamports", c.cfg.TipLamports,
+			"tip_account_configured", c.tipAccount != "",
+			"bundle_url_configured", c.bundleURL != "",
 		)
 		return nil
 	}

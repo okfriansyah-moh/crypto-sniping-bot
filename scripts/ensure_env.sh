@@ -85,11 +85,16 @@ fi
 delivery_mode="$(echo "${SOLANA_INGESTION_DELIVERY:-stream}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$delivery_mode" == "hybrid" || "$delivery_mode" == "webhook" ]]; then
 	if is_placeholder "${HELIUS_WEBHOOK_SECRET:-}" || [[ -z "${HELIUS_WEBHOOK_SECRET:-}" ]]; then
+		if [[ -n "${WEBHOOK_PUBLIC_URL:-}" ]] && ! is_placeholder "${WEBHOOK_PUBLIC_URL:-}"; then
+			echo "ERROR: SOLANA_INGESTION_DELIVERY=$delivery_mode requires HELIUS_WEBHOOK_SECRET (must match Helius dashboard)" >&2
+			echo "Set HELIUS_WEBHOOK_SECRET in .env before hybrid/webhook production use." >&2
+			exit 1
+		fi
 		new_secret="$(gen_secret)"
 		set_env_key HELIUS_WEBHOOK_SECRET "$new_secret"
 		HELIUS_WEBHOOK_SECRET="$new_secret"
 		patched=1
-		echo "Generated HELIUS_WEBHOOK_SECRET in .env"
+		echo "Generated HELIUS_WEBHOOK_SECRET in .env (local dev — configure Helius when using WEBHOOK_PUBLIC_URL)"
 	fi
 fi
 

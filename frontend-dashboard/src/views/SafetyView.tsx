@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { dashboardApi } from "../api/client";
-import { submitDestructiveCommand } from "../api/commands";
+import { submitDestructiveCommand, submitForceCloseCommand } from "../api/commands";
 import type { OverviewResponseDTO } from "../api/types";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Toast } from "../components/Toast";
@@ -14,7 +14,7 @@ type SafetyViewProps = {
   active: boolean;
 };
 
-type PendingAction = "kill" | "resume" | null;
+type PendingAction = "kill" | "resume" | "force_close" | null;
 
 export function SafetyView({ active }: SafetyViewProps) {
   const fetchOverview = useCallback(() => dashboardApi.getOverview(), []);
@@ -40,6 +40,7 @@ function SafetyContent({
   const { toast, showSuccess, showError, dismiss } = useToast();
   const [pending, setPending] = useState<PendingAction>(null);
   const [busy, setBusy] = useState(false);
+  const [forceCloseToken, setForceCloseToken] = useState("");
 
   const controlsReady = Boolean(issuerId);
 
@@ -55,6 +56,30 @@ function SafetyContent({
         `${action === "kill" ? "Kill switch" : "Resume"} accepted (${resp.command_id?.slice(0, 8) ?? "ok"})`,
       );
       setPending(null);
+      onActionApplied();
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runForceClose = async () => {
+    const token = forceCloseToken.trim();
+    if (!token) {
+      showError(new Error("Enter a token address or prefix"));
+      return;
+    }
+    if (!issuerId) {
+      showError(new Error(OPERATOR_ID_HINT));
+      return;
+    }
+    setBusy(true);
+    try {
+      const resp = await submitForceCloseCommand(token, issuerId);
+      showSuccess(`Force close accepted (${resp.command_id?.slice(0, 8) ?? "ok"})`);
+      setPending(null);
+      setForceCloseToken("");
       onActionApplied();
     } catch (err) {
       showError(err);
@@ -87,6 +112,17 @@ function SafetyContent({
         busy={busy}
         onClose={() => !busy && setPending(null)}
         onConfirm={() => runDestructive("resume")}
+      />
+
+      <ConfirmModal
+        open={pending === "force_close"}
+        title="Force close positions"
+        description={`Force-exit all open positions for token prefix "${forceCloseToken.trim()}". Bypasses TP/SL — logged and gated.`}
+        confirmPhrase="FORCE_CLOSE"
+        confirmLabel="Force close"
+        busy={busy}
+        onClose={() => !busy && setPending(null)}
+        onConfirm={() => runForceClose()}
       />
 
       <div className="card view-section">
@@ -127,6 +163,36 @@ function SafetyContent({
             </span>
           )}
         </p>
+      </div>
+
+      <div className="card view-section">
+        <h3>Force close</h3>
+        <p className="hint">
+          Closes all open positions matching a token address prefix. Same safety model as Telegram{" "}
+          <code className="mono">/force_close</code>.
+        </p>
+        <label className="modal-label">
+          Token address or prefix
+          <input
+            className="modal-input"
+            type="text"
+            value={forceCloseToken}
+            onChange={(e) => setForceCloseToken(e.target.value)}
+            placeholder="Ab3c… or full mint address"
+            disabled={!controlsReady || busy}
+            spellCheck={false}
+          />
+        </label>
+        <div className="actions" style={{ marginTop: "0.75rem" }}>
+          <button
+            className="btn btn-danger"
+            type="button"
+            disabled={!controlsReady || busy || !forceCloseToken.trim()}
+            onClick={() => setPending("force_close")}
+          >
+            Force close positions
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-2 view-section">

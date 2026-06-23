@@ -60,7 +60,7 @@ priority:
 
     balanced:
       explore_budget_pct: 2.0
-      edge_strength_min: 0.60
+      edge_strength_min: 0.58
       ev_threshold_bps: 100
       max_positions: 15
 
